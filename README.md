@@ -1,8 +1,6 @@
 # AI Salon Admin
 
-A modern beauty salon management platform built with React, TypeScript, Tailwind CSS, and Node.js.
-
-![AI Salon Admin](https://img.shields.io/badge/React-19-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue) ![Tailwind](https://img.shields.io/badge/Tailwind-3.4-38bdf8) ![Node.js](https://img.shields.io/badge/Node.js-Express-green)
+A modern beauty salon management platform built with React, TypeScript, Tailwind CSS, Node.js, and Supabase.
 
 ## Features
 
@@ -24,40 +22,69 @@ A modern beauty salon management platform built with React, TypeScript, Tailwind
 | Styling  | Tailwind CSS 3, Lucide Icons        |
 | Charts   | Recharts                            |
 | Backend  | Node.js, Express, TypeScript        |
-| Data     | In-memory store (demo-ready)        |
+| Database | Supabase (PostgreSQL)               |
 
-## Project Structure
+## Supabase Setup
 
+### 1. Create your environment file
+
+Copy the example and paste your credentials:
+
+```bash
+cp server/.env.example server/.env
 ```
-AI Salon Admin/
-├── client/                  # React frontend
-│   ├── src/
-│   │   ├── components/      # Reusable UI & layout components
-│   │   │   ├── layout/      # Sidebar, Header, Layout shell
-│   │   │   └── ui/          # StatCard, Modal, SearchInput, etc.
-│   │   ├── context/         # Theme context (dark mode)
-│   │   ├── lib/             # API client & utility functions
-│   │   ├── pages/           # Feature pages (Dashboard, Calendar, etc.)
-│   │   └── types/           # TypeScript interfaces
-│   └── public/              # Static assets
-├── server/                  # Express API backend
-│   └── src/
-│       ├── data/            # Mock data store
-│       ├── routes/          # REST API route handlers
-│       └── types.ts         # Shared type definitions
-└── package.json             # Root workspace scripts
+
+Edit **`server/.env`** and set:
+
+| Variable | Where to find it |
+|----------|------------------|
+| `SUPABASE_URL` | Supabase Dashboard → **Project Settings** → **API** → **Project URL** |
+| `SUPABASE_ANON_KEY` | Supabase Dashboard → **Project Settings** → **API** → **Publishable (anon) key** |
+| `SUPABASE_SERVICE_ROLE_KEY` | *(Optional)* Same page → **service_role** secret key |
+
+> **Note:** The React UI still talks to the Express API — you only need env vars in `server/.env`, not in the client.
+
+### 2. Run database migrations
+
+**Option A — SQL Editor (easiest):**
+
+1. Open Supabase Dashboard → **SQL Editor**
+2. Paste the contents of `supabase/full_setup.sql`
+3. Click **Run**
+
+**Option B — Individual migration files:**
+
+Run these in order from `supabase/migrations/`:
+
+1. `20250622000001_initial_schema.sql` — tables & indexes
+2. `20250622000002_rls_policies.sql` — row-level security
+3. `20250622000003_seed_data.sql` — demo data
+
+**Option C — Supabase CLI:**
+
+```bash
+supabase link --project-ref YOUR_PROJECT_REF
+supabase db push
 ```
+
+### 3. Verify connection
+
+```bash
+cd server && npm run dev
+```
+
+Visit http://localhost:3001/api/health — you should see `"database": "connected"`.
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+ and npm
+- A Supabase project with migrations applied
 
 ### Installation
 
 ```bash
-# Install all dependencies (root, client, and server)
 npm install
 cd client && npm install
 cd ../server && npm install
@@ -67,34 +94,38 @@ cd ..
 ### Development
 
 ```bash
-# Start both frontend and backend concurrently
 npm run dev
 ```
 
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:3001
 
-### Production Build
+## Project Structure
 
-```bash
-npm run build
-npm start
+```
+AI Salon Admin/
+├── client/                  # React frontend (unchanged UI)
+├── server/
+│   ├── .env.example         # Supabase credentials template
+│   └── src/
+│       ├── lib/
+│       │   ├── supabase.ts  # Supabase client
+│       │   └── mappers.ts   # DB ↔ API field mapping
+│       └── routes/          # REST handlers (Supabase-backed)
+└── supabase/
+    ├── full_setup.sql       # One-shot migration + seed
+    └── migrations/          # Individual SQL migration files
 ```
 
-## API Endpoints
+## Database Tables
 
-| Method | Endpoint              | Description                |
-|--------|-----------------------|----------------------------|
-| GET    | `/api/health`         | Health check               |
-| GET    | `/api/clients`        | List all clients           |
-| POST   | `/api/clients`        | Create a client            |
-| GET    | `/api/services`       | List all services          |
-| GET    | `/api/staff`          | List all staff             |
-| GET    | `/api/appointments`   | List appointments          |
-| POST   | `/api/appointments`   | Create a booking           |
-| GET    | `/api/stats/dashboard`| Dashboard statistics       |
-| GET    | `/api/stats/analytics`| Analytics data for charts  |
-| GET    | `/api/stats/reminders`| Appointment reminders      |
+| Table | Description |
+|-------|-------------|
+| `clients` | Client profiles, visit history |
+| `services` | Service catalog with pricing |
+| `staff` | Team members and specialties |
+| `appointments` | Bookings with status tracking |
+| `reminders` | Automated appointment reminders |
 
 ## License
 

@@ -1,50 +1,86 @@
 import { Router } from 'express';
-import { appointments, clients, services, staff, reminders } from '../data/store.js';
+import { supabase } from '../lib/supabase.js';
+import { mapEnrichedReminder } from '../lib/mappers.js';
 import type { AnalyticsData, DashboardStats } from '../types.js';
 
 const router = Router();
 
-router.get('/dashboard', (_req, res) => {
+router.get('/dashboard', async (_req, res) => {
   const today = new Date().toISOString().split('T')[0];
+  const monthPrefix = today.slice(0, 7);
+
+  const [clientsRes, appointmentsRes, remindersRes] = await Promise.all([
+    supabase.from('clients').select('id', { count: 'exact', head: true }),
+    supabase.from('appointments').select('id, status, date, service_id'),
+    supabase.from('reminders').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+  ]);
+
+  if (clientsRes.error) return res.status(500).json({ error: clientsRes.error.message });
+  if (appointmentsRes.error) return res.status(500).json({ error: appointmentsRes.error.message });
+  if (remindersRes.error) return res.status(500).json({ error: remindersRes.error.message });
+
+  const appointments = appointmentsRes.data ?? [];
   const completed = appointments.filter((a) => a.status === 'completed');
   const totalAppts = appointments.filter((a) => a.status !== 'cancelled').length;
 
-  const monthlyRevenue = completed
-    .filter((a) => a.date.startsWith(today.slice(0, 7)))
-    .reduce((sum, a) => {
-      const service = services.find((s) => s.id === a.serviceId);
-      return sum + (service?.price ?? 0);
-    }, 0);
+  const completedThisMonth = completed.filter((a) => a.date.startsWith(monthPrefix));
+  const serviceIds = [...new Set(completedThisMonth.map((a) => a.service_id))];
+
+  let monthlyRevenue = 0;
+  if (serviceIds.length > 0) {
+    const { data: services } = await supabase
+      .from('services')
+      .select('id, price')
+      .in('id', serviceIds);
+
+    const priceMap = new Map((services ?? []).map((s) => [s.id, Number(s.price)]));
+    monthlyRevenue = completedThisMonth.reduce(
+      (sum, a) => sum + (priceMap.get(a.service_id) ?? 0),
+      0
+    );
+  }
 
   const stats: DashboardStats = {
-    totalClients: clients.length,
+    totalClients: clientsRes.count ?? 0,
     totalAppointments: totalAppts,
     todayAppointments: appointments.filter((a) => a.date === today && a.status !== 'cancelled').length,
     monthlyRevenue,
     completionRate: totalAppts > 0 ? Math.round((completed.length / totalAppts) * 100) : 0,
-    upcomingReminders: reminders.filter((r) => r.status === 'pending').length,
+    upcomingReminders: remindersRes.count ?? 0,
   };
 
   res.json(stats);
 });
 
-router.get('/analytics', (_req, res) => {
+router.get('/analytics', async (_req, res) => {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const currentMonth = new Date().getMonth();
+  const year = new Date().getFullYear();
+
+  const { data: appointments, error: aptError } = await supabase
+    .from('appointments')
+    .select('status, date, service_id, staff_id');
+
+  if (aptError) return res.status(500).json({ error: aptError.message });
+
+  const { data: services } = await supabase.from('services').select('id, name, price');
+  const { data: staffMembers } = await supabase.from('staff').select('id, name');
+
+  const serviceMap = new Map((services ?? []).map((s) => [s.id, s]));
+  const staffMap = new Map((staffMembers ?? []).map((s) => [s.id, s]));
+  const allAppointments = appointments ?? [];
 
   const revenueByMonth = months.slice(0, currentMonth + 1).map((month, i) => {
     const monthStr = String(i + 1).padStart(2, '0');
-    const revenue = appointments
-      .filter((a) => a.status === 'completed' && a.date.includes(`-${monthStr}-`))
-      .reduce((sum, a) => {
-        const service = services.find((s) => s.id === a.serviceId);
-        return sum + (service?.price ?? 0);
-      }, 0);
-    return { month, revenue: revenue || Math.floor(Math.random() * 3000) + 2000 };
+    const prefix = `${year}-${monthStr}`;
+    const revenue = allAppointments
+      .filter((a) => a.status === 'completed' && a.date.startsWith(prefix))
+      .reduce((sum, a) => sum + Number(serviceMap.get(a.service_id)?.price ?? 0), 0);
+    return { month, revenue };
   });
 
   const statusCounts: Record<string, number> = {};
-  appointments.forEach((a) => {
+  allAppointments.forEach((a) => {
     statusCounts[a.status] = (statusCounts[a.status] || 0) + 1;
   });
 
@@ -54,14 +90,14 @@ router.get('/analytics', (_req, res) => {
   }));
 
   const serviceCounts: Record<string, { count: number; revenue: number }> = {};
-  appointments
+  allAppointments
     .filter((a) => a.status === 'completed')
     .forEach((a) => {
-      const service = services.find((s) => s.id === a.serviceId);
+      const service = serviceMap.get(a.service_id);
       if (service) {
         if (!serviceCounts[service.name]) serviceCounts[service.name] = { count: 0, revenue: 0 };
         serviceCounts[service.name].count += 1;
-        serviceCounts[service.name].revenue += service.price;
+        serviceCounts[service.name].revenue += Number(service.price);
       }
     });
 
@@ -71,15 +107,15 @@ router.get('/analytics', (_req, res) => {
     .slice(0, 5);
 
   const staffPerf: Record<string, { appointments: number; revenue: number }> = {};
-  appointments
+  allAppointments
     .filter((a) => a.status === 'completed')
     .forEach((a) => {
-      const member = staff.find((s) => s.id === a.staffId);
-      const service = services.find((s) => s.id === a.serviceId);
+      const member = staffMap.get(a.staff_id);
+      const service = serviceMap.get(a.service_id);
       if (member) {
         if (!staffPerf[member.name]) staffPerf[member.name] = { appointments: 0, revenue: 0 };
         staffPerf[member.name].appointments += 1;
-        staffPerf[member.name].revenue += service?.price ?? 0;
+        staffPerf[member.name].revenue += Number(service?.price ?? 0);
       }
     });
 
@@ -97,18 +133,21 @@ router.get('/analytics', (_req, res) => {
   res.json(analytics);
 });
 
-router.get('/reminders', (_req, res) => {
-  const enriched = reminders.map((r) => {
-    const apt = appointments.find((a) => a.id === r.appointmentId);
-    const client = apt ? clients.find((c) => c.id === apt.clientId) : null;
-    return {
-      ...r,
-      clientName: client?.name ?? 'Unknown',
-      appointmentDate: apt?.date,
-      appointmentTime: apt?.startTime,
-    };
-  });
-  res.json(enriched);
+router.get('/reminders', async (_req, res) => {
+  const { data, error } = await supabase
+    .from('reminders')
+    .select(`
+      *,
+      appointments(
+        date,
+        start_time,
+        clients(name)
+      )
+    `)
+    .order('scheduled_for');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data.map(mapEnrichedReminder));
 });
 
 export default router;

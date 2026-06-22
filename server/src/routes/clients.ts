@@ -1,50 +1,76 @@
 import { Router } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import { clients } from '../data/store.js';
-import type { Client } from '../types.js';
+import { supabase } from '../lib/supabase.js';
+import { mapClient } from '../lib/mappers.js';
 
 const router = Router();
 
-router.get('/', (_req, res) => {
-  res.json(clients);
+router.get('/', async (_req, res) => {
+  const { data, error } = await supabase
+    .from('clients')
+    .select('*')
+    .order('name');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data.map(mapClient));
 });
 
-router.get('/:id', (req, res) => {
-  const client = clients.find((c) => c.id === req.params.id);
-  if (!client) return res.status(404).json({ error: 'Client not found' });
-  res.json(client);
+router.get('/:id', async (req, res) => {
+  const { data, error } = await supabase
+    .from('clients')
+    .select('*')
+    .eq('id', req.params.id)
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Client not found' });
+  res.json(mapClient(data));
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { name, email, phone, notes } = req.body;
   if (!name || !email) return res.status(400).json({ error: 'Name and email are required' });
 
-  const client: Client = {
-    id: uuidv4(),
-    name,
-    email,
-    phone: phone || '',
-    notes: notes || '',
-    totalVisits: 0,
-    lastVisit: null,
-    createdAt: new Date().toISOString().split('T')[0],
-  };
-  clients.push(client);
-  res.status(201).json(client);
+  const { data, error } = await supabase
+    .from('clients')
+    .insert({
+      name,
+      email,
+      phone: phone || '',
+      notes: notes || '',
+      total_visits: 0,
+      last_visit: null,
+    })
+    .select('*')
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(mapClient(data));
 });
 
-router.put('/:id', (req, res) => {
-  const index = clients.findIndex((c) => c.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'Client not found' });
+router.put('/:id', async (req, res) => {
+  const { name, email, phone, notes, totalVisits, lastVisit } = req.body;
 
-  clients[index] = { ...clients[index], ...req.body, id: clients[index].id };
-  res.json(clients[index]);
+  const updates: Record<string, unknown> = {};
+  if (name !== undefined) updates.name = name;
+  if (email !== undefined) updates.email = email;
+  if (phone !== undefined) updates.phone = phone;
+  if (notes !== undefined) updates.notes = notes;
+  if (totalVisits !== undefined) updates.total_visits = totalVisits;
+  if (lastVisit !== undefined) updates.last_visit = lastVisit;
+
+  const { data, error } = await supabase
+    .from('clients')
+    .update(updates)
+    .eq('id', req.params.id)
+    .select('*')
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Client not found' });
+  res.json(mapClient(data));
 });
 
-router.delete('/:id', (req, res) => {
-  const index = clients.findIndex((c) => c.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'Client not found' });
-  clients.splice(index, 1);
+router.delete('/:id', async (req, res) => {
+  const { error } = await supabase.from('clients').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
   res.status(204).send();
 });
 

@@ -8,6 +8,7 @@ import Staff from '@/pages/Staff';
 import Bookings from '@/pages/Bookings';
 import Statistics from '@/pages/Statistics';
 import Reminders from '@/pages/Reminders';
+import AIAssistant from '@/pages/AIAssistant';
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="bookings" element={<Bookings />} />
         <Route path="statistics" element={<Statistics />} />
         <Route path="reminders" element={<Reminders />} />
+        <Route path="ai-assistant" element={<AIAssistant />} />
       </Route>
     </Routes>
   );

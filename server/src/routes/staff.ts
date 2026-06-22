@@ -1,51 +1,84 @@
 import { Router } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import { staff } from '../data/store.js';
-import type { Staff } from '../types.js';
+import { supabase } from '../lib/supabase.js';
+import { mapStaff, initialsAvatar } from '../lib/mappers.js';
 
 const router = Router();
 
-router.get('/', (_req, res) => {
-  res.json(staff);
+router.get('/', async (_req, res) => {
+  const { data, error } = await supabase
+    .from('staff')
+    .select('*')
+    .order('name');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data.map(mapStaff));
 });
 
-router.get('/:id', (req, res) => {
-  const member = staff.find((s) => s.id === req.params.id);
-  if (!member) return res.status(404).json({ error: 'Staff member not found' });
-  res.json(member);
+router.get('/:id', async (req, res) => {
+  const { data, error } = await supabase
+    .from('staff')
+    .select('*')
+    .eq('id', req.params.id)
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Staff member not found' });
+  res.json(mapStaff(data));
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { name, email, phone, role, specialties } = req.body;
   if (!name || !email) return res.status(400).json({ error: 'Name and email are required' });
 
-  const member: Staff = {
-    id: uuidv4(),
-    name,
-    email,
-    phone: phone || '',
-    role: role || 'Stylist',
-    specialties: specialties || [],
-    avatar: name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase(),
-    active: true,
-  };
-  staff.push(member);
-  res.status(201).json(member);
+  const { data, error } = await supabase
+    .from('staff')
+    .insert({
+      name,
+      email,
+      phone: phone || '',
+      role: role || 'Stylist',
+      specialties: specialties || [],
+      avatar: initialsAvatar(name),
+      active: true,
+    })
+    .select('*')
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(mapStaff(data));
 });
 
-router.put('/:id', (req, res) => {
-  const index = staff.findIndex((s) => s.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'Staff member not found' });
+router.put('/:id', async (req, res) => {
+  const { name, email, phone, role, specialties, active } = req.body;
 
-  staff[index] = { ...staff[index], ...req.body, id: staff[index].id };
-  res.json(staff[index]);
+  const updates: Record<string, unknown> = {};
+  if (name !== undefined) updates.name = name;
+  if (email !== undefined) updates.email = email;
+  if (phone !== undefined) updates.phone = phone;
+  if (role !== undefined) updates.role = role;
+  if (specialties !== undefined) updates.specialties = specialties;
+  if (active !== undefined) updates.active = active;
+
+  const { data, error } = await supabase
+    .from('staff')
+    .update(updates)
+    .eq('id', req.params.id)
+    .select('*')
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Staff member not found' });
+  res.json(mapStaff(data));
 });
 
-router.delete('/:id', (req, res) => {
-  const index = staff.findIndex((s) => s.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'Staff member not found' });
-  staff[index].active = false;
-  res.json(staff[index]);
+router.delete('/:id', async (req, res) => {
+  const { data, error } = await supabase
+    .from('staff')
+    .update({ active: false })
+    .eq('id', req.params.id)
+    .select('*')
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Staff member not found' });
+  res.json(mapStaff(data));
 });
 
 export default router;

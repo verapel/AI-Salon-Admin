@@ -22,6 +22,7 @@ const navItems = [
   { to: '/bookings', icon: CalendarPlus, label: 'Bookings' },
   { to: '/statistics', icon: BarChart3, label: 'Statistics' },
   { to: '/reminders', icon: Bell, label: 'Reminders' },
+  { to: '/ai-assistant', icon: Sparkles, label: 'AI Assistant' },
 ];
 
 interface SidebarProps {

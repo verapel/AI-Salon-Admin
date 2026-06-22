@@ -1,104 +1,185 @@
 import { Router } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import { appointments, services, clients, staff, reminders } from '../data/store.js';
+import { supabase } from '../lib/supabase.js';
+import { computeEndTime, mapEnrichedAppointment } from '../lib/mappers.js';
 import type { Appointment } from '../types.js';
 
 const router = Router();
 
-function enrichAppointment(apt: Appointment) {
-  const client = clients.find((c) => c.id === apt.clientId);
-  const staffMember = staff.find((s) => s.id === apt.staffId);
-  const service = services.find((s) => s.id === apt.serviceId);
-  return {
-    ...apt,
-    clientName: client?.name ?? 'Unknown',
-    staffName: staffMember?.name ?? 'Unknown',
-    serviceName: service?.name ?? 'Unknown',
-    servicePrice: service?.price ?? 0,
-    serviceDuration: service?.duration ?? 0,
-  };
-}
+const APPOINTMENT_SELECT = `
+  *,
+  clients(name),
+  staff(name),
+  services(name, price, duration)
+`;
 
-router.get('/', (req, res) => {
-  let result = [...appointments];
+router.get('/', async (req, res) => {
+  let query = supabase.from('appointments').select(APPOINTMENT_SELECT);
+
   const { date, status, staffId, clientId } = req.query;
+  if (date) query = query.eq('date', String(date));
+  if (status) query = query.eq('status', String(status) as Appointment['status']);
+  if (staffId) query = query.eq('staff_id', String(staffId));
+  if (clientId) query = query.eq('client_id', String(clientId));
 
-  if (date) result = result.filter((a) => a.date === date);
-  if (status) result = result.filter((a) => a.status === status);
-  if (staffId) result = result.filter((a) => a.staffId === staffId);
-  if (clientId) result = result.filter((a) => a.clientId === clientId);
+  const { data, error } = await query.order('date').order('start_time');
 
-  res.json(result.map(enrichAppointment));
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data.map(mapEnrichedAppointment));
 });
 
-router.get('/:id', (req, res) => {
-  const apt = appointments.find((a) => a.id === req.params.id);
-  if (!apt) return res.status(404).json({ error: 'Appointment not found' });
-  res.json(enrichAppointment(apt));
+router.get('/:id', async (req, res) => {
+  const { data, error } = await supabase
+    .from('appointments')
+    .select(APPOINTMENT_SELECT)
+    .eq('id', req.params.id)
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Appointment not found' });
+  res.json(mapEnrichedAppointment(data));
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { clientId, staffId, serviceId, date, startTime, notes } = req.body;
   if (!clientId || !staffId || !serviceId || !date || !startTime) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  const service = services.find((s) => s.id === serviceId);
-  if (!service) return res.status(400).json({ error: 'Invalid service' });
+  const { data: service, error: serviceError } = await supabase
+    .from('services')
+    .select('duration')
+    .eq('id', serviceId)
+    .single();
 
-  const [h, m] = startTime.split(':').map(Number);
-  const endMinutes = h * 60 + m + service.duration;
-  const endTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
+  if (serviceError || !service) return res.status(400).json({ error: 'Invalid service' });
 
-  const appointment: Appointment = {
-    id: uuidv4(),
-    clientId,
-    staffId,
-    serviceId,
-    date,
-    startTime,
-    endTime,
-    status: 'scheduled',
-    notes: notes || '',
-    reminderSent: false,
-    createdAt: new Date().toISOString().split('T')[0],
-  };
-  appointments.push(appointment);
+  const endTime = computeEndTime(startTime, service.duration);
 
-  reminders.push({
-    id: uuidv4(),
-    appointmentId: appointment.id,
+  const { data: appointment, error: aptError } = await supabase
+    .from('appointments')
+    .insert({
+      client_id: clientId,
+      staff_id: staffId,
+      service_id: serviceId,
+      date,
+      start_time: startTime,
+      end_time: endTime,
+      status: 'scheduled',
+      notes: notes || '',
+      reminder_sent: false,
+    })
+    .select('id')
+    .single();
+
+  if (aptError || !appointment) return res.status(500).json({ error: aptError?.message });
+
+  await supabase.from('reminders').insert({
+    appointment_id: appointment.id,
     type: 'email',
-    scheduledFor: `${date}T08:00:00`,
+    scheduled_for: `${date}T08:00:00`,
     status: 'pending',
     message: `Reminder: Your appointment on ${date} at ${startTime}`,
   });
 
-  res.status(201).json(enrichAppointment(appointment));
+  const { data, error } = await supabase
+    .from('appointments')
+    .select(APPOINTMENT_SELECT)
+    .eq('id', appointment.id)
+    .single();
+
+  if (error || !data) return res.status(500).json({ error: error?.message });
+  res.status(201).json(mapEnrichedAppointment(data));
 });
 
-router.put('/:id', (req, res) => {
-  const index = appointments.findIndex((a) => a.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'Appointment not found' });
+router.put('/:id', async (req, res) => {
+  const { status, notes, clientId, staffId, serviceId, date, startTime } = req.body;
 
-  appointments[index] = { ...appointments[index], ...req.body, id: appointments[index].id };
+  const updates: Record<string, unknown> = {};
+  if (status !== undefined) updates.status = status;
+  if (notes !== undefined) updates.notes = notes;
+  if (clientId !== undefined) updates.client_id = clientId;
+  if (staffId !== undefined) updates.staff_id = staffId;
+  if (serviceId !== undefined) updates.service_id = serviceId;
+  if (date !== undefined) updates.date = date;
+  if (startTime !== undefined) updates.start_time = startTime;
 
-  if (req.body.status === 'completed') {
-    const client = clients.find((c) => c.id === appointments[index].clientId);
-    if (client) {
-      client.totalVisits += 1;
-      client.lastVisit = appointments[index].date;
+  if (startTime !== undefined || serviceId !== undefined) {
+    const { data: existing } = await supabase
+      .from('appointments')
+      .select('service_id, start_time')
+      .eq('id', req.params.id)
+      .single();
+
+    const resolvedServiceId = serviceId ?? existing?.service_id;
+    const resolvedStartTime = startTime ?? existing?.start_time?.slice(0, 5);
+
+    if (resolvedServiceId && resolvedStartTime) {
+      const { data: service } = await supabase
+        .from('services')
+        .select('duration')
+        .eq('id', resolvedServiceId)
+        .single();
+
+      if (service) {
+        updates.end_time = computeEndTime(resolvedStartTime, service.duration);
+      }
     }
   }
 
-  res.json(enrichAppointment(appointments[index]));
+  const { data: updated, error } = await supabase
+    .from('appointments')
+    .update(updates)
+    .eq('id', req.params.id)
+    .select('client_id, date, status')
+    .single();
+
+  if (error || !updated) return res.status(404).json({ error: 'Appointment not found' });
+
+  if (status === 'completed') {
+    const { data: client } = await supabase
+      .from('clients')
+      .select('total_visits')
+      .eq('id', updated.client_id)
+      .single();
+
+    if (client) {
+      await supabase
+        .from('clients')
+        .update({
+          total_visits: client.total_visits + 1,
+          last_visit: updated.date,
+        })
+        .eq('id', updated.client_id);
+    }
+  }
+
+  const { data, error: fetchError } = await supabase
+    .from('appointments')
+    .select(APPOINTMENT_SELECT)
+    .eq('id', req.params.id)
+    .single();
+
+  if (fetchError || !data) return res.status(500).json({ error: fetchError?.message });
+  res.json(mapEnrichedAppointment(data));
 });
 
-router.delete('/:id', (req, res) => {
-  const index = appointments.findIndex((a) => a.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'Appointment not found' });
-  appointments[index].status = 'cancelled';
-  res.json(enrichAppointment(appointments[index]));
+router.delete('/:id', async (req, res) => {
+  const { data, error } = await supabase
+    .from('appointments')
+    .update({ status: 'cancelled' })
+    .eq('id', req.params.id)
+    .select('id')
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Appointment not found' });
+
+  const { data: enriched, error: fetchError } = await supabase
+    .from('appointments')
+    .select(APPOINTMENT_SELECT)
+    .eq('id', req.params.id)
+    .single();
+
+  if (fetchError || !enriched) return res.status(500).json({ error: fetchError?.message });
+  res.json(mapEnrichedAppointment(enriched));
 });
 
 export default router;

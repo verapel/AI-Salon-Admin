@@ -1,52 +1,85 @@
 import { Router } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import { services } from '../data/store.js';
-import type { Service } from '../types.js';
+import { supabase } from '../lib/supabase.js';
+import { mapService } from '../lib/mappers.js';
 
 const router = Router();
 
-router.get('/', (_req, res) => {
-  res.json(services);
+router.get('/', async (_req, res) => {
+  const { data, error } = await supabase
+    .from('services')
+    .select('*')
+    .order('name');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data.map(mapService));
 });
 
-router.get('/:id', (req, res) => {
-  const service = services.find((s) => s.id === req.params.id);
-  if (!service) return res.status(404).json({ error: 'Service not found' });
-  res.json(service);
+router.get('/:id', async (req, res) => {
+  const { data, error } = await supabase
+    .from('services')
+    .select('*')
+    .eq('id', req.params.id)
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Service not found' });
+  res.json(mapService(data));
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { name, description, duration, price, category } = req.body;
-  if (!name || !duration || !price) {
+  if (!name || !duration || price === undefined) {
     return res.status(400).json({ error: 'Name, duration, and price are required' });
   }
 
-  const service: Service = {
-    id: uuidv4(),
-    name,
-    description: description || '',
-    duration: Number(duration),
-    price: Number(price),
-    category: category || 'General',
-    active: true,
-  };
-  services.push(service);
-  res.status(201).json(service);
+  const { data, error } = await supabase
+    .from('services')
+    .insert({
+      name,
+      description: description || '',
+      duration: Number(duration),
+      price: Number(price),
+      category: category || 'General',
+      active: true,
+    })
+    .select('*')
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(mapService(data));
 });
 
-router.put('/:id', (req, res) => {
-  const index = services.findIndex((s) => s.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'Service not found' });
+router.put('/:id', async (req, res) => {
+  const { name, description, duration, price, category, active } = req.body;
 
-  services[index] = { ...services[index], ...req.body, id: services[index].id };
-  res.json(services[index]);
+  const updates: Record<string, unknown> = {};
+  if (name !== undefined) updates.name = name;
+  if (description !== undefined) updates.description = description;
+  if (duration !== undefined) updates.duration = Number(duration);
+  if (price !== undefined) updates.price = Number(price);
+  if (category !== undefined) updates.category = category;
+  if (active !== undefined) updates.active = active;
+
+  const { data, error } = await supabase
+    .from('services')
+    .update(updates)
+    .eq('id', req.params.id)
+    .select('*')
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Service not found' });
+  res.json(mapService(data));
 });
 
-router.delete('/:id', (req, res) => {
-  const index = services.findIndex((s) => s.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'Service not found' });
-  services[index].active = false;
-  res.json(services[index]);
+router.delete('/:id', async (req, res) => {
+  const { data, error } = await supabase
+    .from('services')
+    .update({ active: false })
+    .eq('id', req.params.id)
+    .select('*')
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Service not found' });
+  res.json(mapService(data));
 });
 
 export default router;
