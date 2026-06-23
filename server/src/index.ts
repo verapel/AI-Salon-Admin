@@ -22,6 +22,41 @@ app.get('/api/health', async (_req, res) => {
     database: dbConnected ? 'connected' : 'disconnected',
   });
 });
+app.get('/api/telegram/status', async (_req, res) => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+
+  if (!token) {
+    return res.status(400).json({
+      connected: false,
+      error: 'Telegram token not configured'
+    });
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.telegram.org/bot${token}/getMe`
+    );
+
+    const data = await response.json();
+
+    if (data.ok) {
+      return res.json({
+        connected: true,
+        bot: data.result.username,
+        name: data.result.first_name
+      });
+    }
+
+    return res.json({
+      connected: false
+    });
+  } catch (error) {
+    return res.status(500).json({
+      connected: false,
+      error: 'Telegram API error'
+    });
+  }
+});
 
 app.use('/api/clients', clientsRouter);
 app.use('/api/services', servicesRouter);
