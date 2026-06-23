@@ -68,3 +68,37 @@ app.listen(PORT, () => {
   console.log(`AI Salon Admin API running on http://localhost:${PORT}`);
   console.log(`Supabase: ${process.env.SUPABASE_URL ?? 'NOT CONFIGURED'}`);
 });
+async function sendTelegramMessage(chatId: number, text: string) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+
+  if (!token) return;
+
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text
+    })
+  });
+}
+app.get('/api/telegram/test', async (_req, res) => {
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+
+  if (!chatId) {
+    return res.status(400).json({
+      error: 'Chat ID not configured'
+    });
+  }
+
+  await sendTelegramMessage(
+    Number(chatId),
+    '🎉 AI Salon Admin подключен к Telegram!'
+  );
+
+  res.json({
+    success: true
+  });
+});
