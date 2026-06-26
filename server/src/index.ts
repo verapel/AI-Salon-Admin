@@ -15,7 +15,7 @@ import servicesRouter from './routes/services.js';
 import staffRouter from './routes/staff.js';
 import appointmentsRouter from './routes/appointments.js';
 import statsRouter from './routes/stats.js';
-import { checkSupabaseConnection } from './lib/supabase.js';
+import { supabase, checkSupabaseConnection } from './lib/supabase.js';
 
 const app = express();
 
@@ -90,21 +90,97 @@ history.push({
 chatHistory.set(chatId, history.slice(-10));
 
 if (
-  answer.includes("подтверждена") ||
-  answer.includes("подтверждена.") ||
-  answer.includes("Ждем вас")
+  answer.toLowerCase().includes("подтверждена") ||
+  answer.toLowerCase().includes("оформлена") ||
+  answer.toLowerCase().includes("ждем вас") ||
+  answer.toLowerCase().includes("ждём вас")
 ) {
-  const adminChatId = process.env.TELEGRAM_CHAT_ID;
+  const userMessages = history
+    .filter(m => m.role === "user")
+    .map(m => m.content);
 
-  if (adminChatId) {
-    await sendTelegramMessage(
-      Number(adminChatId),
-      `🔔 Новая запись!\n\n${history
-        .filter(m => m.role === "user")
-        .map(m => "• " + m.content)
-        .join("\n")}`
-    );
+    console.log("USER MESSAGES:", userMessages);
+
+  if (userMessages.length >= 5) {
+    const appointmentMessages = userMessages.slice(-5);
+const [service, date, time, name, phone] = appointmentMessages;
+
+const adminChatId = process.env.TELEGRAM_CHAT_ID;
+
+if (adminChatId) {
+  await sendTelegramMessage(
+    Number(adminChatId),
+    `🔔 Новая запись!
+
+💇 Услуга: ${service}
+📅 День: ${date}
+🕒 Время: ${time}
+👤 Клиент: ${name}
+📞 Телефон: ${phone}`
+  );
+}
+
+console.log("=== START SAVING TO DATABASE ===");
+
+const { data: client, error: clientError } = await (supabase as any)
+  .from("clients")
+  .insert({
+    name,
+    phone,
+    email: ""
+  })
+  .select("id")
+  .single();
+
+console.log("CLIENT:", client);
+console.log("CLIENT ERROR:", clientError);
+
+const { data: serviceRow, error: serviceError } = await (supabase as any)
+  .from("services")
+  .select("id")
+  .limit(1)
+  .single();
+
+console.log("SERVICE:", serviceRow);
+console.log("SERVICE ERROR:", serviceError);
+
+const { data: staffRow, error: staffError } = await (supabase as any)
+  .from("staff")
+  .select("id")
+  .limit(1)
+  .single();
+
+console.log("STAFF:", staffRow);
+console.log("STAFF ERROR:", staffError);
+
+if (client && serviceRow && staffRow) {
+  const { data: appointment, error: appointmentError } = await (supabase as any)
+    .from("appointments")
+    .insert({
+      client_id: client.id,
+      service_id: serviceRow.id,
+      staff_id: staffRow.id,
+      date: "2026-06-27",
+      start_time: "16:00",
+      end_time: "17:00",
+      notes: `Telegram: ${service}, ${date}, ${time}, ${name}, ${phone}`
+    })
+    .select("id")
+    .single();
+
+  console.log("APPOINTMENT:", appointment);
+  console.log("APPOINTMENT ERROR:", appointmentError);
+}
   }
+}
+
+if (
+  answer.toLowerCase().includes("подтверждена") ||
+  answer.toLowerCase().includes("оформлена") ||
+  answer.toLowerCase().includes("ждем вас") ||
+  answer.toLowerCase().includes("ждём вас")
+) {
+  chatHistory.delete(chatId);
 }
 
 return answer;
