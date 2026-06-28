@@ -153,8 +153,11 @@ function formatAppointmentForUser(appt: any): string {
   const date = formatDateForUser((appt.date as string) ?? '');
   const time = appt.start_time ? (appt.start_time as string).slice(0, 5) : '?';
   const notes = (appt.notes as string) ?? '';
-  const serviceMatch = notes.match(/Telegram: (.+?),/);
-  const service = serviceMatch ? serviceMatch[1] : 'услуга';
+  // Новый формат: "Услуга: Стрижка\n..."
+  // Старый формат (обратная совместимость): "Telegram: Стрижка, ..."
+  const serviceNew = notes.match(/Услуга: (.+)/m)?.[1]?.trim();
+  const serviceOld = notes.match(/Telegram: (.+?),/)?.[1];
+  const service = serviceNew ?? serviceOld ?? 'услуга';
   return `📅 ${date} в ${time} — ${service}`;
 }
 
@@ -455,7 +458,9 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
           date: appointmentDate,
           start_time: `${appointmentTime}:00`,
           end_time: `${addOneHour(appointmentTime)}:00`,
-          notes: `Telegram: ${service}, ${date}, ${time}, ${name}, ${phone}`
+          status: 'scheduled',
+          reminder_sent: false,
+          notes: `Источник: Telegram\nКлиент: ${name}\nТелефон: ${phone}\nУслуга: ${service}\nДата: ${date}\nВремя: ${time}`
         })
         .select("id").single();
 
