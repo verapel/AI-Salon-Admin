@@ -7,6 +7,19 @@ import { api } from '@/lib/api';
 import { formatDate, formatTime } from '@/lib/utils';
 import type { Reminder } from '@/types';
 
+const LANG_ABBR: Record<LangCode, string> = {
+  ru: 'RU',
+  en: 'EN',
+  hy: 'AM',
+};
+
+const langAbbrClass =
+  'inline-flex h-6 w-8 shrink-0 items-center justify-center rounded-md text-[11px] font-bold leading-none';
+
+function LangAbbr({ code }: { code: LangCode }) {
+  return <span className={langAbbrClass}>{LANG_ABBR[code]}</span>;
+}
+
 interface HeaderProps {
   title: string;
   subtitle?: string;
@@ -82,8 +95,6 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
   }, [langOpen]);
 
   const close = () => setPanelOpen(false);
-
-  const currentLang = LANGUAGES.find((l) => l.code === language) ?? LANGUAGES[0];
 
   function handleLanguageChange(code: LangCode) {
     setLanguage(code);
@@ -201,7 +212,9 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
             aria-label={t('header.selectLanguage')}
           >
             <Globe className="h-5 w-5" />
-            <span className="hidden text-xs font-medium sm:inline">{currentLang.flag}</span>
+            <span className="hidden sm:inline">
+              <LangAbbr code={language} />
+            </span>
           </button>
 
           {langOpen && (
@@ -225,7 +238,7 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
                       }`}
                     >
                       <span className="flex items-center gap-2">
-                        <span>{lang.flag}</span>
+                        <LangAbbr code={lang.code} />
                         <span>{lang.label}</span>
                       </span>
                       {language === lang.code && (
