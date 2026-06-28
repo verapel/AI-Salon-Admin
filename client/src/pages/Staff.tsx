@@ -58,39 +58,56 @@ export default function Staff() {
   if (loading) return <LoadingSpinner />;
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="w-full min-w-0 max-w-full overflow-x-clip space-y-4 animate-fade-in">
+      {/* Кнопка Add Staff: на mobile во всю ширину, на desktop — справа */}
       <div className="flex justify-end">
-        <button onClick={openCreate} className="btn-primary">
+        <button onClick={openCreate} className="btn-primary w-full sm:w-auto">
           <Plus className="h-4 w-4" /> Add Staff Member
         </button>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="w-full min-w-0 max-w-full grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {staff.filter((s) => s.active).map((member) => (
-          <div key={member.id} className="card group hover:shadow-card-hover">
-            <div className="flex items-start gap-4">
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-lg font-bold text-white">
+          <div key={member.id} className="card group w-full min-w-0 max-w-full p-4 sm:p-6 hover:shadow-card-hover">
+            <div className="flex items-start gap-3 sm:gap-4">
+              {/* Аватар: фиксированный размер, не сжимается */}
+              <div className="flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-lg font-bold text-white">
                 {member.avatar}
               </div>
+
               <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h4 className="font-semibold text-gray-900 dark:text-white">{member.name}</h4>
+                <div className="flex items-start justify-between gap-2">
+                  {/* Имя + роль */}
+                  <div className="min-w-0">
+                    <h4 className="truncate font-semibold text-gray-900 dark:text-white">
+                      {member.name}
+                    </h4>
                     <p className="text-sm text-brand-600 dark:text-brand-400">{member.role}</p>
                   </div>
-                  <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                    <button onClick={() => openEdit(member)} className="btn-ghost p-1.5">
+                  {/* Кнопки: на mobile всегда видимы, на desktop — по hover */}
+                  <div className="flex shrink-0 gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                    <button onClick={() => openEdit(member)} className="btn-ghost p-2 sm:p-1.5">
                       <Pencil className="h-4 w-4" />
                     </button>
-                    <button onClick={() => handleDelete(member.id)} className="btn-ghost p-1.5 text-red-500">
+                    <button onClick={() => handleDelete(member.id)} className="btn-ghost p-2 sm:p-1.5 text-red-500">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
+
+                {/* Email / Phone */}
                 <div className="mt-3 space-y-1 text-sm text-gray-500 dark:text-gray-400">
-                  <p className="flex items-center gap-2"><Mail className="h-3.5 w-3.5" /> {member.email}</p>
-                  <p className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" /> {member.phone}</p>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Mail className="h-3.5 w-3.5 shrink-0" />
+                    <span className="min-w-0 truncate">{member.email}</span>
+                  </div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Phone className="h-3.5 w-3.5 shrink-0" />
+                    <span className="min-w-0 truncate">{member.phone}</span>
+                  </div>
                 </div>
+
+                {/* Специализации */}
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {member.specialties.map((spec) => (
                     <span key={spec} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
@@ -126,9 +143,10 @@ export default function Staff() {
             <label className="mb-1.5 block text-sm font-medium">Specialties (comma-separated)</label>
             <input className="input-field" value={form.specialties} onChange={(e) => setForm({ ...form, specialties: e.target.value })} placeholder="Hair, Color, Nails" />
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
-            <button type="submit" className="btn-primary">{editing ? 'Save Changes' : 'Add Staff'}</button>
+          {/* Кнопки: на mobile в столбик (полная ширина), на sm+ — в ряд справа */}
+          <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary w-full sm:w-auto">Cancel</button>
+            <button type="submit" className="btn-primary w-full sm:w-auto">{editing ? 'Save Changes' : 'Add Staff'}</button>
           </div>
         </form>
       </Modal>

@@ -23,8 +23,9 @@ export default function Reminders() {
   if (loading) return <LoadingSpinner />;
 
   return (
-    <div className="space-y-4 animate-fade-in">
-      <div className="flex gap-2">
+    <div className="w-full min-w-0 max-w-full overflow-x-clip space-y-4 animate-fade-in">
+      {/* Фильтры */}
+      <div className="flex flex-wrap gap-2">
         {(['all', 'pending', 'sent'] as const).map((status) => (
           <button
             key={status}
@@ -49,7 +50,8 @@ export default function Reminders() {
       ) : (
         <div className="space-y-3">
           {filtered.map((reminder) => (
-            <div key={reminder.id} className="card flex items-start gap-4 hover:shadow-card-hover">
+            <div key={reminder.id} className="card w-full min-w-0 max-w-full flex items-start gap-3 sm:gap-4 p-4 sm:p-6 hover:shadow-card-hover">
+              {/* Иконка типа */}
               <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
                 reminder.type === 'email'
                   ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400'
@@ -57,20 +59,44 @@ export default function Reminders() {
               }`}>
                 {reminder.type === 'email' ? <Mail className="h-5 w-5" /> : <MessageSquare className="h-5 w-5" />}
               </div>
+
+              {/* Содержимое */}
               <div className="min-w-0 flex-1">
+                {/* Клиент + статус */}
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-medium text-gray-900 dark:text-white">{reminder.clientName}</p>
-                    <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">{reminder.message}</p>
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-gray-900 dark:text-white">
+                      {reminder.clientName}
+                    </p>
+                    <p className="mt-0.5 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
+                      {reminder.message}
+                    </p>
                   </div>
-                  <span className={`badge shrink-0 ${getStatusColor(reminder.status)}`}>{reminder.status}</span>
+                  <span className={`badge shrink-0 ${getStatusColor(reminder.status)}`}>
+                    {reminder.status}
+                  </span>
                 </div>
-                <div className="mt-2 flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
+
+                {/* Desktop: горизонтальный flex-wrap (оригинальный вид) */}
+                <div className="mt-2 hidden text-xs text-gray-500 dark:text-gray-400 sm:flex sm:flex-wrap sm:gap-3">
                   {reminder.appointmentDate && (
                     <span>Appointment: {formatDate(reminder.appointmentDate)} at {formatTime(reminder.appointmentTime!)}</span>
                   )}
                   <span>Type: {reminder.type.toUpperCase()}</span>
                   <span>Scheduled: {new Date(reminder.scheduledFor).toLocaleString()}</span>
+                </div>
+
+                {/* Mobile: вертикальный список, каждая строка с truncate */}
+                <div className="mt-2 space-y-0.5 text-xs text-gray-500 dark:text-gray-400 sm:hidden">
+                  {reminder.appointmentDate && (
+                    <p className="truncate">
+                      Appointment: {formatDate(reminder.appointmentDate)} at {formatTime(reminder.appointmentTime!)}
+                    </p>
+                  )}
+                  <p>Type: {reminder.type.toUpperCase()}</p>
+                  <p className="truncate">
+                    Scheduled: {new Date(reminder.scheduledFor).toLocaleString()}
+                  </p>
                 </div>
               </div>
             </div>

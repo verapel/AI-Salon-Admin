@@ -63,7 +63,8 @@ export default function Services() {
   if (loading) return <LoadingSpinner />;
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="w-full min-w-0 max-w-full overflow-x-clip space-y-4 animate-fade-in">
+      {/* Фильтры + кнопка добавления */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap gap-2">
           <button
@@ -82,35 +83,53 @@ export default function Services() {
             </button>
           ))}
         </div>
-        <button onClick={openCreate} className="btn-primary">
+        {/* На mobile — полная ширина, на desktop — автоширина (оригинал) */}
+        <button onClick={openCreate} className="btn-primary w-full sm:w-auto">
           <Plus className="h-4 w-4" /> Add Service
         </button>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      {/* Сетка карточек */}
+      <div className="w-full min-w-0 max-w-full grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {filtered.filter((s) => s.active).map((service) => (
-          <div key={service.id} className="card group hover:shadow-card-hover">
+          <div key={service.id} className="card group w-full min-w-0 max-w-full p-4 sm:p-6 hover:shadow-card-hover">
+            {/* Иконка + кнопки */}
             <div className="flex items-start justify-between">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 dark:bg-brand-950/50">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-50 dark:bg-brand-950/50">
                 <Scissors className="h-5 w-5 text-brand-600 dark:text-brand-400" />
               </div>
-              <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                <button onClick={() => openEdit(service)} className="btn-ghost p-1.5">
+              {/* На mobile всегда видимы, на desktop — по hover */}
+              <div className="flex shrink-0 gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                <button onClick={() => openEdit(service)} className="btn-ghost p-2 sm:p-1.5">
                   <Pencil className="h-4 w-4" />
                 </button>
-                <button onClick={() => handleDelete(service.id)} className="btn-ghost p-1.5 text-red-500">
+                <button onClick={() => handleDelete(service.id)} className="btn-ghost p-2 sm:p-1.5 text-red-500">
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
             </div>
-            <h4 className="mt-3 font-semibold text-gray-900 dark:text-white">{service.name}</h4>
-            <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">{service.description}</p>
-            <div className="mt-4 flex items-center justify-between">
-              <span className="text-lg font-bold text-brand-600 dark:text-brand-400">{formatCurrency(service.price)}</span>
-              <span className="flex items-center gap-1 text-xs text-gray-500">
+
+            {/* Название */}
+            <h4 className="mt-3 truncate font-semibold text-gray-900 dark:text-white">
+              {service.name}
+            </h4>
+
+            {/* Описание — line-clamp-2 ограничивает высоту */}
+            <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
+              {service.description}
+            </p>
+
+            {/* Цена + длительность */}
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <span className="text-lg font-bold text-brand-600 dark:text-brand-400">
+                {formatCurrency(service.price)}
+              </span>
+              <span className="flex shrink-0 items-center gap-1 text-xs text-gray-500">
                 <Clock className="h-3.5 w-3.5" /> {formatDuration(service.duration)}
               </span>
             </div>
+
+            {/* Категория */}
             <span className="mt-2 inline-block rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
               {service.category}
             </span>
@@ -128,7 +147,8 @@ export default function Services() {
             <label className="mb-1.5 block text-sm font-medium">Description</label>
             <textarea className="input-field" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          {/* Duration/Price: 1 колонка на mobile, 2 на sm+ */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-sm font-medium">Duration (min)</label>
               <input className="input-field" type="number" value={form.duration} onChange={(e) => setForm({ ...form, duration: Number(e.target.value) })} required />
@@ -144,9 +164,10 @@ export default function Services() {
               {categories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
             </select>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
-            <button type="submit" className="btn-primary">{editing ? 'Save Changes' : 'Add Service'}</button>
+          {/* Кнопки: на mobile в столбик (полная ширина), на sm+ — в ряд справа */}
+          <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary w-full sm:w-auto">Cancel</button>
+            <button type="submit" className="btn-primary w-full sm:w-auto">{editing ? 'Save Changes' : 'Add Service'}</button>
           </div>
         </form>
       </Modal>

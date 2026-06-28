@@ -658,6 +658,47 @@ app.get('/api/telegram/status', async (_req, res) => {
   }
 });
 
+// POST /api/integrations/telegram/connect
+// Принимает { token }, проверяет через getMe, перезапускает polling.
+// Токен хранится только в process.env (runtime, до перезапуска сервера).
+app.post('/api/integrations/telegram/connect', async (req, res) => {
+  const { token } = req.body as { token?: string };
+
+  if (!token || typeof token !== 'string' || token.trim().length < 10) {
+    return res.status(400).json({ success: false, error: 'Token is required' });
+  }
+
+  const trimmedToken = token.trim();
+
+  // Логируем только маску токена — никогда не полный
+  const masked = `${trimmedToken.slice(0, 4)}${'*'.repeat(Math.max(0, trimmedToken.length - 8))}${trimmedToken.slice(-4)}`;
+  console.log(`[telegram/connect] Validating token: ${masked}`);
+
+  try {
+    const tgRes = await fetch(`https://api.telegram.org/bot${trimmedToken}/getMe`);
+    const tgData = await tgRes.json() as { ok: boolean; result?: { username: string; first_name: string } };
+
+    if (!tgData.ok || !tgData.result) {
+      return res.status(400).json({ success: false, error: 'Invalid Telegram token. Check it in @BotFather.' });
+    }
+
+    const { username, first_name } = tgData.result;
+
+    // Обновляем токен в runtime process.env
+    process.env.TELEGRAM_BOT_TOKEN = trimmedToken;
+
+    // Перезапускаем polling с новым токеном
+    restartTelegramPolling();
+
+    console.log(`[telegram/connect] Connected: @${username} (${first_name})`);
+
+    return res.json({ success: true, username, name: first_name });
+  } catch (err) {
+    console.error('[telegram/connect] Error:', err);
+    return res.status(500).json({ success: false, error: 'Could not reach Telegram API' });
+  }
+});
+
 app.use('/api/clients', clientsRouter);
 app.use('/api/services', servicesRouter);
 app.use('/api/staff', staffRouter);
@@ -757,6 +798,18 @@ app.get('/api/telegram/test', async (_req, res) => {
 });
 let telegramOffset = 0;
 let isPolling = false; // предотвращает параллельные тики setInterval
+let pollingIntervalId: ReturnType<typeof setInterval> | null = null;
+
+/** Останавливает текущий polling и запускает новый с токеном из process.env */
+function restartTelegramPolling() {
+  if (pollingIntervalId !== null) {
+    clearInterval(pollingIntervalId);
+    pollingIntervalId = null;
+    isPolling = false;
+    console.log('[polling] Previous polling stopped');
+  }
+  startTelegramPolling();
+}
 
 async function startTelegramPolling() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -768,7 +821,7 @@ async function startTelegramPolling() {
 
   console.log('Telegram polling started');
 
-  setInterval(async () => {
+  pollingIntervalId = setInterval(async () => {
     // Если предыдущий тик ещё выполняется — пропустить этот
     if (isPolling) return;
     isPolling = true;

@@ -2,30 +2,40 @@ import { useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 
-const pageTitles: Record<string, { title: string; subtitle: string }> = {
-  '/': { title: 'Dashboard', subtitle: 'Overview of your salon' },
-  '/calendar': { title: 'Calendar', subtitle: 'View and manage appointments' },
-  '/clients': { title: 'Clients', subtitle: 'Manage your client database' },
-  '/services': { title: 'Services', subtitle: 'Service catalog and pricing' },
-  '/staff': { title: 'Staff', subtitle: 'Team members and schedules' },
-  '/bookings': { title: 'Bookings', subtitle: 'Create and manage appointments' },
-  '/statistics': { title: 'Statistics', subtitle: 'Analytics and insights' },
-  '/reminders': { title: 'Reminders', subtitle: 'Automated appointment reminders' },
+const pageKeys: Record<string, { title: TranslationKey; subtitle: TranslationKey }> = {
+  '/': { title: 'pages.dashboard.title', subtitle: 'pages.dashboard.subtitle' },
+  '/calendar': { title: 'pages.calendar.title', subtitle: 'pages.calendar.subtitle' },
+  '/clients': { title: 'pages.clients.title', subtitle: 'pages.clients.subtitle' },
+  '/services': { title: 'pages.services.title', subtitle: 'pages.services.subtitle' },
+  '/staff': { title: 'pages.staff.title', subtitle: 'pages.staff.subtitle' },
+  '/bookings': { title: 'pages.bookings.title', subtitle: 'pages.bookings.subtitle' },
+  '/statistics': { title: 'pages.statistics.title', subtitle: 'pages.statistics.subtitle' },
+  '/reminders': { title: 'pages.reminders.title', subtitle: 'pages.reminders.subtitle' },
+  '/ai-assistant': { title: 'pages.aiAssistant.title', subtitle: 'pages.aiAssistant.subtitle' },
 };
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
-  const page = pageTitles[location.pathname] || { title: 'AI Salon Admin', subtitle: '' };
+  const { t } = useLanguage();
+
+  const keys = pageKeys[location.pathname] ?? {
+    title: 'pages.default.title' as TranslationKey,
+    subtitle: 'pages.default.subtitle' as TranslationKey,
+  };
+
+  const title = t(keys.title);
+  const subtitle = keys.subtitle ? t(keys.subtitle) : '';
 
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header
-          title={page.title}
-          subtitle={page.subtitle}
+          title={title}
+          subtitle={subtitle || undefined}
           onMenuClick={() => setSidebarOpen(true)}
         />
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
