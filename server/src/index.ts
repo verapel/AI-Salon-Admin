@@ -23,6 +23,39 @@ const chatHistory = new Map<number, any[]>();
 
 const PORT = process.env.PORT || 3001;
 
+function parseAppointmentDate(input: string): string {
+  const now = new Date();
+  const text = input.toLowerCase();
+
+  if (text.includes("завтра")) {
+    now.setDate(now.getDate() + 1);
+  }
+
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function parseAppointmentTime(input: string): string {
+  const match = input.match(/(\d{1,2})[:. ]?(\d{2})?/);
+  if (!match) return "10:00";
+
+  const hours = match[1].padStart(2, "0");
+  const minutes = match[2] || "00";
+
+  return `${hours}:${minutes}`;
+}
+
+function addOneHour(time: string): string {
+  const [h, m] = time.split(":").map(Number);
+  const nextHour = String((h + 1) % 24).padStart(2, "0");
+  const minutes = String(m).padStart(2, "0");
+
+  return `${nextHour}:${minutes}`;
+}
+
 app.use(cors());
 app.use(express.json());
 async function generateAIResponse(chatId: number, text: string) {
@@ -52,22 +85,42 @@ history.push({
         {
           role: 'system',
           content: `Ты AI-администратор салона красоты.
-      
-      Твоя задача — записать клиента.
-      
-      Нужно собрать:
-      1. услугу
-      2. день
-      3. время
-      4. имя
-      5. телефон
-      
-      Правила:
-      - Не спрашивай то, что клиент уже написал.
-      - Спрашивай только один следующий вопрос за раз.
-      - Отвечай коротко и дружелюбно.
-      - Если все данные собраны, кратко подтверди запись.
-      - Пиши только на русском языке.`
+
+Твоя задача — записать клиента.
+
+Нужно собрать строго в таком порядке:
+1. услугу
+2. день
+3. время
+4. имя
+5. телефон
+
+Правила:
+
+- Первое сообщение всегда:
+"Здравствуйте! На какую услугу вы хотите записаться?"
+
+- После получения услуги спроси:
+"На какой день вы хотите записаться?"
+
+- После получения дня спроси:
+"На какое время вам удобно записаться?"
+
+- После получения времени спроси:
+"Как вас зовут?"
+
+- После получения имени спроси:
+"Подскажите, пожалуйста, ваш номер телефона."
+
+- После получения телефона подтверди запись.
+
+Очень важно:
+- Никогда не повторяй один и тот же вопрос два раза подряд.
+- Никогда не спрашивай информацию, которую клиент уже сообщил.
+- Не используй фразы "Отличный выбор", "Замечательно", "Прекрасно" перед каждым вопросом.
+- Пиши естественно, как живой администратор салона.
+- Отвечай коротко и грамотно.
+- Пиши на языке клиента.`
         },
         ...history
       ]
@@ -160,9 +213,9 @@ if (client && serviceRow && staffRow) {
       client_id: client.id,
       service_id: serviceRow.id,
       staff_id: staffRow.id,
-      date: "2026-06-27",
-      start_time: "16:00",
-      end_time: "17:00",
+      date: parseAppointmentDate(date),
+start_time: parseAppointmentTime(time),
+end_time: addOneHour(parseAppointmentTime(time)),
       notes: `Telegram: ${service}, ${date}, ${time}, ${name}, ${phone}`
     })
     .select("id")
