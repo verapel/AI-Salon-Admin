@@ -12,6 +12,42 @@ CREATE TYPE appointment_status AS ENUM (
 CREATE TYPE reminder_type AS ENUM ('email', 'sms');
 CREATE TYPE reminder_status AS ENUM ('pending', 'sent', 'failed');
 
+CREATE TYPE integration_provider AS ENUM (
+  'telegram', 'whatsapp', 'instagram', 'facebook_messenger',
+  'email', 'push', 'google_calendar', 'stripe', 'openai'
+);
+CREATE TYPE integration_status AS ENUM ('connected', 'not_connected', 'error', 'disabled');
+CREATE TYPE integration_health AS ENUM ('healthy', 'error', 'unknown');
+
+CREATE TABLE IF NOT EXISTS salons (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       TEXT NOT NULL,
+  slug       TEXT NOT NULL UNIQUE,
+  timezone   TEXT NOT NULL DEFAULT 'Europe/Moscow',
+  country    TEXT NOT NULL DEFAULT '',
+  currency   TEXT NOT NULL DEFAULT 'RUB',
+  language   TEXT NOT NULL DEFAULT 'ru',
+  active     BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS salon_integrations (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  salon_id         UUID NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  provider         integration_provider NOT NULL,
+  status           integration_status NOT NULL DEFAULT 'not_connected',
+  health           integration_health NOT NULL DEFAULT 'unknown',
+  bot_username     TEXT,
+  bot_display_name TEXT,
+  connected_at     TIMESTAMPTZ,
+  last_checked_at  TIMESTAMPTZ,
+  last_error       TEXT,
+  token_ciphertext TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (salon_id, provider)
+);
+
 CREATE TABLE IF NOT EXISTS clients (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name          TEXT NOT NULL,
@@ -74,15 +110,39 @@ CREATE INDEX IF NOT EXISTS idx_clients_email ON clients (email);
 CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments (date);
 CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointments (status);
 CREATE INDEX IF NOT EXISTS idx_reminders_status ON reminders (status);
+CREATE INDEX IF NOT EXISTS idx_salons_slug ON salons (slug);
+CREATE INDEX IF NOT EXISTS idx_salons_active ON salons (active);
+CREATE INDEX IF NOT EXISTS idx_salon_integrations_provider_status ON salon_integrations (provider, status);
+CREATE INDEX IF NOT EXISTS idx_salon_integrations_salon_id ON salon_integrations (salon_id);
 
 -- =============================================================================
 -- 2. Row Level Security
 -- =============================================================================
+ALTER TABLE salons ENABLE ROW LEVEL SECURITY;
+ALTER TABLE salon_integrations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
 ALTER TABLE services ENABLE ROW LEVEL SECURITY;
 ALTER TABLE staff ENABLE ROW LEVEL SECURITY;
 ALTER TABLE appointments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reminders ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN CREATE POLICY "Allow public read on salons" ON salons FOR SELECT USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow public insert on salons" ON salons FOR INSERT WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow public update on salons" ON salons FOR UPDATE USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow public delete on salons" ON salons FOR DELETE USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN CREATE POLICY "Allow public read on salon_integrations" ON salon_integrations FOR SELECT USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow public insert on salon_integrations" ON salon_integrations FOR INSERT WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow public update on salon_integrations" ON salon_integrations FOR UPDATE USING (true) WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE POLICY "Allow public delete on salon_integrations" ON salon_integrations FOR DELETE USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   CREATE POLICY "Allow public read on clients" ON clients FOR SELECT USING (true);
@@ -133,6 +193,12 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- =============================================================================
 -- 3. Seed data (safe to re-run — uses ON CONFLICT DO NOTHING)
 -- =============================================================================
+INSERT INTO salons (id, name, slug, timezone, country, currency, language, active) VALUES
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0001', 'Beauty Studio', 'default',      'Europe/Moscow', 'RU', 'RUB', 'ru', TRUE),
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0002', 'Nail Studio',   'nail-studio',  'Europe/Moscow', 'RU', 'RUB', 'ru', TRUE),
+  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0003', 'Hair Studio',   'hair-studio',  'Europe/Moscow', 'RU', 'RUB', 'ru', TRUE)
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO clients (id, name, email, phone, notes, total_visits, last_visit, created_at) VALUES
   ('11111111-1111-1111-1111-111111111001', 'Emma Wilson',      'emma.wilson@email.com',   '+1 (555) 123-4567', 'Prefers morning appointments',       12, CURRENT_DATE - 3,  '2024-01-15'),
   ('11111111-1111-1111-1111-111111111002', 'Sophia Martinez',  'sophia.m@email.com',      '+1 (555) 234-5678', 'Allergic to certain hair dyes',       8, CURRENT_DATE - 7,  '2024-03-22'),

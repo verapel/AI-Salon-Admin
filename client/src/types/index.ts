@@ -76,3 +76,33 @@ export interface AnalyticsData {
   topServices: { name: string; count: number; revenue: number }[];
   staffPerformance: { name: string; appointments: number; revenue: number }[];
 }
+
+export interface DeveloperSalon {
+  id: string;
+  name: string;
+  slug: string;
+  timezone: string;
+  country: string;
+  currency: string;
+  language: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export type IntegrationConnectionStatus = 'connected' | 'not_connected' | 'error' | 'disabled';
+export type IntegrationHealthStatus = 'healthy' | 'error' | 'unknown';
+
+export interface DeveloperTelegramIntegration {
+  salonId: string;
+  salonName: string;
+  slug: string;
+  status: IntegrationConnectionStatus;
+  health: IntegrationHealthStatus;
+  botUsername: string | null;
+  botDisplayName: string | null;
+  connectedAt: string | null;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+}
+
+export const DEFAULT_SALON_SLUG = 'default';

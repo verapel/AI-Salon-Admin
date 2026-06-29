@@ -14,6 +14,7 @@ import servicesRouter from './routes/services.js';
 import staffRouter from './routes/staff.js';
 import appointmentsRouter from './routes/appointments.js';
 import statsRouter from './routes/stats.js';
+import developerRouter from './routes/developer.js';
 import { supabase, checkSupabaseConnection } from './lib/supabase.js';
 
 const app = express();
@@ -704,6 +705,7 @@ app.use('/api/services', servicesRouter);
 app.use('/api/staff', staffRouter);
 app.use('/api/appointments', appointmentsRouter);
 app.use('/api/stats', statsRouter);
+app.use('/api/developer', developerRouter);
 
 app.listen(PORT, () => {
   console.log(`AI Salon Admin API running on http://localhost:${PORT}`);

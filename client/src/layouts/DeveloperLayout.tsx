@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Building2, Plug, Activity, Sparkles, X, Bot } from 'lucide-react';
+import { LayoutDashboard, Building2, Plug, Activity, Sparkles, X } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { cn } from '@/lib/utils';
@@ -10,7 +10,6 @@ const navItems: { to: string; icon: typeof LayoutDashboard; labelKey: Translatio
   { to: '/developer/salons', icon: Building2, labelKey: 'developer.nav.salons' },
   { to: '/developer/integrations', icon: Plug, labelKey: 'developer.nav.integrations' },
   { to: '/developer/health', icon: Activity, labelKey: 'developer.nav.health' },
-  { to: '/developer/ai-assistant', icon: Bot, labelKey: 'nav.aiAssistant' },
 ];
 
 const pageKeys: Record<string, { title: TranslationKey; subtitle: TranslationKey }> = {

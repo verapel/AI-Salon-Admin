@@ -6,9 +6,106 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[];
 
+export type IntegrationProvider =
+  | 'telegram'
+  | 'whatsapp'
+  | 'instagram'
+  | 'facebook_messenger'
+  | 'email'
+  | 'push'
+  | 'google_calendar'
+  | 'stripe'
+  | 'openai';
+
+export type IntegrationStatus = 'connected' | 'not_connected' | 'error' | 'disabled';
+
+export type IntegrationHealth = 'healthy' | 'error' | 'unknown';
+
 export interface Database {
   public: {
     Tables: {
+      salons: {
+        Row: {
+          id: string;
+          name: string;
+          slug: string;
+          timezone: string;
+          country: string;
+          currency: string;
+          language: string;
+          active: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          slug: string;
+          timezone?: string;
+          country?: string;
+          currency?: string;
+          language?: string;
+          active?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          slug?: string;
+          timezone?: string;
+          country?: string;
+          currency?: string;
+          language?: string;
+          active?: boolean;
+          created_at?: string;
+        };
+      };
+      salon_integrations: {
+        Row: {
+          id: string;
+          salon_id: string;
+          provider: IntegrationProvider;
+          status: IntegrationStatus;
+          health: IntegrationHealth;
+          bot_username: string | null;
+          bot_display_name: string | null;
+          connected_at: string | null;
+          last_checked_at: string | null;
+          last_error: string | null;
+          token_ciphertext: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          provider: IntegrationProvider;
+          status?: IntegrationStatus;
+          health?: IntegrationHealth;
+          bot_username?: string | null;
+          bot_display_name?: string | null;
+          connected_at?: string | null;
+          last_checked_at?: string | null;
+          last_error?: string | null;
+          token_ciphertext?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          provider?: IntegrationProvider;
+          status?: IntegrationStatus;
+          health?: IntegrationHealth;
+          bot_username?: string | null;
+          bot_display_name?: string | null;
+          connected_at?: string | null;
+          last_checked_at?: string | null;
+          last_error?: string | null;
+          token_ciphertext?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       clients: {
         Row: {
           id: string;
@@ -178,6 +275,11 @@ export interface Database {
           created_at?: string;
         };
       };
+    };
+    Enums: {
+      integration_provider: IntegrationProvider;
+      integration_status: IntegrationStatus;
+      integration_health: IntegrationHealth;
     };
   };
 }

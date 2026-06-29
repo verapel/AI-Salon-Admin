@@ -56,4 +56,9 @@ export const api = {
     getAnalytics: () => request<import('@/types').AnalyticsData>('/stats/analytics'),
     getReminders: () => request<import('@/types').Reminder[]>('/stats/reminders'),
   },
+  developer: {
+    getSalons: () => request<import('@/types').DeveloperSalon[]>('/developer/salons'),
+    getTelegramIntegrations: () =>
+      request<import('@/types').DeveloperTelegramIntegration[]>('/developer/integrations/telegram'),
+  },
 };
