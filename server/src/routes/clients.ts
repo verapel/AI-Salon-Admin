@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
 import { mapClient } from '../lib/mappers.js';
+import type { Database } from '../types/database.js';
 
 const router = Router();
 
@@ -49,7 +50,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const { name, email, phone, notes, totalVisits, lastVisit } = req.body;
 
-  const updates: Record<string, unknown> = {};
+  const updates: Database['public']['Tables']['clients']['Update'] = {};
   if (name !== undefined) updates.name = name;
   if (email !== undefined) updates.email = email;
   if (phone !== undefined) updates.phone = phone;

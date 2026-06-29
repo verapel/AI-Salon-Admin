@@ -5,8 +5,16 @@ import type { AnalyticsData, DashboardStats } from '../types.js';
 
 const router = Router();
 
+/** Local YYYY-MM-DD — avoids UTC shift from toISOString() */
+function localDateStr(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 router.get('/dashboard', async (_req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = localDateStr();
   const monthPrefix = today.slice(0, 7);
 
   const [clientsRes, appointmentsRes, remindersRes] = await Promise.all([
@@ -81,11 +89,12 @@ router.get('/analytics', async (_req, res) => {
 
   const statusCounts: Record<string, number> = {};
   allAppointments.forEach((a) => {
+    if (!a.status) return;
     statusCounts[a.status] = (statusCounts[a.status] || 0) + 1;
   });
 
   const appointmentsByStatus = Object.entries(statusCounts).map(([status, count]) => ({
-    status: status.charAt(0).toUpperCase() + status.slice(1).replace('-', ' '),
+    status,
     count,
   }));
 

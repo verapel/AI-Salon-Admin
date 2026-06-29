@@ -9,6 +9,7 @@ console.log("CURRENT DIR =", process.cwd());
 
 import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
 import clientsRouter from './routes/clients.js';
 import servicesRouter from './routes/services.js';
 import staffRouter from './routes/staff.js';
@@ -16,6 +17,15 @@ import appointmentsRouter from './routes/appointments.js';
 import statsRouter from './routes/stats.js';
 import developerRouter from './routes/developer.js';
 import { supabase, checkSupabaseConnection } from './lib/supabase.js';
+import { loadTelegramTokenFromDb, saveTelegramTokenToDb } from './lib/telegramToken.js';
+import {
+  ACTIVE_SLOT_STATUSES,
+  buildServiceKeyboard,
+  computeAppointmentEndTime,
+  localDateStr,
+  resolveServiceByName,
+  resolveStaffForService,
+} from './lib/telegramBooking.js';
 
 const app = express();
 
@@ -191,14 +201,6 @@ function parseAppointmentTime(input: string): string {
   return `${hours}:${minutes}`;
 }
 
-function addOneHour(time: string): string {
-  const [h, m] = time.split(":").map(Number);
-  const nextHour = String((h + 1) % 24).padStart(2, "0");
-  const minutes = String(m).padStart(2, "0");
-
-  return `${nextHour}:${minutes}`;
-}
-
 app.use(cors());
 app.use(express.json());
 async function generateAIResponse(chatId: number, text: string): Promise<string | null> {
@@ -247,12 +249,13 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
         chatHistory.set(chatId, history.slice(-10));
         return msg;
       }
-      const today = new Date().toISOString().split('T')[0];
+      const today = localDateStr(0);
       const { data: appointments } = await (supabase as any)
         .from('appointments')
         .select('id, date, start_time, notes')
         .eq('client_id', client.id)
         .gte('date', today)
+        .in('status', ACTIVE_SLOT_STATUSES)
         .order('date', { ascending: true });
       if (!appointments || appointments.length === 0) {
         manageState.delete(chatId);
@@ -348,6 +351,7 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
         .select('id')
         .eq('date', appointmentDate)
         .eq('start_time', `${appointmentTime}:00`)
+        .in('status', ACTIVE_SLOT_STATUSES)
         .limit(1)
         .maybeSingle();
 
@@ -428,26 +432,24 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
         clientId = newClient.id;
       }
 
-      // 3. Получить услугу
-      const { data: serviceRow, error: serviceError } = await (supabase as any)
-        .from("services").select("id").limit(1).single();
-      if (serviceError || !serviceRow) {
-        console.error("Service lookup error:", serviceError);
+      // 3. Получить услугу и мастера из каталога салона
+      const serviceRow = await resolveServiceByName(service);
+      if (!serviceRow) {
+        console.error('Service lookup error: no active services in catalog');
         bookingState.delete(chatId); chatHistory.delete(chatId);
-        return "Не удалось найти услугу. Обратитесь к администратору.";
+        return "В салоне пока нет услуг. Добавьте услуги в панели администратора и попробуйте снова.";
       }
 
-      // 4. Получить мастера
-      const { data: staffRow, error: staffError } = await (supabase as any)
-        .from("staff").select("id").limit(1).single();
-      if (staffError || !staffRow) {
-        console.error("Staff lookup error:", staffError);
+      const staffRow = await resolveStaffForService(serviceRow);
+      if (!staffRow) {
+        console.error('Staff lookup error: no active staff');
         bookingState.delete(chatId); chatHistory.delete(chatId);
         return "Не удалось найти доступного мастера. Обратитесь к администратору.";
       }
 
       const appointmentDate = parseAppointmentDate(date);
       const appointmentTime = parseAppointmentTime(time);
+      const endTime = computeAppointmentEndTime(appointmentTime, serviceRow.duration);
 
       // 5. INSERT appointment
       const { data: appointment, error: appointmentError } = await (supabase as any)
@@ -458,10 +460,10 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
           staff_id: staffRow.id,
           date: appointmentDate,
           start_time: `${appointmentTime}:00`,
-          end_time: `${addOneHour(appointmentTime)}:00`,
+          end_time: endTime,
           status: 'scheduled',
           reminder_sent: false,
-          notes: `Источник: Telegram\nКлиент: ${name}\nТелефон: ${phone}\nУслуга: ${service}\nДата: ${date}\nВремя: ${time}`
+          notes: `Источник: Telegram\nКлиент: ${name}\nТелефон: ${phone}\nУслуга: ${serviceRow.name}\nДата: ${date}\nВремя: ${time}`
         })
         .select("id").single();
 
@@ -471,10 +473,18 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
         return "Не удалось создать запись. Попробуйте ещё раз или обратитесь к администратору.";
       }
 
+      await (supabase as any).from('reminders').insert({
+        appointment_id: appointment.id,
+        type: 'email',
+        scheduled_for: `${appointmentDate}T08:00:00`,
+        status: 'pending',
+        message: `Reminder: Your appointment on ${appointmentDate} at ${appointmentTime}`,
+      });
+
       // 6. Подтверждение клиенту (живым текстом, без служебных данных)
       await sendTelegramMessage(
         chatId,
-        `Готово, ${name}! Записала вас на ${service} — ${formatDateForUser(date)} в ${time} ✨\nБудем ждать вас!`
+        `Готово, ${name}! Записала вас на ${serviceRow.name} — ${formatDateForUser(date)} в ${time} ✨\nБудем ждать вас!`
       );
 
       // 7. Уведомление мастеру/администратору (только в TELEGRAM_CHAT_ID)
@@ -484,7 +494,7 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
         console.log("[admin notify] отправляем уведомление в", Number(adminChatId));
         await sendTelegramMessage(
           Number(adminChatId),
-          `🔔 Новая запись!\n\n💇 Услуга: ${service}\n📅 День: ${date}\n🕒 Время: ${time}\n👤 Клиент: ${name}\n📞 Телефон: ${phone}`
+          `🔔 Новая запись!\n\n💇 Услуга: ${serviceRow.name}\n📅 День: ${date}\n🕒 Время: ${time}\n👤 Клиент: ${name}\n📞 Телефон: ${phone}`
         );
         console.log("[admin notify] уведомление отправлено");
       } else {
@@ -503,7 +513,7 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
     headers: {
       'Authorization': `Bearer ${openRouterKey}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'http://localhost:3001',
+      'HTTP-Referer': process.env.APP_URL ?? 'http://localhost:3001',
       'X-Title': 'AI Salon Admin',
     },
     body: JSON.stringify({
@@ -572,11 +582,7 @@ chatHistory.set(chatId, history.slice(-10));
   const assistantCount = history.filter(m => m.role === 'assistant').length;
   if (!bookingState.has(chatId) && assistantCount === 1) {
     bookingState.set(chatId, { step: 'service', service: '', date: '', time: '', name: '', phone: '' });
-    // Первый ответ — отправляем с кнопками услуг (polling не шлёт второй раз)
-    const serviceKeyboard = [
-      [{ text: '✂️ Стрижка', callback_data: 'service:Стрижка' }, { text: '🎨 Окрашивание', callback_data: 'service:Окрашивание' }],
-      [{ text: '💅 Маникюр', callback_data: 'service:Маникюр' }, { text: '✍️ Другая услуга', callback_data: 'service:manual' }]
-    ];
+    const serviceKeyboard = await buildServiceKeyboard();
     await sendTelegramMessageWithKeyboard(chatId, answer, serviceKeyboard);
     return null;
   }
@@ -624,7 +630,12 @@ app.get('/api/health', async (_req, res) => {
   });
 });
 app.get('/api/telegram/status', async (_req, res) => {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
+  let token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+
+  if (!token) {
+    token = (await loadTelegramTokenFromDb()) ?? undefined;
+    if (token) process.env.TELEGRAM_BOT_TOKEN = token;
+  }
 
   if (!token) {
     return res.status(400).json({
@@ -688,7 +699,11 @@ app.post('/api/integrations/telegram/connect', async (req, res) => {
     // Обновляем токен в runtime process.env
     process.env.TELEGRAM_BOT_TOKEN = trimmedToken;
 
-    // Перезапускаем polling с новым токеном
+    const saved = await saveTelegramTokenToDb(trimmedToken, username, first_name);
+    if (!saved) {
+      console.warn('[telegram/connect] Token validated but could not persist to database');
+    }
+
     restartTelegramPolling();
 
     console.log(`[telegram/connect] Connected: @${username} (${first_name})`);
@@ -707,10 +722,43 @@ app.use('/api/appointments', appointmentsRouter);
 app.use('/api/stats', statsRouter);
 app.use('/api/developer', developerRouter);
 
-app.listen(PORT, () => {
-  console.log(`AI Salon Admin API running on http://localhost:${PORT}`);
-  console.log(`Supabase: ${process.env.SUPABASE_URL ?? 'NOT CONFIGURED'}`);
-});
+function resolveClientDist(): string | null {
+  const candidates = [
+    path.resolve(process.cwd(), '../client/dist'),
+    path.resolve(process.cwd(), 'client/dist'),
+  ];
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'index.html'))) return dir;
+  }
+  return null;
+}
+
+const clientDist = resolveClientDist();
+if (clientDist) {
+  app.use(express.static(clientDist));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+  console.log(`Serving client from ${clientDist}`);
+}
+
+async function bootstrap() {
+  if (!process.env.TELEGRAM_BOT_TOKEN?.trim()) {
+    const dbToken = await loadTelegramTokenFromDb();
+    if (dbToken) {
+      process.env.TELEGRAM_BOT_TOKEN = dbToken;
+      console.log('[telegram] Token loaded from database');
+    }
+  }
+
+  app.listen(PORT, () => {
+    console.log(`AI Salon Admin running on http://localhost:${PORT}`);
+    console.log(`Supabase: ${process.env.SUPABASE_URL ?? 'NOT CONFIGURED'}`);
+    startTelegramPolling();
+  });
+}
+
 async function sendTelegramMessage(chatId: number, text: string) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -764,7 +812,11 @@ async function getAvailableSlots(date: string, excludeAppointmentId?: string): P
   console.log(`[slots] date: "${date}"`);
   console.log(`[slots] excludeAppointmentId: "${excludeAppointmentId ?? 'none'}"`);
 
-  const baseQ = (supabase as any).from('appointments').select('start_time').eq('date', date);
+  const baseQ = (supabase as any)
+    .from('appointments')
+    .select('start_time')
+    .eq('date', date)
+    .in('status', ACTIVE_SLOT_STATUSES);
   const { data: booked, error: bookedError } = await (
     excludeAppointmentId ? baseQ.neq('id', excludeAppointmentId) : baseQ
   );
@@ -814,6 +866,8 @@ function restartTelegramPolling() {
 }
 
 async function startTelegramPolling() {
+  if (pollingIntervalId !== null) return;
+
   const token = process.env.TELEGRAM_BOT_TOKEN;
 
   if (!token) {
@@ -854,10 +908,18 @@ async function startTelegramPolling() {
             const appointmentId = cqData.slice('cancel_confirm:'.length);
             const { data: apptInfo } = await (supabase as any)
               .from('appointments').select('date, start_time, notes').eq('id', appointmentId).maybeSingle();
-            const { error } = await (supabase as any).from('appointments').delete().eq('id', appointmentId);
+            const { error } = await (supabase as any)
+              .from('appointments')
+              .update({ status: 'cancelled' })
+              .eq('id', appointmentId);
             if (error) {
               await sendTelegramMessage(cqChatId, 'Не удалось отменить запись. Попробуйте ещё раз.');
             } else {
+              await (supabase as any)
+                .from('reminders')
+                .update({ status: 'failed', message: 'Cancelled — appointment was cancelled' })
+                .eq('appointment_id', appointmentId)
+                .eq('status', 'pending');
               manageState.delete(cqChatId);
               await sendTelegramMessage(cqChatId, 'Запись отменена. Будем рады видеть вас снова! 🌸');
               const adminChatId = process.env.TELEGRAM_CHAT_ID;
@@ -947,6 +1009,7 @@ async function startTelegramPolling() {
             const { data: existingSlot } = await (supabase as any)
               .from('appointments').select('id')
               .eq('date', newDate).eq('start_time', `${parsedTime}:00`)
+              .in('status', ACTIVE_SLOT_STATUSES)
               .neq('id', appointmentId).limit(1).maybeSingle();
             if (existingSlot) {
               // Исключаем саму переносимую запись из занятых слотов
@@ -962,15 +1025,29 @@ async function startTelegramPolling() {
               }
               continue;
             }
-            const newEndTime = addOneHour(parsedTime);
+            const { data: apptForDuration } = await (supabase as any)
+              .from('appointments')
+              .select('service_id, services(duration)')
+              .eq('id', appointmentId)
+              .maybeSingle();
+            const duration = apptForDuration?.services?.duration ?? 60;
+            const newEndTime = computeAppointmentEndTime(parsedTime, duration);
             const { error } = await (supabase as any).from('appointments').update({
               date: newDate,
               start_time: `${parsedTime}:00`,
-              end_time: `${newEndTime}:00`
+              end_time: newEndTime
             }).eq('id', appointmentId);
             if (error) {
               await sendTelegramMessage(cqChatId, 'Не удалось перенести запись. Попробуйте ещё раз.');
             } else {
+              await (supabase as any)
+                .from('reminders')
+                .update({
+                  scheduled_for: `${newDate}T08:00:00`,
+                  message: `Reminder: Your appointment on ${newDate} at ${newTime}`,
+                })
+                .eq('appointment_id', appointmentId)
+                .eq('status', 'pending');
               manageState.delete(cqChatId);
               const formattedDate = formatDateForUser(newDate);
               await sendTelegramMessage(cqChatId, `Готово! Запись перенесена на ${formattedDate} в ${newTime} ✨`);
@@ -1023,4 +1100,7 @@ async function startTelegramPolling() {
   }, 3000);
 }
 
-startTelegramPolling();
+bootstrap().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});

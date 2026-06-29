@@ -58,6 +58,7 @@ export interface Database {
           active?: boolean;
           created_at?: string;
         };
+        Relationships: [];
       };
       salon_integrations: {
         Row: {
@@ -105,6 +106,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       clients: {
         Row: {
@@ -137,6 +139,7 @@ export interface Database {
           last_visit?: string | null;
           created_at?: string;
         };
+        Relationships: [];
       };
       services: {
         Row: {
@@ -169,6 +172,7 @@ export interface Database {
           active?: boolean;
           created_at?: string;
         };
+        Relationships: [];
       };
       staff: {
         Row: {
@@ -204,6 +208,7 @@ export interface Database {
           active?: boolean;
           created_at?: string;
         };
+        Relationships: [];
       };
       appointments: {
         Row: {
@@ -245,6 +250,7 @@ export interface Database {
           reminder_sent?: boolean;
           created_at?: string;
         };
+        Relationships: [];
       };
       reminders: {
         Row: {
@@ -274,8 +280,11 @@ export interface Database {
           message?: string;
           created_at?: string;
         };
+        Relationships: [];
       };
     };
+    Views: Record<string, never>;
+    Functions: Record<string, never>;
     Enums: {
       integration_provider: IntegrationProvider;
       integration_status: IntegrationStatus;

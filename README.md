@@ -100,6 +100,21 @@ npm run dev
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:3001
 
+## Pilot deployment (first real salon)
+
+See **`docs/DEPLOY.md`** for production setup (Docker / VPS / Render).
+
+After deploy:
+
+```bash
+DEPLOY_URL=https://your-domain.com node scripts/verify-deployment.mjs
+```
+
+**Checklist:** `docs/PILOT_CHECKLIST.md`  
+**Owner guide (RU):** `docs/SALON_OWNER_GUIDE.md`
+
+Salon owners connect Telegram via **Integrations** in the admin sidebar (no developer cabinet required).
+
 ## Project Structure
 
 ```

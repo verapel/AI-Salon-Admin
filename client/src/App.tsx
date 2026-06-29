@@ -9,6 +9,7 @@ import Staff from '@/pages/Staff';
 import Bookings from '@/pages/Bookings';
 import Statistics from '@/pages/Statistics';
 import Reminders from '@/pages/Reminders';
+import SalonIntegrations from '@/pages/SalonIntegrations';
 import AIAssistant from '@/pages/AIAssistant';
 import DeveloperHome from '@/pages/developer/DeveloperHome';
 import DeveloperSalons from '@/pages/developer/DeveloperSalons';
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/bookings" element={<Bookings />} />
         <Route path="/statistics" element={<Statistics />} />
         <Route path="/reminders" element={<Reminders />} />
+        <Route path="/integrations" element={<SalonIntegrations />} />
       </Route>
 
       {/* Developer cabinet */}

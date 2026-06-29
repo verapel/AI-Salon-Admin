@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
+import { loadTelegramTokenFromDb } from '../lib/telegramToken.js';
 import type {
   IntegrationHealth,
   IntegrationStatus,
@@ -126,7 +127,11 @@ async function upsertTelegramIntegration(
 }
 
 async function syncDefaultSalonTelegram(salonId: string): Promise<IntegrationRow> {
-  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  let token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token) {
+    token = (await loadTelegramTokenFromDb()) ?? undefined;
+    if (token) process.env.TELEGRAM_BOT_TOKEN = token;
+  }
   const now = new Date().toISOString();
 
   if (!token) {

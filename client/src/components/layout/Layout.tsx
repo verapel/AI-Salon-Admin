@@ -14,6 +14,7 @@ const pageKeys: Record<string, { title: TranslationKey; subtitle: TranslationKey
   '/bookings': { title: 'pages.bookings.title', subtitle: 'pages.bookings.subtitle' },
   '/statistics': { title: 'pages.statistics.title', subtitle: 'pages.statistics.subtitle' },
   '/reminders': { title: 'pages.reminders.title', subtitle: 'pages.reminders.subtitle' },
+  '/integrations': { title: 'pages.integrations.title', subtitle: 'pages.integrations.subtitle' },
 };
 
 export default function Layout() {

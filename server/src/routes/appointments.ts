@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
 import { computeEndTime, mapEnrichedAppointment } from '../lib/mappers.js';
 import type { Appointment } from '../types.js';
+import type { Database } from '../types/database.js';
 
 const router = Router();
 
@@ -93,7 +94,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const { status, notes, clientId, staffId, serviceId, date, startTime } = req.body;
 
-  const updates: Record<string, unknown> = {};
+  const updates: Database['public']['Tables']['appointments']['Update'] = {};
   if (status !== undefined) updates.status = status;
   if (notes !== undefined) updates.notes = notes;
   if (clientId !== undefined) updates.client_id = clientId;
@@ -134,6 +135,27 @@ router.put('/:id', async (req, res) => {
 
   if (error || !updated) return res.status(404).json({ error: 'Appointment not found' });
 
+  if (date !== undefined || startTime !== undefined) {
+    const { data: apptForReminder } = await supabase
+      .from('appointments')
+      .select('date, start_time')
+      .eq('id', req.params.id)
+      .single();
+
+    if (apptForReminder) {
+      const reminderDate = apptForReminder.date;
+      const reminderTime = apptForReminder.start_time?.slice(0, 5) ?? '';
+      await supabase
+        .from('reminders')
+        .update({
+          scheduled_for: `${reminderDate}T08:00:00`,
+          message: `Reminder: Your appointment on ${reminderDate} at ${reminderTime}`,
+        })
+        .eq('appointment_id', req.params.id)
+        .eq('status', 'pending');
+    }
+  }
+
   if (status === 'completed') {
     const { data: client } = await supabase
       .from('clients')
@@ -171,6 +193,12 @@ router.delete('/:id', async (req, res) => {
     .single();
 
   if (error || !data) return res.status(404).json({ error: 'Appointment not found' });
+
+  await supabase
+    .from('reminders')
+    .update({ status: 'failed', message: 'Cancelled — appointment was cancelled' })
+    .eq('appointment_id', req.params.id)
+    .eq('status', 'pending');
 
   const { data: enriched, error: fetchError } = await supabase
     .from('appointments')
