@@ -23,7 +23,6 @@ const navItems: { to: string; icon: typeof LayoutDashboard; labelKey: Translatio
   { to: '/bookings', icon: CalendarPlus, labelKey: 'nav.bookings' },
   { to: '/statistics', icon: BarChart3, labelKey: 'nav.statistics' },
   { to: '/reminders', icon: Bell, labelKey: 'nav.reminders' },
-  { to: '/ai-assistant', icon: Sparkles, labelKey: 'nav.aiAssistant' },
 ];
 
 interface SidebarProps {

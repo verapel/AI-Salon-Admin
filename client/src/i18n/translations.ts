@@ -120,6 +120,26 @@ const en = {
   'ai.tokenNote': 'The token is validated immediately and never stored in the browser.',
   'ai.connectionFailed': 'Connection failed. Check the token.',
   'ai.serverError': 'Could not reach the server. Make sure the backend is running.',
+
+  // Developer cabinet
+  'developer.brand': 'AI Salon',
+  'developer.cabinet': 'Developer Cabinet',
+  'developer.nav.overview': 'Overview',
+  'developer.nav.salons': 'Salons',
+  'developer.nav.integrations': 'Integrations',
+  'developer.nav.health': 'Health',
+  'developer.home.title': 'Overview',
+  'developer.home.subtitle': 'Platform status and activity',
+  'developer.home.placeholder': 'Platform overview and key metrics will appear here.',
+  'developer.salons.title': 'Salons',
+  'developer.salons.subtitle': 'Connected salons on the platform',
+  'developer.salons.placeholder': 'The salon list will appear here.',
+  'developer.integrations.title': 'Integrations',
+  'developer.integrations.subtitle': 'Telegram and messenger connections',
+  'developer.integrations.placeholder': 'Integration status per salon will appear here.',
+  'developer.health.title': 'Health',
+  'developer.health.subtitle': 'API, database, and bot health',
+  'developer.health.placeholder': 'System health checks will appear here.',
 } as const;
 
 export type TranslationKey = keyof typeof en;
@@ -231,6 +251,25 @@ const ru: Record<TranslationKey, string> = {
   'ai.tokenNote': 'Токен проверяется сразу и не сохраняется в браузере.',
   'ai.connectionFailed': 'Не удалось подключить. Проверьте токен.',
   'ai.serverError': 'Не удалось связаться с сервером. Убедитесь, что backend запущен.',
+
+  'developer.brand': 'AI Salon',
+  'developer.cabinet': 'Кабинет разработчика',
+  'developer.nav.overview': 'Обзор',
+  'developer.nav.salons': 'Салоны',
+  'developer.nav.integrations': 'Интеграции',
+  'developer.nav.health': 'Состояние',
+  'developer.home.title': 'Обзор',
+  'developer.home.subtitle': 'Статус платформы и активность',
+  'developer.home.placeholder': 'Здесь появится обзор платформы и ключевые метрики.',
+  'developer.salons.title': 'Салоны',
+  'developer.salons.subtitle': 'Подключённые салоны на платформе',
+  'developer.salons.placeholder': 'Здесь появится список салонов.',
+  'developer.integrations.title': 'Интеграции',
+  'developer.integrations.subtitle': 'Telegram и подключения мессенджеров',
+  'developer.integrations.placeholder': 'Здесь появится статус интеграций по салонам.',
+  'developer.health.title': 'Состояние',
+  'developer.health.subtitle': 'API, база данных и боты',
+  'developer.health.placeholder': 'Здесь появятся проверки состояния системы.',
 };
 
 const hy: Record<TranslationKey, string> = {
@@ -340,6 +379,26 @@ const hy: Record<TranslationKey, string> = {
   'ai.tokenNote': 'Token-ը ստուգվում է անմիջապես և չի պahinվum brauzerում:',
   'ai.connectionFailed': 'Չհաջorվեց մiացնել: Ստուգեք token-ը:',
   'ai.serverError': 'Չհաջorվեց կապվել server-ի հետ: Սtugեք, որ backend-ը աշխatum է:',
+
+
+  'developer.brand': 'AI Salon',
+  'developer.cabinet': 'Developer վահանակ',
+  'developer.nav.overview': 'Ակնարկ',
+  'developer.nav.salons': 'Salon-ներ',
+  'developer.nav.integrations': 'Ինteգraциa',
+  'developer.nav.health': 'Վիճակ',
+  'developer.home.title': 'Ակնարկ',
+  'developer.home.subtitle': 'Platform-ի վիճակ',
+  'developer.home.placeholder': 'Platform-ի ակնարկը կհայտնվի այստեղ:',
+  'developer.salons.title': 'Salon-ներ',
+  'developer.salons.subtitle': 'Միացված salon-ներ',
+  'developer.salons.placeholder': 'Salon-ների ցանկը կհայտնվի այստեղ:',
+  'developer.integrations.title': 'Ինteգraциa',
+  'developer.integrations.subtitle': 'Telegram միացումներ',
+  'developer.integrations.placeholder': 'Ինteգraциa-ի վիճակը կհայտնվի այստեղ:',
+  'developer.health.title': 'Վիճակ',
+  'developer.health.subtitle': 'API և bot-երի վիճակ',
+  'developer.health.placeholder': 'Health check-երը կհայտնվի այստեղ:',
 };
 
 export const translations: Record<LangCode, Record<TranslationKey, string>> = {

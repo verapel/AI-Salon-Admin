@@ -4,6 +4,7 @@ import Sidebar from './Sidebar';
 import Header from './Header';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 
+/** Salon cabinet — page titles for the current salon's admin panel */
 const pageKeys: Record<string, { title: TranslationKey; subtitle: TranslationKey }> = {
   '/': { title: 'pages.dashboard.title', subtitle: 'pages.dashboard.subtitle' },
   '/calendar': { title: 'pages.calendar.title', subtitle: 'pages.calendar.subtitle' },
@@ -13,7 +14,6 @@ const pageKeys: Record<string, { title: TranslationKey; subtitle: TranslationKey
   '/bookings': { title: 'pages.bookings.title', subtitle: 'pages.bookings.subtitle' },
   '/statistics': { title: 'pages.statistics.title', subtitle: 'pages.statistics.subtitle' },
   '/reminders': { title: 'pages.reminders.title', subtitle: 'pages.reminders.subtitle' },
-  '/ai-assistant': { title: 'pages.aiAssistant.title', subtitle: 'pages.aiAssistant.subtitle' },
 };
 
 export default function Layout() {
