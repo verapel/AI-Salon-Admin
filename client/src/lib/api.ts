@@ -60,5 +60,6 @@ export const api = {
     getSalons: () => request<import('@/types').DeveloperSalon[]>('/developer/salons'),
     getTelegramIntegrations: () =>
       request<import('@/types').DeveloperTelegramIntegration[]>('/developer/integrations/telegram'),
+    getHealth: () => request<import('@/types').DeveloperHealth>('/developer/health'),
   },
 };

@@ -81,12 +81,22 @@ export interface DeveloperSalon {
   id: string;
   name: string;
   slug: string;
-  timezone: string;
-  country: string;
-  currency: string;
-  language: string;
   active: boolean;
+  connectedAt: string | null;
+  clientCount: number;
+  appointmentCount: number;
   createdAt: string;
+}
+
+export interface DeveloperHealth {
+  api: { status: 'ok' };
+  supabase: { status: 'connected' | 'disconnected' };
+  telegram: {
+    status: 'connected' | 'not_connected' | 'error';
+    bot: string | null;
+    error?: string | null;
+  };
+  version: string;
 }
 
 export type IntegrationConnectionStatus = 'connected' | 'not_connected' | 'error' | 'disabled';

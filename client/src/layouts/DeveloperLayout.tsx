@@ -17,7 +17,6 @@ const pageKeys: Record<string, { title: TranslationKey; subtitle: TranslationKey
   '/developer/salons': { title: 'developer.salons.title', subtitle: 'developer.salons.subtitle' },
   '/developer/integrations': { title: 'developer.integrations.title', subtitle: 'developer.integrations.subtitle' },
   '/developer/health': { title: 'developer.health.title', subtitle: 'developer.health.subtitle' },
-  '/developer/ai-assistant': { title: 'pages.aiAssistant.title', subtitle: 'pages.aiAssistant.subtitle' },
 };
 
 interface DeveloperSidebarProps {

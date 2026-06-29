@@ -1,5 +1,7 @@
 import { Router } from 'express';
-import { supabase } from '../lib/supabase.js';
+import fs from 'fs';
+import path from 'path';
+import { supabase, checkSupabaseConnection } from '../lib/supabase.js';
 import { loadTelegramTokenFromDb } from '../lib/telegramToken.js';
 import type {
   IntegrationHealth,
@@ -33,18 +35,38 @@ type IntegrationRow = {
   last_error: string | null;
 };
 
-function mapSalon(row: SalonRow) {
+function mapSalonOverview(
+  row: SalonRow,
+  connectedAt: string | null,
+  clientCount: number,
+  appointmentCount: number
+) {
   return {
     id: row.id,
     name: row.name,
     slug: row.slug,
-    timezone: row.timezone,
-    country: row.country,
-    currency: row.currency,
-    language: row.language,
     active: row.active,
+    connectedAt,
+    clientCount,
+    appointmentCount,
     createdAt: row.created_at,
   };
+}
+
+function readAppVersion(): string {
+  const candidates = [
+    path.resolve(process.cwd(), '../package.json'),
+    path.resolve(process.cwd(), 'package.json'),
+  ];
+  for (const file of candidates) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(file, 'utf-8')) as { version?: string };
+      if (pkg.version) return pkg.version;
+    } catch {
+      /* try next */
+    }
+  }
+  return 'unknown';
 }
 
 type TelegramGetMeResult =
@@ -235,13 +257,76 @@ function notConnectedIntegration(): IntegrationRow {
 }
 
 router.get('/salons', async (_req, res) => {
-  const { data, error } = await (supabase as any)
+  const { data: salons, error } = await (supabase as any)
     .from('salons')
     .select('*')
     .order('name');
 
   if (error) return res.status(500).json({ error: error.message });
-  res.json((data as SalonRow[]).map(mapSalon));
+
+  const [{ count: totalClients }, { count: totalAppointments }, integrationsRes] = await Promise.all([
+    supabase.from('clients').select('id', { count: 'exact', head: true }),
+    supabase.from('appointments').select('id', { count: 'exact', head: true }),
+    (supabase as any)
+      .from('salon_integrations')
+      .select('salon_id, connected_at')
+      .eq('provider', TELEGRAM_PROVIDER),
+  ]);
+
+  if (integrationsRes.error) return res.status(500).json({ error: integrationsRes.error.message });
+
+  const connectedAtBySalon = new Map<string, string>(
+    (integrationsRes.data as { salon_id: string; connected_at: string | null }[])
+      .filter((row) => row.connected_at)
+      .map((row) => [row.salon_id, row.connected_at!])
+  );
+
+  const rows = (salons as SalonRow[]).map((salon) => {
+    const isDefault = salon.slug === DEFAULT_SALON_SLUG;
+    return mapSalonOverview(
+      salon,
+      connectedAtBySalon.get(salon.id) ?? (isDefault ? salon.created_at : null),
+      isDefault ? (totalClients ?? 0) : 0,
+      isDefault ? (totalAppointments ?? 0) : 0
+    );
+  });
+
+  res.json(rows);
+});
+
+router.get('/health', async (_req, res) => {
+  const dbConnected = await checkSupabaseConnection();
+
+  let telegramStatus: 'connected' | 'not_connected' | 'error' = 'not_connected';
+  let telegramBot: string | null = null;
+  let telegramError: string | null = null;
+
+  let token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token) {
+    token = (await loadTelegramTokenFromDb()) ?? undefined;
+  }
+
+  if (token) {
+    const check = await checkTelegramBot(token);
+    if (check.ok) {
+      telegramStatus = 'connected';
+      telegramBot = check.username;
+    } else {
+      telegramStatus = 'error';
+      telegramError = check.error;
+    }
+  }
+
+  res.json({
+    api: { status: 'ok' as const },
+    supabase: { status: dbConnected ? ('connected' as const) : ('disconnected' as const) },
+    telegram: {
+      status: telegramStatus,
+      bot: telegramBot,
+      error: telegramError,
+    },
+    version: readAppVersion(),
+  });
 });
 
 router.get('/integrations/telegram', async (_req, res) => {

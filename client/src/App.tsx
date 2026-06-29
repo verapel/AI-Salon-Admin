@@ -10,7 +10,6 @@ import Bookings from '@/pages/Bookings';
 import Statistics from '@/pages/Statistics';
 import Reminders from '@/pages/Reminders';
 import SalonIntegrations from '@/pages/SalonIntegrations';
-import AIAssistant from '@/pages/AIAssistant';
 import DeveloperHome from '@/pages/developer/DeveloperHome';
 import DeveloperSalons from '@/pages/developer/DeveloperSalons';
 import DeveloperIntegrations from '@/pages/developer/DeveloperIntegrations';
@@ -38,7 +37,6 @@ export default function App() {
         <Route path="salons" element={<DeveloperSalons />} />
         <Route path="integrations" element={<DeveloperIntegrations />} />
         <Route path="health" element={<DeveloperHealth />} />
-        <Route path="ai-assistant" element={<AIAssistant />} />
       </Route>
     </Routes>
   );

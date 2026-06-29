@@ -1,9 +1,8 @@
-import { useState } from 'react';
 import { Bot } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
 import IntegrationStatusBadge from '@/components/developer/IntegrationStatusBadge';
 import IntegrationHealthBadge from '@/components/developer/IntegrationHealthBadge';
-import { DEFAULT_SALON_SLUG, type DeveloperTelegramIntegration } from '@/types';
+import type { DeveloperTelegramIntegration } from '@/types';
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return '—';
@@ -18,14 +17,11 @@ function formatDateTime(iso: string | null): string {
 
 interface SalonTelegramCardProps {
   integration: DeveloperTelegramIntegration;
-  onManage: () => void;
+  readOnly?: boolean;
 }
 
-export default function SalonTelegramCard({ integration, onManage }: SalonTelegramCardProps) {
+export default function SalonTelegramCard({ integration, readOnly = true }: SalonTelegramCardProps) {
   const { t } = useLanguage();
-  const [showHint, setShowHint] = useState(false);
-  const isDefaultSalon = integration.slug === DEFAULT_SALON_SLUG;
-  const hint = t('developer.integrations.futureUpdate');
 
   return (
     <div className="card flex w-full min-w-0 max-w-full flex-col p-4 sm:p-5">
@@ -77,34 +73,10 @@ export default function SalonTelegramCard({ integration, onManage }: SalonTelegr
         </p>
       )}
 
-      <div className="relative mt-5">
-        {isDefaultSalon ? (
-          <button type="button" onClick={onManage} className="btn-primary w-full">
-            {t('developer.integrations.manage')}
-          </button>
-        ) : (
-          <>
-            <button
-              type="button"
-              disabled
-              className="btn-primary w-full cursor-not-allowed opacity-50"
-              title={hint}
-            >
-              {t('developer.integrations.manage')}
-            </button>
-            <button
-              type="button"
-              className="absolute inset-0 cursor-not-allowed rounded-lg"
-              aria-label={hint}
-              title={hint}
-              onClick={() => setShowHint(true)}
-            />
-          </>
-        )}
-      </div>
-
-      {showHint && !isDefaultSalon && (
-        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{hint}</p>
+      {readOnly && integration.slug !== 'default' && (
+        <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+          {t('developer.integrations.futureUpdate')}
+        </p>
       )}
     </div>
   );
