@@ -60,7 +60,12 @@ export const api = {
     getSalons: () => request<import('@/types').DeveloperSalon[]>('/developer/salons'),
     getTelegramIntegrations: () =>
       request<import('@/types').DeveloperTelegramIntegration[]>('/developer/integrations/telegram'),
-    connectTelegram: (body: { salonName?: string; salonId?: string; token: string }) =>
+    connectTelegram: (body: {
+      salonName?: string;
+      salonId?: string;
+      token: string;
+      botDisplayName?: string;
+    }) =>
       request<{
         success: boolean;
         salonId: string;
@@ -69,6 +74,17 @@ export const api = {
         integration: import('@/types').DeveloperTelegramIntegration;
       }>('/developer/integrations/telegram/connect', {
         method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    updateTelegramIntegration: (
+      salonId: string,
+      body: { salonName?: string; botDisplayName?: string }
+    ) =>
+      request<{
+        success: boolean;
+        integration: import('@/types').DeveloperTelegramIntegration;
+      }>(`/developer/integrations/telegram/${salonId}`, {
+        method: 'PATCH',
         body: JSON.stringify(body),
       }),
     getHealth: () => request<import('@/types').DeveloperHealth>('/developer/health'),

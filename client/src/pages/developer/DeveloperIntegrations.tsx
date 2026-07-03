@@ -23,7 +23,8 @@ export default function DeveloperIntegrations() {
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const { connecting, connectError, connect, clearConnectError } = useDeveloperTelegramConnect();
+  const { connecting, connectError, connect, updateMetadata, clearConnectError } =
+    useDeveloperTelegramConnect();
 
   const tabParam = searchParams.get('tab');
   const activeTab = isIntegrationTabId(tabParam) ? tabParam : DEFAULT_TAB;
@@ -39,8 +40,16 @@ export default function DeveloperIntegrations() {
     setSearchParams({ tab });
   }
 
-  async function handleCreateConnect(params: { salonName: string; token: string }) {
-    const success = await connect(params);
+  async function handleCreateConnect(params: {
+    salonName: string;
+    botDisplayName: string;
+    token: string;
+  }) {
+    const success = await connect({
+      salonName: params.salonName,
+      token: params.token,
+      botDisplayName: params.botDisplayName,
+    });
     if (success) {
       setRefreshKey((key) => key + 1);
     }
@@ -74,6 +83,7 @@ export default function DeveloperIntegrations() {
               connecting={connecting}
               connectError={connectError}
               onConnect={connect}
+              onUpdateMetadata={updateMetadata}
               onClearError={clearConnectError}
             />
           ) : null

@@ -2,18 +2,29 @@ import { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, Bot } from 'lucide-react';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
-import TelegramConnectModal from '@/components/developer/TelegramConnectModal';
+import DeveloperTelegramManageModal, {
+  type TelegramManageSaveParams,
+} from '@/components/developer/DeveloperTelegramManageModal';
+import EditSalonNameModal from '@/components/developer/EditSalonNameModal';
 import SalonTelegramCard from '@/components/developer/SalonTelegramCard';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import type { DeveloperTelegramIntegration } from '@/types';
-import type { TelegramConnectionStatus } from '@/hooks/useTelegramConnection';
 
 interface TelegramIntegrationsTabProps {
   refreshKey?: number;
   connecting: boolean;
   connectError: string;
-  onConnect: (params: { salonName?: string; salonId?: string; token: string }) => Promise<boolean>;
+  onConnect: (params: {
+    salonName?: string;
+    salonId?: string;
+    token: string;
+    botDisplayName?: string;
+  }) => Promise<boolean>;
+  onUpdateMetadata: (
+    salonId: string,
+    params: { salonName?: string; botDisplayName?: string }
+  ) => Promise<boolean>;
   onClearError: () => void;
 }
 
@@ -22,14 +33,19 @@ export default function TelegramIntegrationsTab({
   connecting,
   connectError,
   onConnect,
+  onUpdateMetadata,
   onClearError,
 }: TelegramIntegrationsTabProps) {
   const { t } = useLanguage();
   const [integrations, setIntegrations] = useState<DeveloperTelegramIntegration[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [manageModalOpen, setManageModalOpen] = useState(false);
+  const [editNameModalOpen, setEditNameModalOpen] = useState(false);
   const [managing, setManaging] = useState<DeveloperTelegramIntegration | null>(null);
+  const [editing, setEditing] = useState<DeveloperTelegramIntegration | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
 
   const loadIntegrations = useCallback(() => {
     setError(false);
@@ -48,31 +64,65 @@ export default function TelegramIntegrationsTab({
   function openManage(integration: DeveloperTelegramIntegration) {
     onClearError();
     setManaging(integration);
-    setModalOpen(true);
+    setManageModalOpen(true);
   }
 
-  function closeModal() {
-    setModalOpen(false);
+  function openEditSalonName(integration: DeveloperTelegramIntegration) {
+    setEditError('');
+    setEditing(integration);
+    setEditNameModalOpen(true);
+  }
+
+  function closeManageModal() {
+    setManageModalOpen(false);
     setManaging(null);
     onClearError();
   }
 
-  async function handleReconnect(token: string) {
+  function closeEditModal() {
+    setEditNameModalOpen(false);
+    setEditing(null);
+    setEditError('');
+  }
+
+  async function handleManageSave(params: TelegramManageSaveParams) {
     if (!managing) return false;
-    const success = await onConnect({ salonId: managing.salonId, token });
-    if (success) {
-      loadIntegrations();
+
+    if (params.token) {
+      const success = await onConnect({
+        salonId: managing.salonId,
+        salonName: params.salonName,
+        token: params.token,
+        botDisplayName: params.botDisplayName,
+      });
+      if (success) loadIntegrations();
+      return success;
     }
+
+    const success = await onUpdateMetadata(managing.salonId, {
+      salonName: params.salonName,
+      botDisplayName: params.botDisplayName,
+    });
+    if (success) loadIntegrations();
     return success;
   }
 
-  const modalStatus: TelegramConnectionStatus =
-    managing?.status === 'connected' ? 'connected' : 'disconnected';
+  async function handleEditSalonNameSave(salonName: string) {
+    if (!editing) return false;
 
-  const modalBotInfo =
-    managing?.botUsername
-      ? { username: managing.botUsername, name: managing.botDisplayName ?? managing.botUsername }
-      : null;
+    setEditSaving(true);
+    setEditError('');
+    try {
+      const success = await onUpdateMetadata(editing.salonId, { salonName });
+      if (success) loadIntegrations();
+      return success;
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : t('developer.integrations.updateFailed'));
+      return false;
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -111,20 +161,30 @@ export default function TelegramIntegrationsTab({
           <SalonTelegramCard
             key={integration.salonId}
             integration={integration}
+            onEditSalonName={() => openEditSalonName(integration)}
             onManage={() => openManage(integration)}
           />
         ))}
       </div>
 
-      <TelegramConnectModal
-        open={modalOpen}
-        onClose={closeModal}
-        status={modalStatus}
-        botInfo={modalBotInfo}
+      <DeveloperTelegramManageModal
+        open={manageModalOpen}
+        onClose={closeManageModal}
+        integration={managing}
         connecting={connecting}
         connectError={connectError}
-        onConnect={handleReconnect}
+        onSave={handleManageSave}
         onClearError={onClearError}
+      />
+
+      <EditSalonNameModal
+        open={editNameModalOpen}
+        initialName={editing?.salonName ?? ''}
+        saving={editSaving}
+        saveError={editError}
+        onClose={closeEditModal}
+        onSave={handleEditSalonNameSave}
+        onClearError={() => setEditError('')}
       />
     </>
   );

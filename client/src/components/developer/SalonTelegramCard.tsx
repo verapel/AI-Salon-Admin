@@ -3,6 +3,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import IntegrationStatusBadge from '@/components/developer/IntegrationStatusBadge';
 import IntegrationHealthBadge from '@/components/developer/IntegrationHealthBadge';
 import type { DeveloperTelegramIntegration } from '@/types';
+import { DEFAULT_SALON_SLUG } from '@/types';
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return '—';
@@ -17,12 +18,18 @@ function formatDateTime(iso: string | null): string {
 
 interface SalonTelegramCardProps {
   integration: DeveloperTelegramIntegration;
+  onEditSalonName: () => void;
   onManage: () => void;
 }
 
-export default function SalonTelegramCard({ integration, onManage }: SalonTelegramCardProps) {
+export default function SalonTelegramCard({
+  integration,
+  onEditSalonName,
+  onManage,
+}: SalonTelegramCardProps) {
   const { t } = useLanguage();
   const isConnected = integration.status === 'connected';
+  const isNonDefaultRuntime = integration.slug !== DEFAULT_SALON_SLUG;
 
   return (
     <div className="card flex w-full min-w-0 max-w-full flex-col p-4 sm:p-5">
@@ -52,6 +59,14 @@ export default function SalonTelegramCard({ integration, onManage }: SalonTelegr
         </div>
         <div className="flex min-w-0 justify-between gap-3">
           <dt className="shrink-0 text-gray-500 dark:text-gray-400">
+            {t('developer.integrations.botDisplayName')}
+          </dt>
+          <dd className="truncate text-right font-medium text-gray-900 dark:text-gray-200">
+            {integration.botDisplayName ?? '—'}
+          </dd>
+        </div>
+        <div className="flex min-w-0 justify-between gap-3">
+          <dt className="shrink-0 text-gray-500 dark:text-gray-400">
             {t('developer.integrations.botUsername')}
           </dt>
           <dd className="truncate text-right font-medium text-gray-900 dark:text-gray-200">
@@ -74,9 +89,24 @@ export default function SalonTelegramCard({ integration, onManage }: SalonTelegr
         </p>
       )}
 
-      <button type="button" onClick={onManage} className="btn-primary mt-5 w-full min-h-[44px]">
-        {isConnected ? t('developer.integrations.manage') : t('developer.integrations.connectTelegram')}
-      </button>
+      {isNonDefaultRuntime && (
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+          {t('developer.integrations.runtimeFutureNote')}
+        </p>
+      )}
+
+      <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+        <button
+          type="button"
+          onClick={onEditSalonName}
+          className="btn-secondary w-full min-h-[44px] sm:flex-1"
+        >
+          {t('developer.integrations.editSalonName')}
+        </button>
+        <button type="button" onClick={onManage} className="btn-primary w-full min-h-[44px] sm:flex-1">
+          {isConnected ? t('developer.integrations.manageTelegram') : t('developer.integrations.connectTelegram')}
+        </button>
+      </div>
     </div>
   );
 }

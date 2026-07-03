@@ -117,15 +117,34 @@ async function checkTelegramBot(token: string): Promise<TelegramGetMeResult> {
   }
 }
 
-async function getExistingIntegration(salonId: string): Promise<{ connected_at: string | null } | null> {
+async function getExistingIntegration(
+  salonId: string
+): Promise<{ connected_at: string | null; bot_display_name: string | null } | null> {
   const { data } = await (supabase as any)
     .from('salon_integrations')
-    .select('connected_at')
+    .select('connected_at, bot_display_name')
     .eq('salon_id', salonId)
     .eq('provider', TELEGRAM_PROVIDER)
     .maybeSingle();
 
   return data;
+}
+
+function resolveBotDisplayName(
+  manual: string | undefined,
+  getMeDisplayName: string,
+  botUsername: string
+): string {
+  const trimmedManual = typeof manual === 'string' ? manual.trim() : '';
+  if (trimmedManual) return trimmedManual;
+  if (getMeDisplayName.trim()) return getMeDisplayName.trim();
+  return botUsername;
+}
+
+function displayBotDisplayName(integration: IntegrationRow): string | null {
+  if (integration.bot_display_name?.trim()) return integration.bot_display_name.trim();
+  if (integration.bot_username?.trim()) return integration.bot_username.trim();
+  return null;
 }
 
 async function upsertTelegramIntegration(
@@ -209,12 +228,14 @@ async function syncDefaultSalonTelegram(salonId: string): Promise<IntegrationRow
   if (check.ok) {
     const existing = await getExistingIntegration(salonId);
     const connectedAt = existing?.connected_at ?? now;
+    const botDisplayName =
+      existing?.bot_display_name?.trim() || check.displayName.trim() || check.username;
 
     const row = await upsertTelegramIntegration(salonId, {
       status: 'connected',
       health: 'healthy',
       botUsername: check.username,
-      botDisplayName: check.displayName,
+      botDisplayName,
       connectedAt,
       lastError: null,
       tokenCiphertext: token,
@@ -263,7 +284,7 @@ function mapTelegramIntegration(salon: SalonRow, integration: IntegrationRow) {
     status: integration.status,
     health: integration.health,
     botUsername: integration.bot_username,
-    botDisplayName: integration.bot_display_name,
+    botDisplayName: displayBotDisplayName(integration),
     connectedAt: integration.connected_at,
     lastCheckedAt: integration.last_checked_at,
     lastError: integration.last_error,
@@ -388,11 +409,110 @@ router.get('/integrations/telegram', async (_req, res) => {
   res.json(result);
 });
 
+router.patch('/integrations/telegram/:salonId', async (req, res) => {
+  const salonId = req.params.salonId?.trim();
+  if (!salonId) {
+    return res.status(400).json({ success: false, error: 'salonId is required' });
+  }
+
+  const { salonName, botDisplayName } = req.body as {
+    salonName?: string;
+    botDisplayName?: string;
+  };
+
+  const hasSalonName = typeof salonName === 'string' && salonName.trim().length > 0;
+  const hasBotDisplayName = typeof botDisplayName === 'string';
+
+  if (!hasSalonName && !hasBotDisplayName) {
+    return res.status(400).json({ success: false, error: 'salonName or botDisplayName is required' });
+  }
+
+  const { data: salon, error: salonError } = await (supabase as any)
+    .from('salons')
+    .select('*')
+    .eq('id', salonId)
+    .single();
+
+  if (salonError || !salon) {
+    return res.status(404).json({ success: false, error: 'Salon not found' });
+  }
+
+  let updatedSalon = salon as SalonRow;
+
+  if (hasSalonName) {
+    const trimmedName = salonName!.trim();
+    const { data, error } = await (supabase as any)
+      .from('salons')
+      .update({ name: trimmedName })
+      .eq('id', salonId)
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      return res.status(500).json({ success: false, error: error?.message ?? 'Could not update salon' });
+    }
+    updatedSalon = data as SalonRow;
+  }
+
+  if (hasBotDisplayName) {
+    const trimmedDisplay = botDisplayName!.trim();
+    const { data: existingIntegration } = await (supabase as any)
+      .from('salon_integrations')
+      .select('status, health, bot_username, bot_display_name, connected_at, last_checked_at, last_error')
+      .eq('salon_id', salonId)
+      .eq('provider', TELEGRAM_PROVIDER)
+      .maybeSingle();
+
+    if (!existingIntegration) {
+      return res.status(404).json({ success: false, error: 'Telegram integration not found' });
+    }
+
+    const now = new Date().toISOString();
+    const { data: integration, error: integrationError } = await (supabase as any)
+      .from('salon_integrations')
+      .update({
+        bot_display_name: trimmedDisplay || null,
+        last_checked_at: now,
+        updated_at: now,
+      })
+      .eq('salon_id', salonId)
+      .eq('provider', TELEGRAM_PROVIDER)
+      .select('status, health, bot_username, bot_display_name, connected_at, last_checked_at, last_error')
+      .single();
+
+    if (integrationError || !integration) {
+      return res.status(500).json({ success: false, error: integrationError?.message ?? 'Could not update integration' });
+    }
+
+    return res.json({
+      success: true,
+      integration: mapTelegramIntegration(updatedSalon, integration as IntegrationRow),
+    });
+  }
+
+  const { data: integration, error: integrationError } = await (supabase as any)
+    .from('salon_integrations')
+    .select('status, health, bot_username, bot_display_name, connected_at, last_checked_at, last_error')
+    .eq('salon_id', salonId)
+    .eq('provider', TELEGRAM_PROVIDER)
+    .single();
+
+  if (integrationError || !integration) {
+    return res.status(404).json({ success: false, error: 'Telegram integration not found' });
+  }
+
+  return res.json({
+    success: true,
+    integration: mapTelegramIntegration(updatedSalon, integration as IntegrationRow),
+  });
+});
+
 router.post('/integrations/telegram/connect', async (req, res) => {
-  const { salonName, salonId, token } = req.body as {
+  const { salonName, salonId, token, botDisplayName } = req.body as {
     salonName?: string;
     salonId?: string;
     token?: string;
+    botDisplayName?: string;
   };
 
   if (!token || typeof token !== 'string' || token.trim().length < 10) {
@@ -403,10 +523,12 @@ router.post('/integrations/telegram/connect', async (req, res) => {
   const trimmedSalonId = typeof salonId === 'string' ? salonId.trim() : '';
 
   if (trimmedName && trimmedSalonId) {
-    return res.status(400).json({ success: false, error: 'Provide salonName or salonId, not both' });
-  }
-
-  if (!trimmedName && !trimmedSalonId) {
+    // Reconnect/update existing salon: salonId + optional salonName rename
+  } else if (trimmedName) {
+    // Create new salon
+  } else if (trimmedSalonId) {
+    // Reconnect without rename
+  } else {
     return res.status(400).json({ success: false, error: 'salonName or salonId is required' });
   }
 
@@ -416,9 +538,11 @@ router.post('/integrations/telegram/connect', async (req, res) => {
     return res.status(400).json({ success: false, error: check.error });
   }
 
+  const storedDisplayName = resolveBotDisplayName(botDisplayName, check.displayName, check.username);
+
   let salon: SalonRow;
 
-  if (trimmedName) {
+  if (trimmedName && !trimmedSalonId) {
     const slug = await uniqueSlug(slugify(trimmedName));
     const { data, error } = await (supabase as any)
       .from('salons')
@@ -440,10 +564,11 @@ router.post('/integrations/telegram/connect', async (req, res) => {
 
     salon = data as SalonRow;
   } else {
+    const lookupId = trimmedSalonId;
     const { data, error } = await (supabase as any)
       .from('salons')
       .select('*')
-      .eq('id', trimmedSalonId)
+      .eq('id', lookupId)
       .single();
 
     if (error || !data) {
@@ -451,16 +576,32 @@ router.post('/integrations/telegram/connect', async (req, res) => {
     }
 
     salon = data as SalonRow;
+
+    if (trimmedName) {
+      const { data: renamed, error: renameError } = await (supabase as any)
+        .from('salons')
+        .update({ name: trimmedName })
+        .eq('id', lookupId)
+        .select('*')
+        .single();
+
+      if (renameError || !renamed) {
+        return res.status(500).json({ success: false, error: renameError?.message ?? 'Could not update salon' });
+      }
+      salon = renamed as SalonRow;
+    }
   }
 
   const existing = await getExistingIntegration(salon.id);
   const now = new Date().toISOString();
+  const integrationHealth: IntegrationHealth =
+    salon.slug === DEFAULT_SALON_SLUG ? 'healthy' : 'unknown';
 
   const integration = await upsertTelegramIntegration(salon.id, {
     status: 'connected',
-    health: 'healthy',
+    health: integrationHealth,
     botUsername: check.username,
-    botDisplayName: check.displayName,
+    botDisplayName: storedDisplayName,
     connectedAt: existing?.connected_at ?? now,
     lastError: null,
     tokenCiphertext: trimmedToken,
@@ -479,7 +620,7 @@ router.post('/integrations/telegram/connect', async (req, res) => {
     success: true,
     salonId: salon.id,
     username: check.username,
-    name: check.displayName,
+    name: storedDisplayName,
     integration: mapTelegramIntegration(salon, integration),
   });
 });
