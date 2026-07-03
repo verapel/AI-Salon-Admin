@@ -4,12 +4,6 @@ import { computeEndTime } from './mappers.js';
 type ServiceRow = { id: string; name: string; duration: number; category: string };
 type StaffRow = { id: string; specialties: string[] | null };
 
-const MAIN_CATEGORY_KEYWORDS: Record<string, string[]> = {
-  стрижка: ['hair', 'haircut', 'cut', 'стрижка', 'blowout', 'style'],
-  окрашивание: ['color', 'colour', 'balayage', 'окрашивание', 'highlight'],
-  маникюр: ['nail', 'manicure', 'маникюр', 'pedicure'],
-};
-
 export function localDateStr(offsetDays = 0): string {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
@@ -34,40 +28,42 @@ export async function fetchActiveServices(): Promise<ServiceRow[]> {
   return data ?? [];
 }
 
-function matchMainCategory(normalized: string, services: ServiceRow[]): ServiceRow | null {
-  const keywords = MAIN_CATEGORY_KEYWORDS[normalized];
-  if (!keywords) return null;
-
-  return (
-    services.find((s) => {
-      const nameLower = s.name.toLowerCase();
-      const catLower = s.category.toLowerCase();
-      return keywords.some((k) => nameLower.includes(k) || catLower.includes(k));
-    }) ?? null
-  );
-}
-
+/** Exact name match; creates a placeholder service when missing (Telegram booking). */
 export async function resolveServiceByName(serviceName: string): Promise<ServiceRow | null> {
-  const services = await fetchActiveServices();
-  if (services.length === 0) return null;
+  const trimmed = serviceName.trim();
+  if (!trimmed || trimmed.toLowerCase() === 'manual') return null;
 
-  const normalized = serviceName.toLowerCase().trim();
-  if (!normalized || normalized === 'manual') return services[0];
+  const { data: existing, error: lookupError } = await supabase
+    .from('services')
+    .select('id, name, duration, category')
+    .ilike('name', trimmed)
+    .maybeSingle();
 
-  const mainCategory = matchMainCategory(normalized, services);
-  if (mainCategory) return mainCategory;
+  if (lookupError) {
+    console.error('[telegram/services] lookup error:', lookupError.message);
+    return null;
+  }
+  if (existing) return existing;
 
-  const exact = services.find((s) => s.name.toLowerCase() === normalized);
-  if (exact) return exact;
+  const { data: created, error: insertError } = await supabase
+    .from('services')
+    .insert({
+      name: trimmed,
+      description: '',
+      duration: 60,
+      price: 0,
+      category: 'Other',
+      active: true,
+    })
+    .select('id, name, duration, category')
+    .single();
 
-  const partial = services.find(
-    (s) =>
-      s.name.toLowerCase().includes(normalized) || normalized.includes(s.name.toLowerCase())
-  );
-  if (partial) return partial;
+  if (insertError || !created) {
+    console.error('[telegram/services] create error:', insertError?.message);
+    return null;
+  }
 
-  const byCategory = services.find((s) => s.category.toLowerCase().includes(normalized));
-  return byCategory ?? services[0];
+  return created;
 }
 
 export async function resolveStaffForService(service: ServiceRow): Promise<StaffRow | null> {
