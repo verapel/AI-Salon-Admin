@@ -2,7 +2,7 @@ import { Bot } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
 import IntegrationStatusBadge from '@/components/developer/IntegrationStatusBadge';
 import IntegrationHealthBadge from '@/components/developer/IntegrationHealthBadge';
-import type { DeveloperTelegramIntegration } from '@/types';
+import { DEFAULT_SALON_SLUG, type DeveloperTelegramIntegration } from '@/types';
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return '—';
@@ -17,11 +17,13 @@ function formatDateTime(iso: string | null): string {
 
 interface SalonTelegramCardProps {
   integration: DeveloperTelegramIntegration;
-  readOnly?: boolean;
+  onManage: () => void;
 }
 
-export default function SalonTelegramCard({ integration, readOnly = true }: SalonTelegramCardProps) {
+export default function SalonTelegramCard({ integration, onManage }: SalonTelegramCardProps) {
   const { t } = useLanguage();
+  const isDefaultSalon = integration.slug === DEFAULT_SALON_SLUG;
+  const isConnected = integration.status === 'connected';
 
   return (
     <div className="card flex w-full min-w-0 max-w-full flex-col p-4 sm:p-5">
@@ -73,11 +75,28 @@ export default function SalonTelegramCard({ integration, readOnly = true }: Salo
         </p>
       )}
 
-      {readOnly && integration.slug !== 'default' && (
-        <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
-          {t('developer.integrations.futureUpdate')}
-        </p>
-      )}
+      <div className="mt-5">
+        {isDefaultSalon ? (
+          <button type="button" onClick={onManage} className="btn-primary w-full min-h-[44px]">
+            {isConnected
+              ? t('developer.integrations.manage')
+              : t('developer.integrations.connectTelegram')}
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              disabled
+              className="btn-primary w-full min-h-[44px] cursor-not-allowed opacity-50"
+            >
+              {t('developer.integrations.connectTelegram')}
+            </button>
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              {t('developer.integrations.futureUpdate')}
+            </p>
+          </>
+        )}
+      </div>
     </div>
   );
 }
