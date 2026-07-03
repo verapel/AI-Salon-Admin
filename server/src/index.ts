@@ -393,6 +393,12 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
       return nameQuestion;
 
     } else if (currentState.step === 'name') {
+      if (/^\d{1,2}:\d{2}$/.test(text.trim())) {
+        const nameQuestion = 'Отлично, записываю. Подскажите, как вас зовут?';
+        history.push({ role: 'assistant', content: nameQuestion });
+        chatHistory.set(chatId, history.slice(-10));
+        return nameQuestion;
+      }
       // Сохраняем имя, сразу спрашиваем телефон (без OpenRouter)
       bookingState.set(chatId, { ...currentState, step: 'phone', name: text });
       const phoneQuestion = "И оставьте, пожалуйста, номер телефона для связи.";
@@ -1072,8 +1078,17 @@ async function startTelegramPolling() {
             continue;
           }
 
-          // service:, date:, time: — передаём значение в шаг-машину
+          // service:, date:, time: — передаём значение в шаг-машину (только на ожидаемом шаге)
           if (cqData.startsWith('service:') || cqData.startsWith('date:') || cqData.startsWith('time:')) {
+            const booking = bookingState.get(cqChatId);
+            const expectedStep = cqData.startsWith('service:')
+              ? 'service'
+              : cqData.startsWith('date:')
+                ? 'date'
+                : 'time';
+            if (!booking || booking.step !== expectedStep) {
+              continue;
+            }
             const value = cqData.slice(cqData.indexOf(':') + 1);
             const answer = await generateAIResponse(cqChatId, value);
             if (answer !== null) {
