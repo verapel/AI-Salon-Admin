@@ -4,6 +4,12 @@ import { computeEndTime } from './mappers.js';
 type ServiceRow = { id: string; name: string; duration: number; category: string };
 type StaffRow = { id: string; specialties: string[] | null };
 
+const MAIN_CATEGORY_KEYWORDS: Record<string, string[]> = {
+  стрижка: ['hair', 'haircut', 'cut', 'стрижка', 'blowout', 'style'],
+  окрашивание: ['color', 'colour', 'balayage', 'окрашивание', 'highlight'],
+  маникюр: ['nail', 'manicure', 'маникюр', 'pedicure'],
+};
+
 export function localDateStr(offsetDays = 0): string {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
@@ -28,12 +34,28 @@ export async function fetchActiveServices(): Promise<ServiceRow[]> {
   return data ?? [];
 }
 
+function matchMainCategory(normalized: string, services: ServiceRow[]): ServiceRow | null {
+  const keywords = MAIN_CATEGORY_KEYWORDS[normalized];
+  if (!keywords) return null;
+
+  return (
+    services.find((s) => {
+      const nameLower = s.name.toLowerCase();
+      const catLower = s.category.toLowerCase();
+      return keywords.some((k) => nameLower.includes(k) || catLower.includes(k));
+    }) ?? null
+  );
+}
+
 export async function resolveServiceByName(serviceName: string): Promise<ServiceRow | null> {
   const services = await fetchActiveServices();
   if (services.length === 0) return null;
 
   const normalized = serviceName.toLowerCase().trim();
   if (!normalized || normalized === 'manual') return services[0];
+
+  const mainCategory = matchMainCategory(normalized, services);
+  if (mainCategory) return mainCategory;
 
   const exact = services.find((s) => s.name.toLowerCase() === normalized);
   if (exact) return exact;
@@ -82,19 +104,16 @@ export function computeAppointmentEndTime(startTime: string, durationMinutes: nu
 }
 
 export async function buildServiceKeyboard(): Promise<{ text: string; callback_data: string }[][]> {
-  const services = await fetchActiveServices();
-  const buttons: { text: string; callback_data: string }[] = services
-    .slice(0, 8)
-    .map((s) => ({ text: s.name, callback_data: `service:${s.name}` }));
-
-  buttons.push({ text: '✍️ Другая услуга', callback_data: 'service:manual' });
-
-  const keyboard: { text: string; callback_data: string }[][] = [];
-  for (let i = 0; i < buttons.length; i += 2) {
-    keyboard.push(buttons.slice(i, i + 2));
-  }
-
-  return keyboard;
+  return [
+    [
+      { text: '✂️ Стрижка', callback_data: 'service:Стрижка' },
+      { text: '🎨 Окрашивание', callback_data: 'service:Окрашивание' },
+    ],
+    [
+      { text: '💅 Маникюр', callback_data: 'service:Маникюр' },
+      { text: '✍️ Другая услуга', callback_data: 'service:manual' },
+    ],
+  ];
 }
 
 /** Active appointments that occupy a time slot on a given date. */
