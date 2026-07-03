@@ -18,6 +18,7 @@ import statsRouter from './routes/stats.js';
 import developerRouter from './routes/developer.js';
 import { supabase, checkSupabaseConnection } from './lib/supabase.js';
 import { loadTelegramTokenFromDb, saveTelegramTokenToDb } from './lib/telegramToken.js';
+import { registerTelegramPollingRestarter } from './lib/telegramPollingControl.js';
 import {
   ACTIVE_SLOT_STATUSES,
   buildServiceKeyboard,
@@ -864,6 +865,8 @@ function restartTelegramPolling() {
   }
   startTelegramPolling();
 }
+
+registerTelegramPollingRestarter(restartTelegramPolling);
 
 async function startTelegramPolling() {
   if (pollingIntervalId !== null) return;

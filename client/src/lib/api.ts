@@ -60,6 +60,17 @@ export const api = {
     getSalons: () => request<import('@/types').DeveloperSalon[]>('/developer/salons'),
     getTelegramIntegrations: () =>
       request<import('@/types').DeveloperTelegramIntegration[]>('/developer/integrations/telegram'),
+    connectTelegram: (body: { salonName?: string; salonId?: string; token: string }) =>
+      request<{
+        success: boolean;
+        salonId: string;
+        username: string;
+        name: string;
+        integration: import('@/types').DeveloperTelegramIntegration;
+      }>('/developer/integrations/telegram/connect', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
     getHealth: () => request<import('@/types').DeveloperHealth>('/developer/health'),
   },
 };

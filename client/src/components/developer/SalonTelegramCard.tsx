@@ -2,7 +2,7 @@ import { Bot } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
 import IntegrationStatusBadge from '@/components/developer/IntegrationStatusBadge';
 import IntegrationHealthBadge from '@/components/developer/IntegrationHealthBadge';
-import { DEFAULT_SALON_SLUG, type DeveloperTelegramIntegration } from '@/types';
+import type { DeveloperTelegramIntegration } from '@/types';
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return '—';
@@ -22,7 +22,6 @@ interface SalonTelegramCardProps {
 
 export default function SalonTelegramCard({ integration, onManage }: SalonTelegramCardProps) {
   const { t } = useLanguage();
-  const isDefaultSalon = integration.slug === DEFAULT_SALON_SLUG;
   const isConnected = integration.status === 'connected';
 
   return (
@@ -75,28 +74,9 @@ export default function SalonTelegramCard({ integration, onManage }: SalonTelegr
         </p>
       )}
 
-      <div className="mt-5">
-        {isDefaultSalon ? (
-          <button type="button" onClick={onManage} className="btn-primary w-full min-h-[44px]">
-            {isConnected
-              ? t('developer.integrations.manage')
-              : t('developer.integrations.connectTelegram')}
-          </button>
-        ) : (
-          <>
-            <button
-              type="button"
-              disabled
-              className="btn-primary w-full min-h-[44px] cursor-not-allowed opacity-50"
-            >
-              {t('developer.integrations.connectTelegram')}
-            </button>
-            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-              {t('developer.integrations.futureUpdate')}
-            </p>
-          </>
-        )}
-      </div>
+      <button type="button" onClick={onManage} className="btn-primary mt-5 w-full min-h-[44px]">
+        {isConnected ? t('developer.integrations.manage') : t('developer.integrations.connectTelegram')}
+      </button>
     </div>
   );
 }

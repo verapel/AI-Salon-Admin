@@ -1,27 +1,24 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Bot } from 'lucide-react';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import EmptyState from '@/components/ui/EmptyState';
 import TelegramConnectModal from '@/components/developer/TelegramConnectModal';
 import SalonTelegramCard from '@/components/developer/SalonTelegramCard';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import type { DeveloperTelegramIntegration } from '@/types';
-import type { TelegramBotInfo, TelegramConnectionStatus } from '@/hooks/useTelegramConnection';
+import type { TelegramConnectionStatus } from '@/hooks/useTelegramConnection';
 
 interface TelegramIntegrationsTabProps {
   refreshKey?: number;
-  status: TelegramConnectionStatus;
-  botInfo: TelegramBotInfo | null;
   connecting: boolean;
   connectError: string;
-  onConnect: (token: string) => Promise<boolean>;
+  onConnect: (params: { salonName?: string; salonId?: string; token: string }) => Promise<boolean>;
   onClearError: () => void;
 }
 
 export default function TelegramIntegrationsTab({
   refreshKey = 0,
-  status,
-  botInfo,
   connecting,
   connectError,
   onConnect,
@@ -32,6 +29,7 @@ export default function TelegramIntegrationsTab({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [managing, setManaging] = useState<DeveloperTelegramIntegration | null>(null);
 
   const loadIntegrations = useCallback(() => {
     setError(false);
@@ -47,23 +45,34 @@ export default function TelegramIntegrationsTab({
     loadIntegrations();
   }, [loadIntegrations, refreshKey]);
 
-  function openManage() {
+  function openManage(integration: DeveloperTelegramIntegration) {
     onClearError();
+    setManaging(integration);
     setModalOpen(true);
   }
 
   function closeModal() {
     setModalOpen(false);
+    setManaging(null);
     onClearError();
   }
 
-  async function handleConnect(token: string) {
-    const success = await onConnect(token);
+  async function handleReconnect(token: string) {
+    if (!managing) return false;
+    const success = await onConnect({ salonId: managing.salonId, token });
     if (success) {
       loadIntegrations();
     }
     return success;
   }
+
+  const modalStatus: TelegramConnectionStatus =
+    managing?.status === 'connected' ? 'connected' : 'disconnected';
+
+  const modalBotInfo =
+    managing?.botUsername
+      ? { username: managing.botUsername, name: managing.botDisplayName ?? managing.botUsername }
+      : null;
 
   if (loading) {
     return (
@@ -85,6 +94,16 @@ export default function TelegramIntegrationsTab({
     );
   }
 
+  if (integrations.length === 0) {
+    return (
+      <EmptyState
+        icon={<Bot className="h-8 w-8 text-gray-400" />}
+        title={t('developer.integrations.emptyTitle')}
+        description={t('developer.integrations.emptyDesc')}
+      />
+    );
+  }
+
   return (
     <>
       <div className="grid w-full min-w-0 max-w-full gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -92,7 +111,7 @@ export default function TelegramIntegrationsTab({
           <SalonTelegramCard
             key={integration.salonId}
             integration={integration}
-            onManage={openManage}
+            onManage={() => openManage(integration)}
           />
         ))}
       </div>
@@ -100,11 +119,11 @@ export default function TelegramIntegrationsTab({
       <TelegramConnectModal
         open={modalOpen}
         onClose={closeModal}
-        status={status}
-        botInfo={botInfo}
+        status={modalStatus}
+        botInfo={modalBotInfo}
         connecting={connecting}
         connectError={connectError}
-        onConnect={handleConnect}
+        onConnect={handleReconnect}
         onClearError={onClearError}
       />
     </>

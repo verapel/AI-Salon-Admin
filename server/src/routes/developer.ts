@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { supabase, checkSupabaseConnection } from '../lib/supabase.js';
 import { loadTelegramTokenFromDb } from '../lib/telegramToken.js';
+import { restartTelegramPolling } from '../lib/telegramPollingControl.js';
 import type {
   IntegrationHealth,
   IntegrationStatus,
@@ -34,6 +35,26 @@ type IntegrationRow = {
   last_checked_at: string | null;
   last_error: string | null;
 };
+
+function slugify(name: string): string {
+  const base = name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return base || 'salon';
+}
+
+async function uniqueSlug(base: string): Promise<string> {
+  let slug = base;
+  let suffix = 1;
+  while (true) {
+    const { data } = await (supabase as any).from('salons').select('id').eq('slug', slug).maybeSingle();
+    if (!data) return slug;
+    suffix += 1;
+    slug = `${base}-${suffix}`;
+  }
+}
 
 function mapSalonOverview(
   row: SalonRow,
@@ -116,27 +137,31 @@ async function upsertTelegramIntegration(
     botDisplayName: string | null;
     connectedAt: string | null;
     lastError: string | null;
+    tokenCiphertext?: string | null;
   }
 ): Promise<IntegrationRow | null> {
   const now = new Date().toISOString();
 
+  const payload: Record<string, unknown> = {
+    salon_id: salonId,
+    provider: TELEGRAM_PROVIDER,
+    status: fields.status,
+    health: fields.health,
+    bot_username: fields.botUsername,
+    bot_display_name: fields.botDisplayName,
+    connected_at: fields.connectedAt,
+    last_checked_at: now,
+    last_error: fields.lastError,
+    updated_at: now,
+  };
+
+  if (fields.tokenCiphertext !== undefined) {
+    payload.token_ciphertext = fields.tokenCiphertext;
+  }
+
   const { data, error } = await (supabase as any)
     .from('salon_integrations')
-    .upsert(
-      {
-        salon_id: salonId,
-        provider: TELEGRAM_PROVIDER,
-        status: fields.status,
-        health: fields.health,
-        bot_username: fields.botUsername,
-        bot_display_name: fields.botDisplayName,
-        connected_at: fields.connectedAt,
-        last_checked_at: now,
-        last_error: fields.lastError,
-        updated_at: now,
-      },
-      { onConflict: 'salon_id,provider' }
-    )
+    .upsert(payload, { onConflict: 'salon_id,provider' })
     .select('status, health, bot_username, bot_display_name, connected_at, last_checked_at, last_error')
     .single();
 
@@ -192,6 +217,7 @@ async function syncDefaultSalonTelegram(salonId: string): Promise<IntegrationRow
       botDisplayName: check.displayName,
       connectedAt,
       lastError: null,
+      tokenCiphertext: token,
     });
 
     return (
@@ -241,18 +267,6 @@ function mapTelegramIntegration(salon: SalonRow, integration: IntegrationRow) {
     connectedAt: integration.connected_at,
     lastCheckedAt: integration.last_checked_at,
     lastError: integration.last_error,
-  };
-}
-
-function notConnectedIntegration(): IntegrationRow {
-  return {
-    status: 'not_connected',
-    health: 'unknown',
-    bot_username: null,
-    bot_display_name: null,
-    connected_at: null,
-    last_checked_at: null,
-    last_error: null,
   };
 }
 
@@ -330,27 +344,144 @@ router.get('/health', async (_req, res) => {
 });
 
 router.get('/integrations/telegram', async (_req, res) => {
-  const { data: salons, error } = await (supabase as any)
+  const { data: defaultSalon } = await (supabase as any)
     .from('salons')
     .select('*')
-    .eq('active', true)
-    .order('name');
+    .eq('slug', DEFAULT_SALON_SLUG)
+    .maybeSingle();
+
+  if (defaultSalon) {
+    await syncDefaultSalonTelegram(defaultSalon.id);
+  }
+
+  const { data: integrations, error } = await (supabase as any)
+    .from('salon_integrations')
+    .select('*')
+    .eq('provider', TELEGRAM_PROVIDER)
+    .in('status', ['connected', 'error']);
 
   if (error) return res.status(500).json({ error: error.message });
 
-  const rows = salons as SalonRow[];
-  const result = [];
-
-  for (const salon of rows) {
-    if (salon.slug === DEFAULT_SALON_SLUG) {
-      const integration = await syncDefaultSalonTelegram(salon.id);
-      result.push(mapTelegramIntegration(salon, integration));
-    } else {
-      result.push(mapTelegramIntegration(salon, notConnectedIntegration()));
-    }
+  const rows = (integrations ?? []) as (IntegrationRow & { salon_id: string })[];
+  if (rows.length === 0) {
+    return res.json([]);
   }
 
+  const salonIds = rows.map((row) => row.salon_id);
+  const { data: salons, error: salonsError } = await (supabase as any)
+    .from('salons')
+    .select('*')
+    .in('id', salonIds)
+    .eq('active', true);
+
+  if (salonsError) return res.status(500).json({ error: salonsError.message });
+
+  const salonMap = new Map((salons as SalonRow[]).map((salon) => [salon.id, salon]));
+  const result = rows
+    .map((integration) => {
+      const salon = salonMap.get(integration.salon_id);
+      if (!salon) return null;
+      return mapTelegramIntegration(salon, integration);
+    })
+    .filter(Boolean);
+
   res.json(result);
+});
+
+router.post('/integrations/telegram/connect', async (req, res) => {
+  const { salonName, salonId, token } = req.body as {
+    salonName?: string;
+    salonId?: string;
+    token?: string;
+  };
+
+  if (!token || typeof token !== 'string' || token.trim().length < 10) {
+    return res.status(400).json({ success: false, error: 'Token is required' });
+  }
+
+  const trimmedName = typeof salonName === 'string' ? salonName.trim() : '';
+  const trimmedSalonId = typeof salonId === 'string' ? salonId.trim() : '';
+
+  if (trimmedName && trimmedSalonId) {
+    return res.status(400).json({ success: false, error: 'Provide salonName or salonId, not both' });
+  }
+
+  if (!trimmedName && !trimmedSalonId) {
+    return res.status(400).json({ success: false, error: 'salonName or salonId is required' });
+  }
+
+  const trimmedToken = token.trim();
+  const check = await checkTelegramBot(trimmedToken);
+  if (!check.ok) {
+    return res.status(400).json({ success: false, error: check.error });
+  }
+
+  let salon: SalonRow;
+
+  if (trimmedName) {
+    const slug = await uniqueSlug(slugify(trimmedName));
+    const { data, error } = await (supabase as any)
+      .from('salons')
+      .insert({
+        name: trimmedName,
+        slug,
+        timezone: 'Europe/Moscow',
+        country: 'RU',
+        currency: 'RUB',
+        language: 'ru',
+        active: true,
+      })
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      return res.status(500).json({ success: false, error: error?.message ?? 'Could not create salon' });
+    }
+
+    salon = data as SalonRow;
+  } else {
+    const { data, error } = await (supabase as any)
+      .from('salons')
+      .select('*')
+      .eq('id', trimmedSalonId)
+      .single();
+
+    if (error || !data) {
+      return res.status(404).json({ success: false, error: 'Salon not found' });
+    }
+
+    salon = data as SalonRow;
+  }
+
+  const existing = await getExistingIntegration(salon.id);
+  const now = new Date().toISOString();
+
+  const integration = await upsertTelegramIntegration(salon.id, {
+    status: 'connected',
+    health: 'healthy',
+    botUsername: check.username,
+    botDisplayName: check.displayName,
+    connectedAt: existing?.connected_at ?? now,
+    lastError: null,
+    tokenCiphertext: trimmedToken,
+  });
+
+  if (!integration) {
+    return res.status(500).json({ success: false, error: 'Could not save integration' });
+  }
+
+  if (salon.slug === DEFAULT_SALON_SLUG) {
+    process.env.TELEGRAM_BOT_TOKEN = trimmedToken;
+    restartTelegramPolling();
+  }
+
+  return res.json({
+    success: true,
+    salonId: salon.id,
+    username: check.username,
+    name: check.displayName,
+    integration: mapTelegramIntegration(salon, integration),
+  });
 });
 
 export default router;

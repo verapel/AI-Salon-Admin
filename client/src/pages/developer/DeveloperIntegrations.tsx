@@ -8,7 +8,7 @@ import IntegrationTabs, {
 import TelegramIntegrationsTab from '@/components/developer/TelegramIntegrationsTab';
 import ComingSoonTab from '@/components/developer/ComingSoonTab';
 import AddIntegrationModal from '@/components/developer/AddIntegrationModal';
-import { useTelegramConnection } from '@/hooks/useTelegramConnection';
+import { useDeveloperTelegramConnect } from '@/hooks/useDeveloperTelegramConnect';
 import { useLanguage } from '@/context/LanguageContext';
 
 const DEFAULT_TAB: IntegrationTabId = 'telegram';
@@ -23,15 +23,7 @@ export default function DeveloperIntegrations() {
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const {
-    status,
-    botInfo,
-    connecting,
-    connectError,
-    connect,
-    clearConnectError,
-    refreshStatus,
-  } = useTelegramConnection();
+  const { connecting, connectError, connect, clearConnectError } = useDeveloperTelegramConnect();
 
   const tabParam = searchParams.get('tab');
   const activeTab = isIntegrationTabId(tabParam) ? tabParam : DEFAULT_TAB;
@@ -47,10 +39,9 @@ export default function DeveloperIntegrations() {
     setSearchParams({ tab });
   }
 
-  async function handleConnect(token: string) {
-    const success = await connect(token);
+  async function handleCreateConnect(params: { salonName: string; token: string }) {
+    const success = await connect(params);
     if (success) {
-      await refreshStatus();
       setRefreshKey((key) => key + 1);
     }
     return success;
@@ -80,11 +71,9 @@ export default function DeveloperIntegrations() {
           activeTab === 'telegram' ? (
             <TelegramIntegrationsTab
               refreshKey={refreshKey}
-              status={status}
-              botInfo={botInfo}
               connecting={connecting}
               connectError={connectError}
-              onConnect={handleConnect}
+              onConnect={connect}
               onClearError={clearConnectError}
             />
           ) : null
@@ -96,11 +85,9 @@ export default function DeveloperIntegrations() {
       <AddIntegrationModal
         open={addModalOpen}
         onClose={() => setAddModalOpen(false)}
-        status={status}
-        botInfo={botInfo}
         connecting={connecting}
         connectError={connectError}
-        onConnect={handleConnect}
+        onConnect={handleCreateConnect}
         onClearError={clearConnectError}
         onSuccess={handleAddSuccess}
       />
