@@ -4,6 +4,7 @@ import SearchInput from '@/components/ui/SearchInput';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
+import QuickBookingModal from '@/components/bookings/QuickBookingModal';
 import { useLanguage, type LangCode, type TranslationKey } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import { formatCurrency, getStatusColor } from '@/lib/utils';
@@ -27,18 +28,7 @@ const toLocalDateStr = (date: Date) => {
 
 const formatTime24 = (time: string) => time.slice(0, 5);
 
-const NEW_CLIENT_OPTION = '__new_client__';
-
-const emptyNewClient = () => ({ name: '', phone: '', email: '' });
-
-const quickClientEmail = (phone: string, email?: string) => {
-  const trimmed = email?.trim();
-  if (trimmed) return trimmed;
-  const digits = phone.replace(/\D/g, '');
-  return `quick-client-${digits || Date.now()}@no-email.local`;
-};
-
-const emptyForm = () => ({
+const emptyEditForm = () => ({
   clientId: '',
   staffId: '',
   serviceId: '',
@@ -64,22 +54,14 @@ export default function Bookings() {
   const [services, setServices] = useState<Service[]>([]);
   const [staff, setStaff] = useState<StaffType[]>([]);
   const [loading, setLoading] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [quickModalOpen, setQuickModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
   const [editing, setEditing] = useState<Appointment | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
-  const [form, setForm] = useState(emptyForm);
-  const [isNewClient, setIsNewClient] = useState(false);
-  const [newClient, setNewClient] = useState(emptyNewClient);
-
-  const resetModal = () => {
-    setModalOpen(false);
-    setEditing(null);
-    setIsNewClient(false);
-    setNewClient(emptyNewClient());
-  };
+  const [form, setForm] = useState(emptyEditForm);
 
   const formatDateLocalized = (dateStr: string) =>
     new Date(dateStr + 'T00:00:00').toLocaleDateString(locale, {
@@ -131,18 +113,10 @@ export default function Bookings() {
   const canModify = (apt: Appointment) =>
     apt.status === 'scheduled' || apt.status === 'confirmed';
 
-  const openCreate = () => {
-    setEditing(null);
-    setForm(emptyForm());
-    setIsNewClient(false);
-    setNewClient(emptyNewClient());
-    setModalOpen(true);
-  };
+  const openCreate = () => setQuickModalOpen(true);
 
   const openEdit = (apt: Appointment) => {
     setEditing(apt);
-    setIsNewClient(false);
-    setNewClient(emptyNewClient());
     setForm({
       clientId: apt.clientId,
       staffId: apt.staffId,
@@ -151,32 +125,21 @@ export default function Bookings() {
       startTime: formatTime24(apt.startTime),
       notes: apt.notes || '',
     });
-    setModalOpen(true);
+    setEditModalOpen(true);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const closeEditModal = () => {
+    setEditModalOpen(false);
+    setEditing(null);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitting) return;
+    if (!editing || submitting) return;
     setSubmitting(true);
     try {
-      if (editing) {
-        await api.appointments.update(editing.id, form);
-      } else {
-        let clientId = form.clientId;
-        if (isNewClient) {
-          const name = newClient.name.trim();
-          const phone = newClient.phone.trim();
-          const created = await api.clients.create({
-            name,
-            phone,
-            email: quickClientEmail(phone, newClient.email),
-            notes: '',
-          });
-          clientId = created.id;
-        }
-        await api.appointments.create({ ...form, clientId });
-      }
-      resetModal();
+      await api.appointments.update(editing.id, form);
+      closeEditModal();
       loadData();
     } catch (err) {
       console.error(err);
@@ -456,87 +419,35 @@ export default function Bookings() {
         </>
       )}
 
-      <Modal
-        open={modalOpen}
-        onClose={resetModal}
-        title={editing ? t('bookings.editTitle') : t('bookings.createTitle')}
-        size="lg"
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
+      <QuickBookingModal
+        open={quickModalOpen}
+        onClose={() => setQuickModalOpen(false)}
+        onSuccess={loadData}
+      />
+
+      <Modal open={editModalOpen} onClose={closeEditModal} title={t('bookings.editTitle')} size="lg">
+        <form onSubmit={handleEditSubmit} className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className={isNewClient && !editing ? 'sm:col-span-2' : undefined}>
+            <div>
               <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldClient')}</label>
-              {!editing && isNewClient ? (
-                <div className="space-y-3">
-                  <button
-                    type="button"
-                    onClick={() => setIsNewClient(false)}
-                    className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
-                  >
-                    {t('bookings.selectExistingClient')}
-                  </button>
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldClientName')}</label>
-                    <input
-                      className="input-field w-full min-w-0"
-                      value={newClient.name}
-                      onChange={(e) => setNewClient({ ...newClient, name: e.target.value })}
-                      placeholder={t('bookings.placeholderClientName')}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldPhone')}</label>
-                    <input
-                      className="input-field w-full min-w-0"
-                      type="tel"
-                      value={newClient.phone}
-                      onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
-                      placeholder={t('bookings.placeholderPhone')}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldEmailOptional')}</label>
-                    <input
-                      className="input-field w-full min-w-0"
-                      type="email"
-                      value={newClient.email}
-                      onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
-                      placeholder={t('bookings.placeholderEmailOptional')}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <select
-                  className="input-field w-full min-w-0"
-                  value={form.clientId}
-                  onChange={(e) => {
-                    if (e.target.value === NEW_CLIENT_OPTION) {
-                      setIsNewClient(true);
-                      setForm({ ...form, clientId: '' });
-                    } else {
-                      setForm({ ...form, clientId: e.target.value });
-                    }
-                  }}
-                  required
-                >
-                  <option value="">{t('bookings.selectClient')}</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                  {!editing && (
-                    <option value={NEW_CLIENT_OPTION}>{t('bookings.newClient')}</option>
-                  )}
-                </select>
-              )}
+              <select
+                className="input-field w-full min-w-0"
+                value={form.clientId}
+                onChange={(e) => setForm({ ...form, clientId: e.target.value })}
+                required
+              >
+                <option value="">{t('bookings.selectClient')}</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldService')}</label>
               <select
-                className="input-field"
+                className="input-field w-full min-w-0"
                 value={form.serviceId}
                 onChange={(e) => setForm({ ...form, serviceId: e.target.value })}
                 required
@@ -552,7 +463,7 @@ export default function Bookings() {
             <div>
               <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldStaff')}</label>
               <select
-                className="input-field"
+                className="input-field w-full min-w-0"
                 value={form.staffId}
                 onChange={(e) => setForm({ ...form, staffId: e.target.value })}
                 required
@@ -568,7 +479,7 @@ export default function Bookings() {
             <div>
               <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldDate')}</label>
               <input
-                className="input-field"
+                className="input-field w-full min-w-0"
                 type="date"
                 value={form.date}
                 onChange={(e) => setForm({ ...form, date: e.target.value })}
@@ -578,7 +489,7 @@ export default function Bookings() {
             <div>
               <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldTime')}</label>
               <input
-                className="input-field"
+                className="input-field w-full min-w-0"
                 type="time"
                 value={form.startTime}
                 onChange={(e) => setForm({ ...form, startTime: e.target.value })}
@@ -589,7 +500,7 @@ export default function Bookings() {
           <div>
             <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldNotes')}</label>
             <textarea
-              className="input-field"
+              className="input-field w-full min-w-0"
               rows={2}
               value={form.notes}
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
@@ -598,14 +509,14 @@ export default function Bookings() {
           <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
             <button
               type="button"
-              onClick={resetModal}
+              onClick={closeEditModal}
               className="btn-secondary w-full sm:w-auto"
               disabled={submitting}
             >
               {t('common.cancel')}
             </button>
             <button type="submit" className="btn-primary w-full sm:w-auto" disabled={submitting}>
-              {editing ? t('bookings.saveChanges') : t('bookings.createSubmit')}
+              {t('bookings.saveChanges')}
             </button>
           </div>
         </form>

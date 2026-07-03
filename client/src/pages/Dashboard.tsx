@@ -4,6 +4,7 @@ import { Users, Calendar, DollarSign, CheckCircle, Bell, ArrowRight, Mail, Messa
 import StatCard from '@/components/ui/StatCard';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
+import QuickBookingModal from '@/components/bookings/QuickBookingModal';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import { formatCurrency, getStatusColor } from '@/lib/utils';
@@ -28,6 +29,7 @@ export default function Dashboard() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [quickBookingOpen, setQuickBookingOpen] = useState(false);
 
   const loadData = useCallback(() => {
     setError(false);
@@ -52,8 +54,7 @@ export default function Dashboard() {
     loadData();
   }, [loadData]);
 
-  const quickActions: { to: string; labelKey: TranslationKey; descKey: TranslationKey }[] = [
-    { to: '/bookings', labelKey: 'dashboard.newBooking', descKey: 'dashboard.newBookingDesc' },
+  const quickLinks: { to: string; labelKey: TranslationKey; descKey: TranslationKey }[] = [
     { to: '/clients', labelKey: 'dashboard.addClient', descKey: 'dashboard.addClientDesc' },
     { to: '/reminders', labelKey: 'dashboard.viewReminders', descKey: 'dashboard.viewRemindersDesc' },
     { to: '/statistics', labelKey: 'dashboard.viewAnalytics', descKey: 'dashboard.viewAnalyticsDesc' },
@@ -183,7 +184,22 @@ export default function Dashboard() {
               {t('dashboard.quickActions')}
             </h3>
             <div className="space-y-2">
-              {quickActions.map((action) => (
+              <button
+                type="button"
+                onClick={() => setQuickBookingOpen(true)}
+                className="flex min-h-[52px] w-full min-w-0 items-center justify-between gap-3 rounded-lg border p-3.5 text-left transition-colors hover:bg-gray-50 sm:min-h-0 sm:p-3 dark:border-gray-700 dark:hover:bg-gray-800/50"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                    {t('dashboard.newBooking')}
+                  </p>
+                  <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                    {t('dashboard.newBookingDesc')}
+                  </p>
+                </div>
+                <ArrowRight className="h-4 w-4 shrink-0 text-gray-400" />
+              </button>
+              {quickLinks.map((action) => (
                 <Link
                   key={action.to}
                   to={action.to}
@@ -227,6 +243,12 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      <QuickBookingModal
+        open={quickBookingOpen}
+        onClose={() => setQuickBookingOpen(false)}
+        onSuccess={loadData}
+      />
     </div>
   );
 }
