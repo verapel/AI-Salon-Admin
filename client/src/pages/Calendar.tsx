@@ -25,6 +25,9 @@ const formatTime24 = (time: string) => time.slice(0, 5);
 
 const HOURS = Array.from({ length: 12 }, (_, i) => i + 8);
 
+/** Shared desktop week grid: fixed time column + 7 equal day columns */
+const WEEK_GRID_CLASS = 'grid grid-cols-[3.5rem_repeat(7,minmax(0,1fr))]';
+
 function statusLabel(status: Appointment['status'], t: (key: TranslationKey) => string) {
   return t(`appointmentStatus.${status}` as TranslationKey);
 }
@@ -196,36 +199,41 @@ export default function Calendar() {
       {/* DESKTOP: week grid — lg+ */}
       <div className="hidden lg:block">
         <div className="card overflow-hidden p-0">
-          <div className="grid grid-cols-8 border-b dark:border-gray-700">
-            <div className="border-r p-3 text-xs font-medium text-gray-500 dark:border-gray-700 dark:text-gray-400">
-              {t('calendar.timeColumn')}
-            </div>
-            {weekDays.map((day) => (
-              <div
-                key={day.toISOString()}
-                className={`border-r p-3 text-center last:border-r-0 dark:border-gray-700 ${
-                  isToday(day) ? 'bg-brand-50 dark:bg-brand-950/30' : ''
-                }`}
-              >
-                <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                  {day.toLocaleDateString(locale, { weekday: 'short' })}
-                </p>
-                <p
-                  className={`text-lg font-bold ${
-                    isToday(day)
-                      ? 'text-brand-600 dark:text-brand-400'
-                      : 'text-gray-900 dark:text-white'
+          <div className="max-h-[600px] overflow-y-auto overflow-x-clip">
+            <div
+              className={`sticky top-0 z-10 border-b bg-white dark:border-gray-700 dark:bg-gray-900 ${WEEK_GRID_CLASS}`}
+            >
+              <div className="border-r p-3 text-xs font-medium text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                {t('calendar.timeColumn')}
+              </div>
+              {weekDays.map((day) => (
+                <div
+                  key={day.toISOString()}
+                  className={`min-w-0 border-r p-3 text-center last:border-r-0 dark:border-gray-700 ${
+                    isToday(day) ? 'bg-brand-50 dark:bg-brand-950/30' : ''
                   }`}
                 >
-                  {day.getDate()}
-                </p>
-              </div>
-            ))}
-          </div>
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                    {day.toLocaleDateString(locale, { weekday: 'short' })}
+                  </p>
+                  <p
+                    className={`text-lg font-bold ${
+                      isToday(day)
+                        ? 'text-brand-600 dark:text-brand-400'
+                        : 'text-gray-900 dark:text-white'
+                    }`}
+                  >
+                    {day.getDate()}
+                  </p>
+                </div>
+              ))}
+            </div>
 
-          <div className="max-h-[600px] overflow-y-auto">
             {HOURS.map((hour) => (
-              <div key={hour} className="grid grid-cols-8 border-b last:border-b-0 dark:border-gray-700">
+              <div
+                key={hour}
+                className={`${WEEK_GRID_CLASS} border-b last:border-b-0 dark:border-gray-700`}
+              >
                 <div className="border-r p-3 text-xs tabular-nums text-gray-500 dark:border-gray-700 dark:text-gray-400">
                   {`${String(hour).padStart(2, '0')}:00`}
                 </div>
@@ -237,7 +245,7 @@ export default function Calendar() {
                   return (
                     <div
                       key={day.toISOString() + hour}
-                      className="min-h-[60px] border-r p-1 last:border-r-0 dark:border-gray-700"
+                      className="min-h-[60px] min-w-0 border-r p-1 last:border-r-0 dark:border-gray-700"
                     >
                       {dayAppts.map((apt) => (
                         <div
