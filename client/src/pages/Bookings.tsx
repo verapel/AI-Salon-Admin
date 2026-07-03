@@ -27,6 +27,17 @@ const toLocalDateStr = (date: Date) => {
 
 const formatTime24 = (time: string) => time.slice(0, 5);
 
+const NEW_CLIENT_OPTION = '__new_client__';
+
+const emptyNewClient = () => ({ name: '', phone: '', email: '' });
+
+const quickClientEmail = (phone: string, email?: string) => {
+  const trimmed = email?.trim();
+  if (trimmed) return trimmed;
+  const digits = phone.replace(/\D/g, '');
+  return `quick-client-${digits || Date.now()}@no-email.local`;
+};
+
 const emptyForm = () => ({
   clientId: '',
   staffId: '',
@@ -60,6 +71,15 @@ export default function Bookings() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState(emptyForm);
+  const [isNewClient, setIsNewClient] = useState(false);
+  const [newClient, setNewClient] = useState(emptyNewClient);
+
+  const resetModal = () => {
+    setModalOpen(false);
+    setEditing(null);
+    setIsNewClient(false);
+    setNewClient(emptyNewClient());
+  };
 
   const formatDateLocalized = (dateStr: string) =>
     new Date(dateStr + 'T00:00:00').toLocaleDateString(locale, {
@@ -114,11 +134,15 @@ export default function Bookings() {
   const openCreate = () => {
     setEditing(null);
     setForm(emptyForm());
+    setIsNewClient(false);
+    setNewClient(emptyNewClient());
     setModalOpen(true);
   };
 
   const openEdit = (apt: Appointment) => {
     setEditing(apt);
+    setIsNewClient(false);
+    setNewClient(emptyNewClient());
     setForm({
       clientId: apt.clientId,
       staffId: apt.staffId,
@@ -138,10 +162,21 @@ export default function Bookings() {
       if (editing) {
         await api.appointments.update(editing.id, form);
       } else {
-        await api.appointments.create(form);
+        let clientId = form.clientId;
+        if (isNewClient) {
+          const name = newClient.name.trim();
+          const phone = newClient.phone.trim();
+          const created = await api.clients.create({
+            name,
+            phone,
+            email: quickClientEmail(phone, newClient.email),
+            notes: '',
+          });
+          clientId = created.id;
+        }
+        await api.appointments.create({ ...form, clientId });
       }
-      setModalOpen(false);
-      setEditing(null);
+      resetModal();
       loadData();
     } catch (err) {
       console.error(err);
@@ -423,30 +458,80 @@ export default function Bookings() {
 
       <Modal
         open={modalOpen}
-        onClose={() => {
-          setModalOpen(false);
-          setEditing(null);
-        }}
+        onClose={resetModal}
         title={editing ? t('bookings.editTitle') : t('bookings.createTitle')}
         size="lg"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
+            <div className={isNewClient && !editing ? 'sm:col-span-2' : undefined}>
               <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldClient')}</label>
-              <select
-                className="input-field"
-                value={form.clientId}
-                onChange={(e) => setForm({ ...form, clientId: e.target.value })}
-                required
-              >
-                <option value="">{t('bookings.selectClient')}</option>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              {!editing && isNewClient ? (
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsNewClient(false)}
+                    className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+                  >
+                    {t('bookings.selectExistingClient')}
+                  </button>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldClientName')}</label>
+                    <input
+                      className="input-field w-full min-w-0"
+                      value={newClient.name}
+                      onChange={(e) => setNewClient({ ...newClient, name: e.target.value })}
+                      placeholder={t('bookings.placeholderClientName')}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldPhone')}</label>
+                    <input
+                      className="input-field w-full min-w-0"
+                      type="tel"
+                      value={newClient.phone}
+                      onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
+                      placeholder={t('bookings.placeholderPhone')}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldEmailOptional')}</label>
+                    <input
+                      className="input-field w-full min-w-0"
+                      type="email"
+                      value={newClient.email}
+                      onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
+                      placeholder={t('bookings.placeholderEmailOptional')}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <select
+                  className="input-field w-full min-w-0"
+                  value={form.clientId}
+                  onChange={(e) => {
+                    if (e.target.value === NEW_CLIENT_OPTION) {
+                      setIsNewClient(true);
+                      setForm({ ...form, clientId: '' });
+                    } else {
+                      setForm({ ...form, clientId: e.target.value });
+                    }
+                  }}
+                  required
+                >
+                  <option value="">{t('bookings.selectClient')}</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                  {!editing && (
+                    <option value={NEW_CLIENT_OPTION}>{t('bookings.newClient')}</option>
+                  )}
+                </select>
+              )}
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium">{t('bookings.fieldService')}</label>
@@ -513,10 +598,7 @@ export default function Bookings() {
           <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
             <button
               type="button"
-              onClick={() => {
-                setModalOpen(false);
-                setEditing(null);
-              }}
+              onClick={resetModal}
               className="btn-secondary w-full sm:w-auto"
               disabled={submitting}
             >
