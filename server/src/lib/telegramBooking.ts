@@ -2,27 +2,10 @@ import { supabase } from './supabase.js';
 import { computeEndTime } from './mappers.js';
 
 type ServiceRow = { id: string; name: string; duration: number; category: string };
-type StaffRow = { id: string; name: string };
+export type StaffRow = { id: string; name: string; specialties: string[] };
 
-const TATEV_NAME_ALIASES = ['татев', 'tatev'];
-const MAYA_NAME_ALIASES = ['мая', 'maya'];
-
-function normalizeStaffLookup(value: string): string {
-  return value.toLowerCase().trim();
-}
-
-function staffNameMatches(memberName: string, aliases: string[]): boolean {
-  const normalized = normalizeStaffLookup(memberName);
-  return aliases.some((alias) => normalized.includes(alias) || alias.includes(normalized));
-}
-
-function staffTargetForService(serviceName: string): 'maya' | 'tatev' {
-  const normalized = normalizeStaffLookup(serviceName);
-  if (normalized.includes('макияж') || normalized.includes('makeup')) {
-    return 'maya';
-  }
-  return 'tatev';
-}
+export const STAFF_UNAVAILABLE_MESSAGE =
+  'Для этой услуги пока не назначен мастер. Администратор свяжется с вами.';
 
 export function localDateStr(offsetDays = 0): string {
   const d = new Date();
@@ -46,6 +29,96 @@ export async function fetchActiveServices(): Promise<ServiceRow[]> {
   }
 
   return data ?? [];
+}
+
+function normalizeMatchText(value: string): string {
+  return value.toLowerCase().trim();
+}
+
+function parseSpecializations(entries: string[] | null | undefined): string[] {
+  return (entries ?? [])
+    .flatMap((entry) => entry.split(','))
+    .map((part) => normalizeMatchText(part))
+    .filter(Boolean);
+}
+
+function serviceMatchesSpecialization(serviceName: string, specialization: string): boolean {
+  const service = normalizeMatchText(serviceName);
+  const spec = normalizeMatchText(specialization);
+  if (!service || !spec) return false;
+  return service.includes(spec) || spec.includes(service);
+}
+
+export function staffMatchesServiceSpecialization(
+  member: StaffRow,
+  serviceName: string
+): boolean {
+  const specs = parseSpecializations(member.specialties);
+  return specs.some((spec) => serviceMatchesSpecialization(serviceName, spec));
+}
+
+async function fetchActiveStaff(): Promise<StaffRow[]> {
+  const { data, error } = await supabase
+    .from('staff')
+    .select('id, name, specialties')
+    .eq('active', true)
+    .order('name');
+
+  if (error) {
+    console.error('[telegram/staff] load error:', error.message);
+    return [];
+  }
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    specialties: row.specialties ?? [],
+  }));
+}
+
+/** Active staff whose specialties match the selected Telegram service name. */
+export async function findStaffForServiceSpecialization(
+  serviceName: string
+): Promise<StaffRow[]> {
+  const trimmed = serviceName.trim();
+  if (!trimmed || trimmed.toLowerCase() === 'manual') return [];
+
+  const staffList = await fetchActiveStaff();
+  return staffList.filter((member) => staffMatchesServiceSpecialization(member, trimmed));
+}
+
+export async function getActiveStaffById(staffId: string): Promise<StaffRow | null> {
+  const { data, error } = await supabase
+    .from('staff')
+    .select('id, name, specialties')
+    .eq('id', staffId)
+    .eq('active', true)
+    .maybeSingle();
+
+  if (error || !data) {
+    console.error('[telegram/staff] lookup by id error:', error?.message);
+    return null;
+  }
+
+  return {
+    id: data.id,
+    name: data.name,
+    specialties: data.specialties ?? [],
+  };
+}
+
+export function buildStaffSelectionKeyboard(
+  staff: StaffRow[]
+): { text: string; callback_data: string }[][] {
+  const buttons = staff.map((member) => ({
+    text: member.name,
+    callback_data: `staff:${member.id}`,
+  }));
+  const keyboard: { text: string; callback_data: string }[][] = [];
+  for (let i = 0; i < buttons.length; i += 2) {
+    keyboard.push(buttons.slice(i, i + 2));
+  }
+  return keyboard;
 }
 
 /** Exact name match; creates a placeholder service when missing (Telegram booking). */
@@ -84,30 +157,6 @@ export async function resolveServiceByName(serviceName: string): Promise<Service
   }
 
   return created;
-}
-
-/** Assign staff by Telegram service choice — no client prompt. */
-export async function resolveStaffForTelegramBooking(serviceName: string): Promise<StaffRow | null> {
-  const { data: staffList, error } = await supabase
-    .from('staff')
-    .select('id, name')
-    .eq('active', true);
-
-  if (error || !staffList?.length) {
-    console.error('[telegram/staff] load error:', error?.message);
-    return null;
-  }
-
-  const target = staffTargetForService(serviceName);
-  const aliases = target === 'maya' ? MAYA_NAME_ALIASES : TATEV_NAME_ALIASES;
-  const matched = staffList.find((member) => staffNameMatches(member.name, aliases));
-
-  if (matched) return matched;
-
-  console.warn(
-    `[telegram/staff] no ${target} match for service "${serviceName}", using fallback staff`
-  );
-  return staffList[0];
 }
 
 export function computeAppointmentEndTime(startTime: string, durationMinutes: number): string {

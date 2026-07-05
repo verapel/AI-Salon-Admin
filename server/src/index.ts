@@ -1,4 +1,4 @@
-import dotenv from 'dotenv';
+﻿import dotenv from 'dotenv';
 import path from 'path';
 
 dotenv.config({
@@ -22,20 +22,24 @@ import { registerTelegramPollingRestarter } from './lib/telegramPollingControl.j
 import {
   ACTIVE_SLOT_STATUSES,
   buildServiceKeyboard,
+  buildStaffSelectionKeyboard,
   computeAppointmentEndTime,
+  findStaffForServiceSpecialization,
+  getActiveStaffById,
   localDateStr,
   resolveServiceByName,
-  resolveStaffForTelegramBooking,
+  STAFF_UNAVAILABLE_MESSAGE,
 } from './lib/telegramBooking.js';
 
 const app = express();
 
 const chatHistory = new Map<number, any[]>();
-type BookingStep = 'service' | 'date' | 'time' | 'name' | 'phone';
+type BookingStep = 'service' | 'staff' | 'date' | 'time' | 'name' | 'phone';
 
 interface BookingData {
   step?: BookingStep;
   service: string;
+  staffId: string;
   date: string;
   time: string;
   name: string;
@@ -333,7 +337,38 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
 
   if (currentState?.step) {
     if (currentState.step === 'service') {
-      bookingState.set(chatId, { ...currentState, step: 'date', service: text });
+      const serviceName = text.trim();
+      const staffMatches = await findStaffForServiceSpecialization(serviceName);
+
+      if (staffMatches.length === 0) {
+        history.push({ role: 'assistant', content: STAFF_UNAVAILABLE_MESSAGE });
+        chatHistory.set(chatId, history.slice(-10));
+        bookingState.delete(chatId);
+        return STAFF_UNAVAILABLE_MESSAGE;
+      }
+
+      if (staffMatches.length === 1) {
+        bookingState.set(chatId, {
+          ...currentState,
+          step: 'date',
+          service: serviceName,
+          staffId: staffMatches[0].id,
+        });
+      } else {
+        bookingState.set(chatId, { ...currentState, step: 'staff', service: serviceName });
+        const staffQuestion = 'К какому мастеру хотите записаться?';
+        history.push({ role: 'assistant', content: staffQuestion });
+        chatHistory.set(chatId, history.slice(-10));
+        await sendTelegramMessageWithKeyboard(
+          chatId,
+          staffQuestion,
+          buildStaffSelectionKeyboard(staffMatches)
+        );
+        return null;
+      }
+
+    } else if (currentState.step === 'staff') {
+      bookingState.set(chatId, { ...currentState, step: 'date', staffId: text.trim() });
 
     } else if (currentState.step === 'date') {
       console.log(`[step:date] raw text: "${text}" | bookingState before:`, JSON.stringify(currentState));
@@ -447,11 +482,13 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
         return "В салоне пока нет услуг. Добавьте услуги в панели администратора и попробуйте снова.";
       }
 
-      const staffRow = await resolveStaffForTelegramBooking(service);
+      const staffRow = finalState.staffId
+        ? await getActiveStaffById(finalState.staffId)
+        : null;
       if (!staffRow) {
-        console.error('Staff lookup error: no active staff');
+        console.error('Staff lookup error: no staff assigned for booking');
         bookingState.delete(chatId); chatHistory.delete(chatId);
-        return "Не удалось найти доступного мастера. Обратитесь к администратору.";
+        return STAFF_UNAVAILABLE_MESSAGE;
       }
 
       const appointmentDate = parseAppointmentDate(date);
@@ -588,7 +625,15 @@ chatHistory.set(chatId, history.slice(-10));
   // Инициализировать step-машину после первого ответа AI (приветствие)
   const assistantCount = history.filter(m => m.role === 'assistant').length;
   if (!bookingState.has(chatId) && assistantCount === 1) {
-    bookingState.set(chatId, { step: 'service', service: '', date: '', time: '', name: '', phone: '' });
+    bookingState.set(chatId, {
+      step: 'service',
+      service: '',
+      staffId: '',
+      date: '',
+      time: '',
+      name: '',
+      phone: '',
+    });
     const serviceKeyboard = await buildServiceKeyboard();
     await sendTelegramMessageWithKeyboard(chatId, answer, serviceKeyboard);
     return null;
@@ -1079,17 +1124,21 @@ async function startTelegramPolling() {
           }
 
           // service:, date:, time: — передаём значение в шаг-машину (только на ожидаемом шаге)
-          if (cqData.startsWith('service:') || cqData.startsWith('date:') || cqData.startsWith('time:')) {
+          if (cqData.startsWith('service:') || cqData.startsWith('date:') || cqData.startsWith('time:') || cqData.startsWith('staff:')) {
             const booking = bookingState.get(cqChatId);
             const expectedStep = cqData.startsWith('service:')
               ? 'service'
               : cqData.startsWith('date:')
                 ? 'date'
-                : 'time';
+                : cqData.startsWith('time:')
+                  ? 'time'
+                  : 'staff';
             if (!booking || booking.step !== expectedStep) {
               continue;
             }
-            const value = cqData.slice(cqData.indexOf(':') + 1);
+            const value = cqData.startsWith('staff:')
+              ? cqData.slice('staff:'.length)
+              : cqData.slice(cqData.indexOf(':') + 1);
             const answer = await generateAIResponse(cqChatId, value);
             if (answer !== null) {
               await sendTelegramMessage(cqChatId, answer);
