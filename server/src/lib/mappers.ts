@@ -23,6 +23,7 @@ export function mapClient(row: {
   is_blocked?: boolean;
   blocked_at?: string | null;
   blocked_reason?: string | null;
+  birthday?: string | null;
 }): Client {
   return {
     id: row.id,
@@ -36,6 +37,7 @@ export function mapClient(row: {
     isBlocked: row.is_blocked ?? false,
     blockedAt: row.blocked_at ?? null,
     blockedReason: row.blocked_reason ?? null,
+    birthday: row.birthday ?? null,
   };
 }
 

@@ -10,6 +10,7 @@ export interface Client {
   isBlocked: boolean;
   blockedAt: string | null;
   blockedReason: string | null;
+  birthday: string | null;
 }
 
 export interface Service {

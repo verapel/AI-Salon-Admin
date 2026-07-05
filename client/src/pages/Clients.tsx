@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, Users, Mail, Phone, Ban, ShieldCheck } from 'lucide-react';
+import { Plus, Pencil, Trash2, Users, Mail, Phone, Ban, ShieldCheck, Cake } from 'lucide-react';
 import SearchInput from '@/components/ui/SearchInput';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
@@ -28,7 +28,7 @@ export default function Clients() {
   const [filter, setFilter] = useState<ClientFilter>('all');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
-  const [form, setForm] = useState({ name: '', email: '', phone: '', notes: '' });
+  const [form, setForm] = useState({ name: '', email: '', phone: '', notes: '', birthday: '' });
 
   const loadClients = () => {
     api.clients
@@ -56,13 +56,19 @@ export default function Clients() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ name: '', email: '', phone: '', notes: '' });
+    setForm({ name: '', email: '', phone: '', notes: '', birthday: '' });
     setModalOpen(true);
   };
 
   const openEdit = (client: Client) => {
     setEditing(client);
-    setForm({ name: client.name, email: client.email, phone: client.phone, notes: client.notes });
+    setForm({
+      name: client.name,
+      email: client.email,
+      phone: client.phone,
+      notes: client.notes,
+      birthday: client.birthday ?? '',
+    });
     setModalOpen(true);
   };
 
@@ -70,9 +76,15 @@ export default function Clients() {
     e.preventDefault();
     try {
       if (editing) {
-        await api.clients.update(editing.id, form);
+        await api.clients.update(editing.id, {
+          ...form,
+          birthday: form.birthday || null,
+        });
       } else {
-        await api.clients.create(form);
+        await api.clients.create({
+          ...form,
+          birthday: form.birthday || null,
+        });
       }
       setModalOpen(false);
       loadClients();
@@ -262,6 +274,14 @@ export default function Clients() {
                     {client.phone || t('clients.phoneNA')}
                   </span>
                 </div>
+                {client.birthday && (
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Cake className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                    <span className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">
+                      {t('clients.birthday')}: {formatDate(client.birthday)}
+                    </span>
+                  </div>
+                )}
                 {client.isBlocked && client.blockedReason && (
                   <p className="truncate text-xs text-red-600 dark:text-red-400">
                     {client.blockedReason}
@@ -309,6 +329,15 @@ export default function Clients() {
               className="input-field"
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">{t('clients.fieldBirthday')}</label>
+            <input
+              className="input-field"
+              type="date"
+              value={form.birthday}
+              onChange={(e) => setForm({ ...form, birthday: e.target.value })}
             />
           </div>
           <div>

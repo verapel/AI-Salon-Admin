@@ -30,6 +30,12 @@ import {
   resolveServiceByName,
   STAFF_UNAVAILABLE_MESSAGE,
   BLOCKED_CLIENT_BOOKING_MESSAGE,
+  BIRTHDAY_PROMPT_MESSAGE,
+  BIRTHDAY_INVALID_MESSAGE,
+  BIRTHDAY_SAVED_MESSAGE,
+  BIRTHDAY_SKIPPED_MESSAGE,
+  getBirthdaySkipKeyboard,
+  parseBirthdayDate,
 } from './lib/telegramBooking.js';
 
 const app = express();
@@ -62,6 +68,13 @@ interface ManageData {
 }
 
 const manageState = new Map<number, ManageData>();
+
+interface BirthdayCollectionState {
+  clientId: string;
+  invalidAttempts: number;
+}
+
+const birthdayState = new Map<number, BirthdayCollectionState>();
 
 const PORT = process.env.PORT || 3001;
 
@@ -207,6 +220,34 @@ function parseAppointmentTime(input: string): string {
   return `${hours}:${minutes}`;
 }
 
+async function handleBirthdayCollection(chatId: number, text: string): Promise<string | null> {
+  const state = birthdayState.get(chatId);
+  if (!state) return null;
+
+  const parsed = parseBirthdayDate(text);
+  if (!parsed) {
+    if (state.invalidAttempts >= 1) {
+      birthdayState.delete(chatId);
+      return BIRTHDAY_SKIPPED_MESSAGE;
+    }
+    birthdayState.set(chatId, { ...state, invalidAttempts: state.invalidAttempts + 1 });
+    await sendTelegramMessageWithKeyboard(chatId, BIRTHDAY_INVALID_MESSAGE, getBirthdaySkipKeyboard());
+    return null;
+  }
+
+  const { error } = await (supabase as any)
+    .from('clients')
+    .update({ birthday: parsed })
+    .eq('id', state.clientId);
+
+  birthdayState.delete(chatId);
+  if (error) {
+    console.error('[birthday] save error:', error);
+    return BIRTHDAY_SKIPPED_MESSAGE;
+  }
+  return BIRTHDAY_SAVED_MESSAGE;
+}
+
 app.use(cors());
 app.use(express.json());
 async function generateAIResponse(chatId: number, text: string): Promise<string | null> {
@@ -214,6 +255,10 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
 
   if (!openRouterKey) {
     return 'OpenRouter API key not configured';
+  }
+
+  if (birthdayState.has(chatId)) {
+    return handleBirthdayCollection(chatId, text);
   }
 
   const history = [...(chatHistory.get(chatId) || [])];
@@ -230,6 +275,7 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
     const isRescheduleIntent = /перенос|перенес|перенести/.test(lowerText);
     if (isCancelIntent || isRescheduleIntent) {
       bookingState.delete(chatId);
+      birthdayState.delete(chatId);
       const action: ManageAction = isCancelIntent ? 'cancel' : 'reschedule';
       manageState.set(chatId, { action, step: 'ask_phone' });
       const msg = action === 'cancel'
@@ -494,6 +540,7 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
       }
 
       let clientId: string;
+      let isNewClient = false;
       if (existingClient) {
         clientId = existingClient.id;
       } else {
@@ -505,6 +552,7 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
           return "Не удалось сохранить данные клиента. Попробуйте ещё раз.";
         }
         clientId = newClient.id;
+        isNewClient = true;
       }
 
       // 3. Получить услугу и мастера из каталога салона
@@ -608,6 +656,12 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
 
       bookingState.delete(chatId);
       chatHistory.delete(chatId);
+
+      if (isNewClient) {
+        birthdayState.set(chatId, { clientId, invalidAttempts: 0 });
+        await sendTelegramMessageWithKeyboard(chatId, BIRTHDAY_PROMPT_MESSAGE, getBirthdaySkipKeyboard());
+      }
+
       return null; // OpenRouter не вызывается — всё уже отправлено
     }
   }
@@ -1230,6 +1284,14 @@ async function startTelegramPolling() {
           }
           if (cqData === 'date:manual') {
             await sendTelegramMessage(cqChatId, 'Напишите дату в удобном формате — например: «сегодня», «завтра», «30 июня».');
+            continue;
+          }
+
+          if (cqData === 'birthday:skip') {
+            if (birthdayState.has(cqChatId)) {
+              birthdayState.delete(cqChatId);
+              await sendTelegramMessage(cqChatId, BIRTHDAY_SKIPPED_MESSAGE);
+            }
             continue;
           }
 

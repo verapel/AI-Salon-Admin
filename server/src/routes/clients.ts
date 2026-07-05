@@ -27,7 +27,7 @@ router.get('/:id', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { name, email, phone, notes } = req.body;
+  const { name, email, phone, notes, birthday } = req.body;
   if (!name || !email) return res.status(400).json({ error: 'Name and email are required' });
 
   const { data, error } = await supabase
@@ -37,6 +37,7 @@ router.post('/', async (req, res) => {
       email,
       phone: phone || '',
       notes: notes || '',
+      birthday: birthday || null,
       total_visits: 0,
       last_visit: null,
     })
@@ -48,7 +49,7 @@ router.post('/', async (req, res) => {
 });
 
 router.put('/:id', async (req, res) => {
-  const { name, email, phone, notes, totalVisits, lastVisit } = req.body;
+  const { name, email, phone, notes, totalVisits, lastVisit, birthday } = req.body;
 
   const updates: Database['public']['Tables']['clients']['Update'] = {};
   if (name !== undefined) updates.name = name;
@@ -57,6 +58,7 @@ router.put('/:id', async (req, res) => {
   if (notes !== undefined) updates.notes = notes;
   if (totalVisits !== undefined) updates.total_visits = totalVisits;
   if (lastVisit !== undefined) updates.last_visit = lastVisit;
+  if (birthday !== undefined) updates.birthday = birthday || null;
 
   const { data, error } = await supabase
     .from('clients')

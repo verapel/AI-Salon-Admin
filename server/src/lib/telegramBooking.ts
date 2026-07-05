@@ -10,6 +10,41 @@ export const STAFF_UNAVAILABLE_MESSAGE =
 export const BLOCKED_CLIENT_BOOKING_MESSAGE =
   'К сожалению, онлайн-запись для этого номера недоступна. Администратор свяжется с вами.';
 
+export const BIRTHDAY_PROMPT_MESSAGE =
+  'Хотите указать день рождения, чтобы мы могли подготовить для вас приятный бонус? Напишите дату в формате ДД.ММ.ГГГГ или нажмите Пропустить.';
+
+export const BIRTHDAY_INVALID_MESSAGE =
+  'Не удалось распознать дату. Введите в формате ДД.ММ.ГГГГ или нажмите Пропустить.';
+
+export const BIRTHDAY_SAVED_MESSAGE = 'Спасибо! Сохранили ваш день рождения 🎂';
+
+export const BIRTHDAY_SKIPPED_MESSAGE = 'Хорошо! Будем ждать вас!';
+
+/** Parse DD.MM.YYYY / DD-MM-YYYY / DD/MM/YYYY into YYYY-MM-DD. */
+export function parseBirthdayDate(input: string): string | null {
+  const trimmed = input.trim();
+  const match = trimmed.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if (!match) return null;
+
+  const day = Number.parseInt(match[1], 10);
+  const month = Number.parseInt(match[2], 10);
+  const year = Number.parseInt(match[3], 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 1900 || year > new Date().getFullYear()) {
+    return null;
+  }
+
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null;
+  }
+
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+export function getBirthdaySkipKeyboard(): { text: string; callback_data: string }[][] {
+  return [[{ text: 'Пропустить', callback_data: 'birthday:skip' }]];
+}
+
 export function localDateStr(offsetDays = 0): string {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
