@@ -4,7 +4,7 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { useLanguage, type LangCode, type TranslationKey } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import { getStatusColor } from '@/lib/utils';
-import type { Appointment } from '@/types';
+import type { Appointment, Staff } from '@/types';
 
 const LOCALE: Record<LangCode, string> = {
   ru: 'ru-RU',
@@ -32,12 +32,25 @@ function statusLabel(status: Appointment['status'], t: (key: TranslationKey) => 
   return t(`appointmentStatus.${status}` as TranslationKey);
 }
 
+function matchesStaffFilter(apt: Appointment, staffFilter: 'all' | string): boolean {
+  if (staffFilter === 'all') return true;
+  if (!apt.staffId?.trim()) return false;
+  return apt.staffId === staffFilter;
+}
+
 export default function Calendar() {
   const { language, t } = useLanguage();
   const locale = LOCALE[language];
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [staffFilter, setStaffFilter] = useState<'all' | string>('all');
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
+
+  const filteredAppointments = useMemo(
+    () => appointments.filter((apt) => matchesStaffFilter(apt, staffFilter)),
+    [appointments, staffFilter]
+  );
 
   const weekDays = useMemo(() => {
     const start = new Date(currentDate);
@@ -52,22 +65,24 @@ export default function Calendar() {
 
   const dayAppointments = useMemo(() => {
     const dateStr = toLocalDateStr(currentDate);
-    return appointments
+    return filteredAppointments
       .filter((a) => a.date === dateStr && a.status !== 'cancelled')
       .sort((a, b) => a.startTime.localeCompare(b.startTime));
-  }, [appointments, currentDate]);
+  }, [filteredAppointments, currentDate]);
 
   useEffect(() => {
-    api.appointments
-      .getAll()
-      .then(setAppointments)
+    Promise.all([api.appointments.getAll(), api.staff.getAll()])
+      .then(([apptData, staffData]) => {
+        setAppointments(apptData);
+        setStaff(staffData.filter((member) => member.active).sort((a, b) => a.name.localeCompare(b.name)));
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
 
   const getAppointmentsForDay = (date: Date) => {
     const dateStr = toLocalDateStr(date);
-    return appointments.filter((a) => a.date === dateStr && a.status !== 'cancelled');
+    return filteredAppointments.filter((a) => a.date === dateStr && a.status !== 'cancelled');
   };
 
   const navigateWeek = (direction: number) => {
@@ -86,6 +101,13 @@ export default function Calendar() {
 
   const formatMobileDate = (date: Date) =>
     date.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'long' });
+
+  const emptyDayMessage =
+    staffFilter !== 'all'
+      ? t('calendar.noAppointmentsForStaff')
+      : isToday(currentDate)
+        ? t('calendar.noAppointmentsToday')
+        : t('calendar.noAppointmentsDay');
 
   if (loading) return <LoadingSpinner />;
 
@@ -157,14 +179,38 @@ export default function Calendar() {
         </div>
       </div>
 
+      {/* Staff filter — below calendar navigation */}
+      <div className="w-full min-w-0">
+        <p className="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+          {t('calendar.staffFilter')}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setStaffFilter('all')}
+            className={staffFilter === 'all' ? 'btn-primary text-xs' : 'btn-secondary text-xs'}
+          >
+            {t('calendar.allStaff')}
+          </button>
+          {staff.map((member) => (
+            <button
+              key={member.id}
+              type="button"
+              onClick={() => setStaffFilter(member.id)}
+              className={staffFilter === member.id ? 'btn-primary text-xs' : 'btn-secondary text-xs'}
+            >
+              {member.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* MOBILE: day list */}
       <div className="lg:hidden">
         <div className="space-y-3">
           {dayAppointments.length === 0 ? (
             <div className="card py-12 text-center">
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                {isToday(currentDate) ? t('calendar.noAppointmentsToday') : t('calendar.noAppointmentsDay')}
-              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{emptyDayMessage}</p>
             </div>
           ) : (
             dayAppointments.map((apt) => (
