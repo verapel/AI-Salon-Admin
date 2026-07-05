@@ -32,6 +32,32 @@ function statusLabel(status: Appointment['status'], t: (key: TranslationKey) => 
   return t(`appointmentStatus.${status}` as TranslationKey);
 }
 
+function sortAppointmentsForDisplay(a: Appointment, b: Appointment): number {
+  const byTime = a.startTime.localeCompare(b.startTime);
+  if (byTime !== 0) return byTime;
+  return (a.staffName ?? '').localeCompare(b.staffName ?? '');
+}
+
+function appointmentsInHour(appointments: Appointment[], hour: number): Appointment[] {
+  return appointments
+    .filter((a) => parseInt(a.startTime.split(':')[0], 10) === hour)
+    .sort(sortAppointmentsForDisplay);
+}
+
+function groupAppointmentsByTime(appointments: Appointment[]): [string, Appointment[]][] {
+  const groups = new Map<string, Appointment[]>();
+  for (const apt of appointments) {
+    const timeKey = formatTime24(apt.startTime);
+    const list = groups.get(timeKey) ?? [];
+    list.push(apt);
+    groups.set(timeKey, list);
+  }
+  return Array.from(groups.entries()).map(([time, appts]) => [
+    time,
+    appts.sort(sortAppointmentsForDisplay),
+  ]);
+}
+
 function matchesStaffFilter(apt: Appointment, staffFilter: 'all' | string): boolean {
   if (staffFilter === 'all') return true;
   if (!apt.staffId?.trim()) return false;
@@ -67,8 +93,15 @@ export default function Calendar() {
     const dateStr = toLocalDateStr(currentDate);
     return filteredAppointments
       .filter((a) => a.date === dateStr && a.status !== 'cancelled')
-      .sort((a, b) => a.startTime.localeCompare(b.startTime));
+      .sort(sortAppointmentsForDisplay);
   }, [filteredAppointments, currentDate]);
+
+  const mobileTimeGroups = useMemo(
+    () => groupAppointmentsByTime(dayAppointments),
+    [dayAppointments]
+  );
+
+  const showStaffOnCards = staffFilter === 'all';
 
   useEffect(() => {
     Promise.all([api.appointments.getAll(), api.staff.getAll()])
@@ -213,28 +246,40 @@ export default function Calendar() {
               <p className="text-sm text-gray-500 dark:text-gray-400">{emptyDayMessage}</p>
             </div>
           ) : (
-            dayAppointments.map((apt) => (
-              <div key={apt.id} className="card flex w-full min-w-0 max-w-full items-start gap-3 p-4">
+            mobileTimeGroups.map(([time, appts]) => (
+              <div
+                key={time}
+                className="card flex w-full min-w-0 max-w-full items-start gap-3 p-4"
+              >
                 <div className="flex shrink-0 flex-col items-center justify-center rounded-lg bg-brand-50 px-3 py-2 text-center dark:bg-brand-950/30">
                   <span className="whitespace-nowrap text-sm font-bold tabular-nums text-brand-700 dark:text-brand-300">
-                    {formatTime24(apt.startTime)}
+                    {time}
                   </span>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="truncate text-base font-semibold text-gray-900 dark:text-white">
-                      {apt.clientName}
-                    </p>
-                    <span className={`badge shrink-0 text-xs ${getStatusColor(apt.status)}`}>
-                      {statusLabel(apt.status, t)}
-                    </span>
-                  </div>
-                  <p className="mt-1 truncate text-sm text-gray-600 dark:text-gray-400">
-                    {apt.serviceName}
-                  </p>
-                  <p className="mt-0.5 truncate text-xs text-gray-400 dark:text-gray-500">
-                    {t('calendar.staffPrefix')} {apt.staffName}
-                  </p>
+                <div className="min-w-0 flex-1 space-y-3">
+                  {appts.map((apt, index) => (
+                    <div
+                      key={apt.id}
+                      className={index > 0 ? 'border-t border-gray-100 pt-3 dark:border-gray-800' : ''}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="truncate text-base font-semibold text-gray-900 dark:text-white">
+                          {apt.clientName}
+                        </p>
+                        <span className={`badge shrink-0 text-xs ${getStatusColor(apt.status)}`}>
+                          {statusLabel(apt.status, t)}
+                        </span>
+                      </div>
+                      <p className="mt-1 truncate text-sm text-gray-600 dark:text-gray-400">
+                        {apt.serviceName}
+                      </p>
+                      {showStaffOnCards && apt.staffName && (
+                        <p className="mt-0.5 truncate text-xs text-gray-400 dark:text-gray-500">
+                          {t('calendar.staffPrefix')} {apt.staffName}
+                        </p>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             ))
@@ -284,22 +329,22 @@ export default function Calendar() {
                   {`${String(hour).padStart(2, '0')}:00`}
                 </div>
                 {weekDays.map((day) => {
-                  const dayAppts = getAppointmentsForDay(day).filter((a) => {
-                    const aptHour = parseInt(a.startTime.split(':')[0], 10);
-                    return aptHour === hour;
-                  });
+                  const dayAppts = appointmentsInHour(getAppointmentsForDay(day), hour);
                   return (
                     <div
                       key={day.toISOString() + hour}
-                      className="min-h-[60px] min-w-0 border-r p-1 last:border-r-0 dark:border-gray-700"
+                      className="flex min-h-[60px] min-w-0 flex-col gap-1 border-r p-1 last:border-r-0 dark:border-gray-700"
                     >
                       {dayAppts.map((apt) => (
                         <div
                           key={apt.id}
-                          className={`mb-1 rounded-md p-1.5 text-xs ${getStatusColor(apt.status)}`}
+                          className={`shrink-0 rounded-md p-1.5 text-xs leading-tight ${getStatusColor(apt.status)}`}
                         >
                           <p className="truncate font-medium">{apt.clientName}</p>
                           <p className="truncate opacity-75">{apt.serviceName}</p>
+                          {showStaffOnCards && apt.staffName && (
+                            <p className="truncate opacity-70">{apt.staffName}</p>
+                          )}
                           <p className="tabular-nums opacity-60">{formatTime24(apt.startTime)}</p>
                         </div>
                       ))}
