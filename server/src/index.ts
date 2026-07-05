@@ -7,7 +7,7 @@ dotenv.config({
 
 console.log("CURRENT DIR =", process.cwd());
 
-import express from 'express';
+import express, { type RequestHandler } from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import clientsRouter from './routes/clients.js';
@@ -16,6 +16,7 @@ import staffRouter from './routes/staff.js';
 import appointmentsRouter from './routes/appointments.js';
 import statsRouter from './routes/stats.js';
 import developerRouter from './routes/developer.js';
+import { requireDeveloperAuth, requireSalonAuth } from './middleware/auth.js';
 import { supabase, checkSupabaseConnection } from './lib/supabase.js';
 import { loadTelegramTokenFromDb, saveTelegramTokenToDb } from './lib/telegramToken.js';
 import { registerTelegramPollingRestarter } from './lib/telegramPollingControl.js';
@@ -893,12 +894,17 @@ app.post('/api/integrations/telegram/connect', async (req, res) => {
   }
 });
 
-app.use('/api/clients', clientsRouter);
-app.use('/api/services', servicesRouter);
-app.use('/api/staff', staffRouter);
-app.use('/api/appointments', appointmentsRouter);
-app.use('/api/stats', statsRouter);
-app.use('/api/developer', developerRouter);
+const API_AUTH_REQUIRED = process.env.API_AUTH_REQUIRED === 'true';
+const noopAuth: RequestHandler = (_req, _res, next) => next();
+const salonAuth = API_AUTH_REQUIRED ? requireSalonAuth : noopAuth;
+const developerAuth = API_AUTH_REQUIRED ? requireDeveloperAuth : noopAuth;
+
+app.use('/api/clients', salonAuth, clientsRouter);
+app.use('/api/services', salonAuth, servicesRouter);
+app.use('/api/staff', salonAuth, staffRouter);
+app.use('/api/appointments', salonAuth, appointmentsRouter);
+app.use('/api/stats', salonAuth, statsRouter);
+app.use('/api/developer', developerAuth, developerRouter);
 
 function resolveClientDist(): string | null {
   const candidates = [

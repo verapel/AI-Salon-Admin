@@ -21,6 +21,10 @@ export type IntegrationStatus = 'connected' | 'not_connected' | 'error' | 'disab
 
 export type IntegrationHealth = 'healthy' | 'error' | 'unknown';
 
+export type SalonMemberRole = 'owner' | 'admin' | 'staff_readonly';
+
+export type PlatformUserRole = 'developer';
+
 export interface Database {
   public: {
     Tables: {
@@ -309,6 +313,54 @@ export interface Database {
         };
         Relationships: [];
       };
+      salon_members: {
+        Row: {
+          id: string;
+          user_id: string;
+          salon_id: string;
+          role: SalonMemberRole;
+          active: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          salon_id: string;
+          role: SalonMemberRole;
+          active?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          salon_id?: string;
+          role?: SalonMemberRole;
+          active?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      platform_users: {
+        Row: {
+          user_id: string;
+          role: PlatformUserRole;
+          active: boolean;
+          created_at: string;
+        };
+        Insert: {
+          user_id: string;
+          role?: PlatformUserRole;
+          active?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          role?: PlatformUserRole;
+          active?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
@@ -316,6 +368,8 @@ export interface Database {
       integration_provider: IntegrationProvider;
       integration_status: IntegrationStatus;
       integration_health: IntegrationHealth;
+      salon_member_role: SalonMemberRole;
+      platform_user_role: PlatformUserRole;
     };
   };
 }
