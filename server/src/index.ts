@@ -25,7 +25,7 @@ import {
   computeAppointmentEndTime,
   localDateStr,
   resolveServiceByName,
-  resolveStaffForService,
+  resolveStaffForTelegramBooking,
 } from './lib/telegramBooking.js';
 
 const app = express();
@@ -447,7 +447,7 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
         return "В салоне пока нет услуг. Добавьте услуги в панели администратора и попробуйте снова.";
       }
 
-      const staffRow = await resolveStaffForService(serviceRow);
+      const staffRow = await resolveStaffForTelegramBooking(service);
       if (!staffRow) {
         console.error('Staff lookup error: no active staff');
         bookingState.delete(chatId); chatHistory.delete(chatId);

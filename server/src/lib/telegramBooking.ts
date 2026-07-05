@@ -2,7 +2,27 @@ import { supabase } from './supabase.js';
 import { computeEndTime } from './mappers.js';
 
 type ServiceRow = { id: string; name: string; duration: number; category: string };
-type StaffRow = { id: string; specialties: string[] | null };
+type StaffRow = { id: string; name: string };
+
+const TATEV_NAME_ALIASES = ['татев', 'tatev'];
+const MAYA_NAME_ALIASES = ['мая', 'maya'];
+
+function normalizeStaffLookup(value: string): string {
+  return value.toLowerCase().trim();
+}
+
+function staffNameMatches(memberName: string, aliases: string[]): boolean {
+  const normalized = normalizeStaffLookup(memberName);
+  return aliases.some((alias) => normalized.includes(alias) || alias.includes(normalized));
+}
+
+function staffTargetForService(serviceName: string): 'maya' | 'tatev' {
+  const normalized = normalizeStaffLookup(serviceName);
+  if (normalized.includes('макияж') || normalized.includes('makeup')) {
+    return 'maya';
+  }
+  return 'tatev';
+}
 
 export function localDateStr(offsetDays = 0): string {
   const d = new Date();
@@ -66,10 +86,11 @@ export async function resolveServiceByName(serviceName: string): Promise<Service
   return created;
 }
 
-export async function resolveStaffForService(service: ServiceRow): Promise<StaffRow | null> {
+/** Assign staff by Telegram service choice — no client prompt. */
+export async function resolveStaffForTelegramBooking(serviceName: string): Promise<StaffRow | null> {
   const { data: staffList, error } = await supabase
     .from('staff')
-    .select('id, specialties')
+    .select('id, name')
     .eq('active', true);
 
   if (error || !staffList?.length) {
@@ -77,22 +98,16 @@ export async function resolveStaffForService(service: ServiceRow): Promise<Staff
     return null;
   }
 
-  const serviceLower = service.name.toLowerCase();
-  const categoryLower = service.category.toLowerCase();
+  const target = staffTargetForService(serviceName);
+  const aliases = target === 'maya' ? MAYA_NAME_ALIASES : TATEV_NAME_ALIASES;
+  const matched = staffList.find((member) => staffNameMatches(member.name, aliases));
 
-  const matched = staffList.find((member) =>
-    (member.specialties ?? []).some((spec) => {
-      const specLower = spec.toLowerCase();
-      return (
-        serviceLower.includes(specLower) ||
-        specLower.includes(serviceLower) ||
-        categoryLower.includes(specLower) ||
-        specLower.includes(categoryLower)
-      );
-    })
+  if (matched) return matched;
+
+  console.warn(
+    `[telegram/staff] no ${target} match for service "${serviceName}", using fallback staff`
   );
-
-  return matched ?? staffList[0];
+  return staffList[0];
 }
 
 export function computeAppointmentEndTime(startTime: string, durationMinutes: number): string {
@@ -106,7 +121,7 @@ export async function buildServiceKeyboard(): Promise<{ text: string; callback_d
       { text: '🎨 Окрашивание', callback_data: 'service:Окрашивание' },
     ],
     [
-      { text: '💅 Маникюр', callback_data: 'service:Маникюр' },
+      { text: '💄 Макияж', callback_data: 'service:Макияж' },
       { text: '✍️ Другая услуга', callback_data: 'service:manual' },
     ],
   ];
