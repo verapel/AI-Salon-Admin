@@ -308,8 +308,13 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
       // Пользователь ввёл дату вручную при переносе
       const parsedDate = parseAppointmentDate(text);
       manageState.set(chatId, { ...manage, newDate: parsedDate });
-      // Исключаем саму переносимую запись, чтобы её слот не блокировался
-      const freeSlots = await getAvailableSlots(parsedDate, manage.appointmentId);
+      const staffId = await getAppointmentStaffId(manage.appointmentId!);
+      if (!staffId) {
+        manageState.delete(chatId);
+        return 'Не удалось определить мастера для этой записи. Обратитесь к администратору.';
+      }
+      // Исключаем саму переносимую запись из занятых слотов мастера
+      const freeSlots = await getAvailableSlots(parsedDate, staffId, manage.appointmentId);
       if (freeSlots.length === 0) {
         const msg = 'На эту дату нет свободного времени. Выберите другой день:';
         history.push({ role: 'assistant', content: msg });
@@ -371,11 +376,23 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
       bookingState.set(chatId, { ...currentState, step: 'date', staffId: text.trim() });
 
     } else if (currentState.step === 'date') {
+      if (!currentState.staffId?.trim()) {
+        bookingState.delete(chatId);
+        history.push({ role: 'assistant', content: STAFF_UNAVAILABLE_MESSAGE });
+        chatHistory.set(chatId, history.slice(-10));
+        return STAFF_UNAVAILABLE_MESSAGE;
+      }
       console.log(`[step:date] raw text: "${text}" | bookingState before:`, JSON.stringify(currentState));
       bookingState.set(chatId, { ...currentState, step: 'time', date: text });
       console.log(`[step:date] bookingState after:`, JSON.stringify(bookingState.get(chatId)));
 
     } else if (currentState.step === 'time') {
+      if (!currentState.staffId?.trim()) {
+        bookingState.delete(chatId);
+        history.push({ role: 'assistant', content: STAFF_UNAVAILABLE_MESSAGE });
+        chatHistory.set(chatId, history.slice(-10));
+        return STAFF_UNAVAILABLE_MESSAGE;
+      }
       // Проверяем слот СРАЗУ — до того как AI спросит имя
       console.log(`[step:time] raw text: "${text}" | currentState.date: "${currentState.date}"`);
       const appointmentDate = parseAppointmentDate(currentState.date);
@@ -387,12 +404,13 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
         .select('id')
         .eq('date', appointmentDate)
         .eq('start_time', `${appointmentTime}:00`)
+        .eq('staff_id', currentState.staffId)
         .in('status', ACTIVE_SLOT_STATUSES)
         .limit(1)
         .maybeSingle();
 
       if (existingSlot) {
-        const freeSlots = await getAvailableSlots(appointmentDate);
+        const freeSlots = await getAvailableSlots(appointmentDate, currentState.staffId);
 
         if (freeSlots.length === 0) {
           // На эту дату нет ни одного свободного слота — просим выбрать другой день
@@ -494,6 +512,34 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
       const appointmentDate = parseAppointmentDate(date);
       const appointmentTime = parseAppointmentTime(time);
       const endTime = computeAppointmentEndTime(appointmentTime, serviceRow.duration);
+
+      const { data: conflictingSlot } = await (supabase as any)
+        .from('appointments')
+        .select('id')
+        .eq('date', appointmentDate)
+        .eq('start_time', `${appointmentTime}:00`)
+        .eq('staff_id', staffRow.id)
+        .in('status', ACTIVE_SLOT_STATUSES)
+        .limit(1)
+        .maybeSingle();
+
+      if (conflictingSlot) {
+        bookingState.set(chatId, { ...finalState, step: 'time', time: '' });
+        const freeSlots = await getAvailableSlots(appointmentDate, staffRow.id);
+        if (freeSlots.length === 0) {
+          bookingState.set(chatId, { ...finalState, step: 'date', date: '', time: '' });
+          return `К сожалению, это время уже занято, и на ${date} у мастера больше нет свободных слотов. Выберите другой день.`;
+        }
+        const keyboard: { text: string; callback_data: string }[][] = [];
+        for (let i = 0; i < freeSlots.length; i += 3) {
+          keyboard.push(
+            freeSlots.slice(i, i + 3).map((slot) => ({ text: slot, callback_data: `time:${slot}` }))
+          );
+        }
+        const busyMsg = `К сожалению, это время уже занято. Доступное время на ${date}:`;
+        await sendTelegramMessageWithKeyboard(chatId, busyMsg, keyboard);
+        return null;
+      }
 
       // 5. INSERT appointment
       const { data: appointment, error: appointmentError } = await (supabase as any)
@@ -642,6 +688,12 @@ chatHistory.set(chatId, history.slice(-10));
   // После получения услуги — кнопки дат
   const currentStepAfterAI = bookingState.get(chatId)?.step;
   if (currentStepAfterAI === 'date') {
+    const stateForDate = bookingState.get(chatId)!;
+    if (!stateForDate.staffId?.trim()) {
+      bookingState.delete(chatId);
+      await sendTelegramMessage(chatId, STAFF_UNAVAILABLE_MESSAGE);
+      return null;
+    }
     await sendTelegramMessageWithKeyboard(chatId, answer, getDateKeyboard());
     return null;
   }
@@ -649,10 +701,15 @@ chatHistory.set(chatId, history.slice(-10));
   // После получения даты — кнопки свободного времени
   if (currentStepAfterAI === 'time') {
     const stateForTime = bookingState.get(chatId)!;
+    if (!stateForTime.staffId?.trim()) {
+      bookingState.delete(chatId);
+      await sendTelegramMessage(chatId, STAFF_UNAVAILABLE_MESSAGE);
+      return null;
+    }
     console.log(`[timeKeyboard] stateForTime.date: "${stateForTime.date}"`);
     const parsedDate = parseAppointmentDate(stateForTime.date);
     console.log(`[timeKeyboard] parsedDate passed to getAvailableSlots: "${parsedDate}"`);
-    const freeSlots = await getAvailableSlots(parsedDate);
+    const freeSlots = await getAvailableSlots(parsedDate, stateForTime.staffId);
 
     if (freeSlots.length === 0) {
       // Нет слотов — возвращаем на выбор даты
@@ -858,16 +915,43 @@ async function answerCallbackQuery(callbackQueryId: string) {
   });
 }
 
-async function getAvailableSlots(date: string, excludeAppointmentId?: string): Promise<string[]> {
+async function getAppointmentStaffId(appointmentId: string): Promise<string | null> {
+  const { data, error } = await (supabase as any)
+    .from('appointments')
+    .select('staff_id')
+    .eq('id', appointmentId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[slots] staff lookup error:', JSON.stringify(error));
+    return null;
+  }
+
+  const staffId = (data?.staff_id as string | undefined)?.trim();
+  return staffId || null;
+}
+
+async function getAvailableSlots(
+  date: string,
+  staffId: string,
+  excludeAppointmentId?: string
+): Promise<string[]> {
   const allSlots = ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
 
   console.log(`[slots] date: "${date}"`);
+  console.log(`[slots] staffId: "${staffId}"`);
   console.log(`[slots] excludeAppointmentId: "${excludeAppointmentId ?? 'none'}"`);
+
+  if (!staffId.trim()) {
+    console.warn('[slots] missing staffId — returning no slots');
+    return [];
+  }
 
   const baseQ = (supabase as any)
     .from('appointments')
     .select('start_time')
     .eq('date', date)
+    .eq('staff_id', staffId)
     .in('status', ACTIVE_SLOT_STATUSES);
   const { data: booked, error: bookedError } = await (
     excludeAppointmentId ? baseQ.neq('id', excludeAppointmentId) : baseQ
@@ -1032,8 +1116,13 @@ async function startTelegramPolling() {
             console.log(`[rdate] appointmentId="${appointmentId}" dateStr="${dateStr}" parsedDate="${newDate}"`);
             const cur = manageState.get(cqChatId);
             if (cur) manageState.set(cqChatId, { ...cur, step: 'select_new_time', appointmentId, newDate });
-            // Исключаем саму переносимую запись, чтобы её слот не блокировался
-            const freeSlots = await getAvailableSlots(newDate, appointmentId);
+            const staffId = await getAppointmentStaffId(appointmentId);
+            if (!staffId) {
+              await sendTelegramMessage(cqChatId, 'Не удалось определить мастера для этой записи. Обратитесь к администратору.');
+              continue;
+            }
+            // Исключаем саму переносимую запись, чтобы её слот не блокировался у этого мастера
+            const freeSlots = await getAvailableSlots(newDate, staffId, appointmentId);
             if (freeSlots.length === 0) {
               await sendTelegramMessageWithKeyboard(cqChatId, 'На эту дату нет свободного времени. Выберите другой день:', getRescheduleDateKeyboard(appointmentId));
             } else {
@@ -1059,15 +1148,21 @@ async function startTelegramPolling() {
               continue;
             }
             const parsedTime = parseAppointmentTime(newTime);
-            // Проверяем слот (исключаем саму переносимую запись)
+            const staffId = await getAppointmentStaffId(appointmentId);
+            if (!staffId) {
+              await sendTelegramMessage(cqChatId, 'Не удалось определить мастера для этой записи. Обратитесь к администратору.');
+              continue;
+            }
+            // Проверяем слот мастера (исключаем саму переносимую запись)
             const { data: existingSlot } = await (supabase as any)
               .from('appointments').select('id')
               .eq('date', newDate).eq('start_time', `${parsedTime}:00`)
+              .eq('staff_id', staffId)
               .in('status', ACTIVE_SLOT_STATUSES)
               .neq('id', appointmentId).limit(1).maybeSingle();
             if (existingSlot) {
-              // Исключаем саму переносимую запись из занятых слотов
-              const freeSlots = await getAvailableSlots(newDate, appointmentId);
+              // Исключаем саму переносимую запись из занятых слотов мастера
+              const freeSlots = await getAvailableSlots(newDate, staffId, appointmentId);
               if (freeSlots.length === 0) {
                 await sendTelegramMessageWithKeyboard(cqChatId, 'Это время занято, и других свободных слотов на эту дату нет. Выберите другой день:', getRescheduleDateKeyboard(appointmentId));
               } else {
