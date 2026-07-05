@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
 import { computeEndTime, mapEnrichedAppointment } from '../lib/mappers.js';
-import { PILOT_SALON_ID } from '../lib/pilotSalon.js';
+import { getSalonId } from '../lib/salonContext.js';
 import type { Appointment } from '../types.js';
 import type { Database } from '../types/database.js';
 
@@ -14,24 +14,26 @@ const APPOINTMENT_SELECT = `
   services(name, price, duration)
 `;
 
-async function isInPilotSalon(
+async function isInSalon(
   table: 'clients' | 'staff' | 'services',
-  id: string
+  id: string,
+  salonId: string
 ): Promise<boolean> {
   const { data } = await supabase
     .from(table)
     .select('id')
     .eq('id', id)
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .maybeSingle();
   return !!data;
 }
 
 router.get('/', async (req, res) => {
+  const salonId = getSalonId(req);
   let query = supabase
     .from('appointments')
     .select(APPOINTMENT_SELECT)
-    .eq('salon_id', PILOT_SALON_ID);
+    .eq('salon_id', salonId);
 
   const { date, status, staffId, clientId } = req.query;
   if (date) query = query.eq('date', String(date));
@@ -46,11 +48,12 @@ router.get('/', async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
+  const salonId = getSalonId(req);
   const { data, error } = await supabase
     .from('appointments')
     .select(APPOINTMENT_SELECT)
     .eq('id', req.params.id)
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .single();
 
   if (error || !data) return res.status(404).json({ error: 'Appointment not found' });
@@ -58,15 +61,16 @@ router.get('/:id', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
+  const salonId = getSalonId(req);
   const { clientId, staffId, serviceId, date, startTime, notes } = req.body;
   if (!clientId || !staffId || !serviceId || !date || !startTime) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
   const [clientOk, staffOk, serviceOk] = await Promise.all([
-    isInPilotSalon('clients', clientId),
-    isInPilotSalon('staff', staffId),
-    isInPilotSalon('services', serviceId),
+    isInSalon('clients', clientId, salonId),
+    isInSalon('staff', staffId, salonId),
+    isInSalon('services', serviceId, salonId),
   ]);
 
   if (!clientOk || !staffOk || !serviceOk) {
@@ -77,7 +81,7 @@ router.post('/', async (req, res) => {
     .from('services')
     .select('duration')
     .eq('id', serviceId)
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .single();
 
   if (serviceError || !service) return res.status(400).json({ error: 'Invalid service' });
@@ -96,7 +100,7 @@ router.post('/', async (req, res) => {
       status: 'scheduled',
       notes: notes || '',
       reminder_sent: false,
-      salon_id: PILOT_SALON_ID,
+      salon_id: salonId,
     })
     .select('id')
     .single();
@@ -109,14 +113,14 @@ router.post('/', async (req, res) => {
     scheduled_for: `${date}T08:00:00`,
     status: 'pending',
     message: `Reminder: Your appointment on ${date} at ${startTime}`,
-    salon_id: PILOT_SALON_ID,
+    salon_id: salonId,
   });
 
   const { data, error } = await supabase
     .from('appointments')
     .select(APPOINTMENT_SELECT)
     .eq('id', appointment.id)
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .single();
 
   if (error || !data) return res.status(500).json({ error: error?.message });
@@ -124,15 +128,16 @@ router.post('/', async (req, res) => {
 });
 
 router.put('/:id', async (req, res) => {
+  const salonId = getSalonId(req);
   const { status, notes, clientId, staffId, serviceId, date, startTime } = req.body;
 
-  if (clientId !== undefined && !(await isInPilotSalon('clients', clientId))) {
+  if (clientId !== undefined && !(await isInSalon('clients', clientId, salonId))) {
     return res.status(400).json({ error: 'Invalid client for this salon' });
   }
-  if (staffId !== undefined && !(await isInPilotSalon('staff', staffId))) {
+  if (staffId !== undefined && !(await isInSalon('staff', staffId, salonId))) {
     return res.status(400).json({ error: 'Invalid staff for this salon' });
   }
-  if (serviceId !== undefined && !(await isInPilotSalon('services', serviceId))) {
+  if (serviceId !== undefined && !(await isInSalon('services', serviceId, salonId))) {
     return res.status(400).json({ error: 'Invalid service for this salon' });
   }
 
@@ -150,7 +155,7 @@ router.put('/:id', async (req, res) => {
       .from('appointments')
       .select('service_id, start_time')
       .eq('id', req.params.id)
-      .eq('salon_id', PILOT_SALON_ID)
+      .eq('salon_id', salonId)
       .single();
 
     const resolvedServiceId = serviceId ?? existing?.service_id;
@@ -161,7 +166,7 @@ router.put('/:id', async (req, res) => {
         .from('services')
         .select('duration')
         .eq('id', resolvedServiceId)
-        .eq('salon_id', PILOT_SALON_ID)
+        .eq('salon_id', salonId)
         .single();
 
       if (service) {
@@ -174,7 +179,7 @@ router.put('/:id', async (req, res) => {
     .from('appointments')
     .update(updates)
     .eq('id', req.params.id)
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .select('client_id, date, status')
     .single();
 
@@ -185,7 +190,7 @@ router.put('/:id', async (req, res) => {
       .from('appointments')
       .select('date, start_time')
       .eq('id', req.params.id)
-      .eq('salon_id', PILOT_SALON_ID)
+      .eq('salon_id', salonId)
       .single();
 
     if (apptForReminder) {
@@ -198,7 +203,7 @@ router.put('/:id', async (req, res) => {
           message: `Reminder: Your appointment on ${reminderDate} at ${reminderTime}`,
         })
         .eq('appointment_id', req.params.id)
-        .eq('salon_id', PILOT_SALON_ID)
+        .eq('salon_id', salonId)
         .eq('status', 'pending');
     }
   }
@@ -208,7 +213,7 @@ router.put('/:id', async (req, res) => {
       .from('clients')
       .select('total_visits')
       .eq('id', updated.client_id)
-      .eq('salon_id', PILOT_SALON_ID)
+      .eq('salon_id', salonId)
       .single();
 
     if (client) {
@@ -219,7 +224,7 @@ router.put('/:id', async (req, res) => {
           last_visit: updated.date,
         })
         .eq('id', updated.client_id)
-        .eq('salon_id', PILOT_SALON_ID);
+        .eq('salon_id', salonId);
     }
   }
 
@@ -227,7 +232,7 @@ router.put('/:id', async (req, res) => {
     .from('appointments')
     .select(APPOINTMENT_SELECT)
     .eq('id', req.params.id)
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .single();
 
   if (fetchError || !data) return res.status(500).json({ error: fetchError?.message });
@@ -235,11 +240,12 @@ router.put('/:id', async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
+  const salonId = getSalonId(req);
   const { data, error } = await supabase
     .from('appointments')
     .update({ status: 'cancelled' })
     .eq('id', req.params.id)
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .select('id')
     .single();
 
@@ -249,14 +255,14 @@ router.delete('/:id', async (req, res) => {
     .from('reminders')
     .update({ status: 'failed', message: 'Cancelled — appointment was cancelled' })
     .eq('appointment_id', req.params.id)
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .eq('status', 'pending');
 
   const { data: enriched, error: fetchError } = await supabase
     .from('appointments')
     .select(APPOINTMENT_SELECT)
     .eq('id', req.params.id)
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .single();
 
   if (fetchError || !enriched) return res.status(500).json({ error: fetchError?.message });

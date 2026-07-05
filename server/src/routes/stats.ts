@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
 import { mapEnrichedReminder } from '../lib/mappers.js';
-import { PILOT_SALON_ID } from '../lib/pilotSalon.js';
+import { getSalonId } from '../lib/salonContext.js';
 import type { AnalyticsData, DashboardStats } from '../types.js';
 
 const router = Router();
@@ -14,7 +14,8 @@ function localDateStr(date = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
-router.get('/dashboard', async (_req, res) => {
+router.get('/dashboard', async (req, res) => {
+  const salonId = getSalonId(req);
   const today = localDateStr();
   const monthPrefix = today.slice(0, 7);
 
@@ -22,15 +23,15 @@ router.get('/dashboard', async (_req, res) => {
     supabase
       .from('clients')
       .select('id', { count: 'exact', head: true })
-      .eq('salon_id', PILOT_SALON_ID),
+      .eq('salon_id', salonId),
     supabase
       .from('appointments')
       .select('id, status, date, service_id')
-      .eq('salon_id', PILOT_SALON_ID),
+      .eq('salon_id', salonId),
     supabase
       .from('reminders')
       .select('id', { count: 'exact', head: true })
-      .eq('salon_id', PILOT_SALON_ID)
+      .eq('salon_id', salonId)
       .eq('status', 'pending'),
   ]);
 
@@ -50,7 +51,7 @@ router.get('/dashboard', async (_req, res) => {
     const { data: services } = await supabase
       .from('services')
       .select('id, price')
-      .eq('salon_id', PILOT_SALON_ID)
+      .eq('salon_id', salonId)
       .in('id', serviceIds);
 
     const priceMap = new Map((services ?? []).map((s) => [s.id, Number(s.price)]));
@@ -72,7 +73,8 @@ router.get('/dashboard', async (_req, res) => {
   res.json(stats);
 });
 
-router.get('/analytics', async (_req, res) => {
+router.get('/analytics', async (req, res) => {
+  const salonId = getSalonId(req);
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const currentMonth = new Date().getMonth();
   const year = new Date().getFullYear();
@@ -80,18 +82,18 @@ router.get('/analytics', async (_req, res) => {
   const { data: appointments, error: aptError } = await supabase
     .from('appointments')
     .select('status, date, service_id, staff_id')
-    .eq('salon_id', PILOT_SALON_ID);
+    .eq('salon_id', salonId);
 
   if (aptError) return res.status(500).json({ error: aptError.message });
 
   const { data: services } = await supabase
     .from('services')
     .select('id, name, price')
-    .eq('salon_id', PILOT_SALON_ID);
+    .eq('salon_id', salonId);
   const { data: staffMembers } = await supabase
     .from('staff')
     .select('id, name')
-    .eq('salon_id', PILOT_SALON_ID);
+    .eq('salon_id', salonId);
 
   const serviceMap = new Map((services ?? []).map((s) => [s.id, s]));
   const staffMap = new Map((staffMembers ?? []).map((s) => [s.id, s]));
@@ -161,7 +163,8 @@ router.get('/analytics', async (_req, res) => {
   res.json(analytics);
 });
 
-router.get('/reminders', async (_req, res) => {
+router.get('/reminders', async (req, res) => {
+  const salonId = getSalonId(req);
   const { data, error } = await supabase
     .from('reminders')
     .select(`
@@ -172,7 +175,7 @@ router.get('/reminders', async (_req, res) => {
         clients(name)
       )
     `)
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .order('scheduled_for');
 
   if (error) return res.status(500).json({ error: error.message });

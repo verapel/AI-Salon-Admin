@@ -1,16 +1,17 @@
 import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
 import { mapStaff, initialsAvatar } from '../lib/mappers.js';
-import { PILOT_SALON_ID } from '../lib/pilotSalon.js';
+import { getSalonId } from '../lib/salonContext.js';
 import type { Database } from '../types/database.js';
 
 const router = Router();
 
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
+  const salonId = getSalonId(req);
   const { data, error } = await supabase
     .from('staff')
     .select('*')
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .order('name');
 
   if (error) return res.status(500).json({ error: error.message });
@@ -18,11 +19,12 @@ router.get('/', async (_req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
+  const salonId = getSalonId(req);
   const { data, error } = await supabase
     .from('staff')
     .select('*')
     .eq('id', req.params.id)
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .single();
 
   if (error || !data) return res.status(404).json({ error: 'Staff member not found' });
@@ -30,6 +32,7 @@ router.get('/:id', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
+  const salonId = getSalonId(req);
   const { name, email, phone, role, specialties } = req.body;
   if (!name || !email) return res.status(400).json({ error: 'Name and email are required' });
 
@@ -43,7 +46,7 @@ router.post('/', async (req, res) => {
       specialties: specialties || [],
       avatar: initialsAvatar(name),
       active: true,
-      salon_id: PILOT_SALON_ID,
+      salon_id: salonId,
     })
     .select('*')
     .single();
@@ -53,6 +56,7 @@ router.post('/', async (req, res) => {
 });
 
 router.put('/:id', async (req, res) => {
+  const salonId = getSalonId(req);
   const { name, email, phone, role, specialties, active } = req.body;
 
   const updates: Database['public']['Tables']['staff']['Update'] = {};
@@ -70,7 +74,7 @@ router.put('/:id', async (req, res) => {
     .from('staff')
     .update(updates)
     .eq('id', req.params.id)
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .select('*')
     .single();
 
@@ -79,11 +83,12 @@ router.put('/:id', async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
+  const salonId = getSalonId(req);
   const { data, error } = await supabase
     .from('staff')
     .update({ active: false })
     .eq('id', req.params.id)
-    .eq('salon_id', PILOT_SALON_ID)
+    .eq('salon_id', salonId)
     .select('*')
     .single();
 
