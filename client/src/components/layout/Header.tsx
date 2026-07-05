@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Menu, Moon, Sun, Bell, X, Globe, Check } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Menu, Moon, Sun, Bell, X, Globe, Check, LogOut } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useTheme } from '@/context/ThemeContext';
 import { useLanguage, LANGUAGES, type LangCode } from '@/context/LanguageContext';
+import { useAuth } from '@/context/AuthContext';
 import { api } from '@/lib/api';
 import { formatDate, formatTime } from '@/lib/utils';
 import type { Reminder } from '@/types';
@@ -28,6 +29,8 @@ interface HeaderProps {
 }
 
 export default function Header({ title, subtitle, onMenuClick, actions }: HeaderProps) {
+  const navigate = useNavigate();
+  const { signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { language, setLanguage, t } = useLanguage();
   const [panelOpen, setPanelOpen] = useState(false);
@@ -99,6 +102,11 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
   function handleLanguageChange(code: LangCode) {
     setLanguage(code);
     setLangOpen(false);
+  }
+
+  async function handleSignOut() {
+    await signOut();
+    navigate('/login', { replace: true });
   }
 
   return (
@@ -255,6 +263,17 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
         <button onClick={toggleTheme} className="btn-ghost" aria-label={t('header.toggleTheme')}>
           {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
         </button>
+
+        <button
+          type="button"
+          onClick={handleSignOut}
+          className="btn-ghost inline-flex items-center gap-1.5 text-sm font-medium"
+          aria-label={t('auth.signOut')}
+        >
+          <LogOut className="h-4 w-4 shrink-0" />
+          <span>{t('auth.signOut')}</span>
+        </button>
+
         <div className="ml-2 hidden items-center gap-2 sm:flex">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700 dark:bg-brand-900/50 dark:text-brand-300">
             AD

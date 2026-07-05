@@ -423,6 +423,7 @@ const en = {
   'auth.login.signingIn': 'Signing in...',
   'auth.login.error': 'Sign in failed. Check your email and password.',
   'auth.login.noAccess': 'No access assigned to this account.',
+  'auth.signOut': 'Sign out',
 } as const;
 
 export type TranslationKey = keyof typeof en;
@@ -834,6 +835,7 @@ const ru: Record<TranslationKey, string> = {
   'auth.login.signingIn': 'Вход...',
   'auth.login.error': 'Не удалось войти. Проверьте email и пароль.',
   'auth.login.noAccess': 'У этой учётной записи нет доступа.',
+  'auth.signOut': 'Выйти',
 };
 
 const hy: Record<TranslationKey, string> = {
@@ -1243,6 +1245,7 @@ const hy: Record<TranslationKey, string> = {
   'auth.login.signingIn': 'Signing in...',
   'auth.login.error': 'Sign in failed. Check your email and password.',
   'auth.login.noAccess': 'No access assigned to this account.',
+  'auth.signOut': 'Դուրս գալ',
 };
 
 export const translations: Record<LangCode, Record<TranslationKey, string>> = {
