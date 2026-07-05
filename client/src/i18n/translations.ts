@@ -39,7 +39,7 @@ const en = {
   'nav.aiAssistant': 'AI Assistant',
 
   // Sidebar
-  'sidebar.brand': 'AI Salon',
+  'sidebar.brand': 'AI Admin',
   'sidebar.adminPanel': 'Admin Panel',
   'sidebar.proTip': 'Pro Tip',
   'sidebar.proTipText': 'Use the booking system to schedule appointments and auto-send reminders.',
@@ -254,7 +254,7 @@ const en = {
   'reminders.retry': 'Retry',
   'pages.aiAssistant.title': 'AI Assistant',
   'pages.aiAssistant.subtitle': 'Messenger integrations',
-  'pages.default.title': 'AI Salon Admin',
+  'pages.default.title': 'AI Admin',
   'pages.default.subtitle': '',
 
   // Header
@@ -326,7 +326,7 @@ const en = {
   'integrations.testFailed': 'Could not send test message. Check TELEGRAM_CHAT_ID on the server.',
 
   // Developer cabinet
-  'developer.brand': 'AI Salon',
+  'developer.brand': 'AI Admin',
   'developer.cabinet': 'Developer Cabinet',
   'developer.nav.overview': 'Overview',
   'developer.nav.salons': 'Salons',
@@ -447,7 +447,7 @@ const ru: Record<TranslationKey, string> = {
   'nav.integrations': 'Интеграции',
   'nav.aiAssistant': 'AI Ассистент',
 
-  'sidebar.brand': 'AI Salon',
+  'sidebar.brand': 'AI Admin',
   'sidebar.adminPanel': 'Админ-панель',
   'sidebar.proTip': 'Совет',
   'sidebar.proTipText': 'Используйте систему записи для планирования визитов и автоматических напоминаний.',
@@ -661,7 +661,7 @@ const ru: Record<TranslationKey, string> = {
   'reminders.retry': 'Повторить',
   'pages.aiAssistant.title': 'AI Ассистент',
   'pages.aiAssistant.subtitle': 'Интеграции с мессенджерами',
-  'pages.default.title': 'AI Salon Admin',
+  'pages.default.title': 'AI Admin',
   'pages.default.subtitle': '',
 
   'header.reminders': 'Напоминания',
@@ -729,7 +729,7 @@ const ru: Record<TranslationKey, string> = {
   'integrations.testSent': 'Тестовое сообщение отправлено в чат администратора.',
   'integrations.testFailed': 'Не удалось отправить тест. Проверьте TELEGRAM_CHAT_ID на сервере.',
 
-  'developer.brand': 'AI Salon',
+  'developer.brand': 'AI Admin',
   'developer.cabinet': 'Кабинет разработчика',
   'developer.nav.overview': 'Обзор',
   'developer.nav.salons': 'Салоны',
@@ -848,7 +848,7 @@ const hy: Record<TranslationKey, string> = {
   'nav.integrations': 'Ինտեգրացիաներ',
   'nav.aiAssistant': 'AI Օգնական',
 
-  'sidebar.brand': 'AI Salon',
+  'sidebar.brand': 'AI Admin',
   'sidebar.adminPanel': 'Ադմին վահանակ',
   'sidebar.proTip': 'Խորհուրդ',
   'sidebar.proTipText': 'Օգտագործեք գրանցման համակարգը հանդիպումներ պլանավորելու և ավտոմատ հիշեցումներ ուղարկելու համար.',
@@ -1062,7 +1062,7 @@ const hy: Record<TranslationKey, string> = {
   'reminders.retry': 'Կրկին փորձել',
   'pages.aiAssistant.title': 'AI Օգնական',
   'pages.aiAssistant.subtitle': 'Մեսենջերների ինteգрация',
-  'pages.default.title': 'AI Salon Admin',
+  'pages.default.title': 'AI Admin',
   'pages.default.subtitle': '',
 
   'header.reminders': 'Հիշեցումներ',
@@ -1130,7 +1130,7 @@ const hy: Record<TranslationKey, string> = {
   'integrations.testSent': 'Թեստային հաղորդագրություն ուղարկված է:',
   'integrations.testFailed': 'Չհաջողվեց ուղարկել թեստը: Ստուգեք TELEGRAM_CHAT_ID-ը:',
 
-  'developer.brand': 'AI Salon',
+  'developer.brand': 'AI Admin',
   'developer.cabinet': 'Developer վահանակ',
   'developer.nav.overview': 'Ակնարկ',
   'developer.nav.salons': 'Salon-ներ',

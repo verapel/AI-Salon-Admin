@@ -1048,7 +1048,7 @@ app.get('/api/telegram/test', async (_req, res) => {
 
   await sendTelegramMessage(
     Number(chatId),
-    '🎉 AI Salon Admin подключен к Telegram!'
+    '🎉 AI Admin подключен к Telegram!'
   );
 
   res.json({
