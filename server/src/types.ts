@@ -7,6 +7,9 @@ export interface Client {
   totalVisits: number;
   lastVisit: string | null;
   createdAt: string;
+  isBlocked: boolean;
+  blockedAt: string | null;
+  blockedReason: string | null;
 }
 
 export interface Service {

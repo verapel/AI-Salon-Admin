@@ -20,6 +20,9 @@ export function mapClient(row: {
   total_visits: number;
   last_visit: string | null;
   created_at: string;
+  is_blocked?: boolean;
+  blocked_at?: string | null;
+  blocked_reason?: string | null;
 }): Client {
   return {
     id: row.id,
@@ -30,6 +33,9 @@ export function mapClient(row: {
     totalVisits: row.total_visits,
     lastVisit: row.last_visit,
     createdAt: row.created_at,
+    isBlocked: row.is_blocked ?? false,
+    blockedAt: row.blocked_at ?? null,
+    blockedReason: row.blocked_reason ?? null,
   };
 }
 

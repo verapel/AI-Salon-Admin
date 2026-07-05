@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, Users, Mail, Phone } from 'lucide-react';
+import { Plus, Pencil, Trash2, Users, Mail, Phone, Ban, ShieldCheck } from 'lucide-react';
 import SearchInput from '@/components/ui/SearchInput';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
@@ -8,12 +8,24 @@ import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import type { Client } from '@/types';
+import type { TranslationKey } from '@/i18n/translations';
+
+type ClientFilter = 'all' | 'active' | 'blacklist';
+
+const FILTER_KEYS: Record<ClientFilter, TranslationKey> = {
+  all: 'clients.filterAll',
+  active: 'clients.filterActive',
+  blacklist: 'clients.filterBlacklist',
+};
+
+const FILTERS: ClientFilter[] = ['all', 'active', 'blacklist'];
 
 export default function Clients() {
   const { t } = useLanguage();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<ClientFilter>('all');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
   const [form, setForm] = useState({ name: '', email: '', phone: '', notes: '' });
@@ -31,12 +43,16 @@ export default function Clients() {
   }, []);
 
   const query = search.trim().toLowerCase();
-  const filtered = clients.filter(
-    (c) =>
+  const filtered = clients.filter((c) => {
+    const matchesSearch =
       c.name.toLowerCase().includes(query) ||
       c.email.toLowerCase().includes(query) ||
-      c.phone.toLowerCase().includes(query)
-  );
+      c.phone.toLowerCase().includes(query);
+    if (!matchesSearch) return false;
+    if (filter === 'active') return !c.isBlocked;
+    if (filter === 'blacklist') return c.isBlocked;
+    return true;
+  });
 
   const openCreate = () => {
     setEditing(null);
@@ -75,7 +91,40 @@ export default function Clients() {
     }
   };
 
+  const handleBlock = async (client: Client) => {
+    if (!confirm(t('clients.blockConfirm'))) return;
+    try {
+      await api.clients.block(client.id);
+      loadClients();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUnblock = async (client: Client) => {
+    try {
+      await api.clients.unblock(client.id);
+      loadClients();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   if (loading) return <LoadingSpinner />;
+
+  const emptyTitle =
+    filter === 'blacklist'
+      ? t('clients.noBlacklist')
+      : clients.length === 0
+        ? t('clients.noClients')
+        : t('clients.noResults');
+
+  const emptyDescription =
+    filter === 'blacklist'
+      ? t('clients.noBlacklistDesc')
+      : clients.length === 0
+        ? t('clients.noClientsDesc')
+        : t('clients.noResultsDesc');
 
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-clip space-y-4 animate-fade-in">
@@ -92,15 +141,29 @@ export default function Clients() {
         </button>
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        {FILTERS.map((status) => (
+          <button
+            key={status}
+            onClick={() => setFilter(status)}
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+              filter === status
+                ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/50 dark:text-brand-300'
+                : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+            }`}
+          >
+            {t(FILTER_KEYS[status])}
+          </button>
+        ))}
+      </div>
+
       {filtered.length === 0 ? (
         <EmptyState
           icon={<Users className="h-8 w-8 text-gray-400" />}
-          title={clients.length === 0 ? t('clients.noClients') : t('clients.noResults')}
-          description={
-            clients.length === 0 ? t('clients.noClientsDesc') : t('clients.noResultsDesc')
-          }
+          title={emptyTitle}
+          description={emptyDescription}
           action={
-            clients.length === 0 ? (
+            filter !== 'blacklist' && clients.length === 0 ? (
               <button onClick={openCreate} className="btn-primary">
                 <Plus className="h-4 w-4" /> {t('common.addClient')}
               </button>
@@ -112,11 +175,19 @@ export default function Clients() {
           {filtered.map((client) => (
             <div
               key={client.id}
-              className="card group w-full min-w-0 max-w-full p-4 hover:shadow-card-hover sm:p-6"
+              className={`card group w-full min-w-0 max-w-full p-4 hover:shadow-card-hover sm:p-6 ${
+                client.isBlocked ? 'border-red-200 dark:border-red-900/50' : ''
+              }`}
             >
               <div className="flex min-w-0 items-center justify-between gap-1 sm:items-start">
                 <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700 dark:bg-brand-900/50 dark:text-brand-300 sm:h-11 sm:w-11 sm:text-sm">
+                  <div
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold sm:h-11 sm:w-11 sm:text-sm ${
+                      client.isBlocked
+                        ? 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300'
+                        : 'bg-brand-100 text-brand-700 dark:bg-brand-900/50 dark:text-brand-300'
+                    }`}
+                  >
                     {client.name
                       .split(' ')
                       .map((n) => n[0])
@@ -125,9 +196,16 @@ export default function Clients() {
                       .toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h4 className="truncate font-semibold text-gray-900 dark:text-white">
-                      {client.name}
-                    </h4>
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <h4 className="truncate font-semibold text-gray-900 dark:text-white">
+                        {client.name}
+                      </h4>
+                      {client.isBlocked && (
+                        <span className="badge shrink-0 bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300">
+                          {t('clients.blocked')}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
                       {client.totalVisits} {t('clients.visits')}
                     </p>
@@ -135,6 +213,25 @@ export default function Clients() {
                 </div>
 
                 <div className="flex shrink-0 gap-1.5 transition-opacity sm:gap-1 sm:opacity-0 sm:group-hover:opacity-100">
+                  {client.isBlocked ? (
+                    <button
+                      onClick={() => handleUnblock(client)}
+                      className="btn-ghost min-h-[44px] min-w-[44px] p-2 text-green-600 sm:min-h-0 sm:min-w-0 sm:p-1.5"
+                      aria-label={t('clients.unblockAria')}
+                      title={t('clients.unblock')}
+                    >
+                      <ShieldCheck className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleBlock(client)}
+                      className="btn-ghost min-h-[44px] min-w-[44px] p-2 text-red-500 sm:min-h-0 sm:min-w-0 sm:p-1.5"
+                      aria-label={t('clients.blockAria')}
+                      title={t('clients.block')}
+                    >
+                      <Ban className="h-4 w-4" />
+                    </button>
+                  )}
                   <button
                     onClick={() => openEdit(client)}
                     className="btn-ghost min-h-[44px] min-w-[44px] p-2 sm:min-h-0 sm:min-w-0 sm:p-1.5"
@@ -165,6 +262,11 @@ export default function Clients() {
                     {client.phone || t('clients.phoneNA')}
                   </span>
                 </div>
+                {client.isBlocked && client.blockedReason && (
+                  <p className="truncate text-xs text-red-600 dark:text-red-400">
+                    {client.blockedReason}
+                  </p>
+                )}
                 {client.lastVisit && (
                   <p className="truncate text-xs text-gray-500 dark:text-gray-400">
                     {t('clients.lastVisit')}: {formatDate(client.lastVisit)}

@@ -21,6 +21,13 @@ export const api = {
       request<import('@/types').Client>('/clients', { method: 'POST', body: JSON.stringify(data) }),
     update: (id: string, data: Partial<import('@/types').Client>) =>
       request<import('@/types').Client>(`/clients/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    block: (id: string, blockedReason?: string) =>
+      request<import('@/types').Client>(`/clients/${id}/block`, {
+        method: 'POST',
+        body: JSON.stringify(blockedReason ? { blockedReason } : {}),
+      }),
+    unblock: (id: string) =>
+      request<import('@/types').Client>(`/clients/${id}/unblock`, { method: 'POST' }),
     delete: (id: string) => request<void>(`/clients/${id}`, { method: 'DELETE' }),
   },
   services: {

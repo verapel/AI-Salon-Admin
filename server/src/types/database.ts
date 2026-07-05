@@ -118,6 +118,9 @@ export interface Database {
           total_visits: number;
           last_visit: string | null;
           created_at: string;
+          is_blocked: boolean;
+          blocked_at: string | null;
+          blocked_reason: string | null;
         };
         Insert: {
           id?: string;
@@ -128,6 +131,9 @@ export interface Database {
           total_visits?: number;
           last_visit?: string | null;
           created_at?: string;
+          is_blocked?: boolean;
+          blocked_at?: string | null;
+          blocked_reason?: string | null;
         };
         Update: {
           id?: string;
@@ -138,6 +144,9 @@ export interface Database {
           total_visits?: number;
           last_visit?: string | null;
           created_at?: string;
+          is_blocked?: boolean;
+          blocked_at?: string | null;
+          blocked_reason?: string | null;
         };
         Relationships: [];
       };

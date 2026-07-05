@@ -7,6 +7,9 @@ export type StaffRow = { id: string; name: string; specialties: string[] };
 export const STAFF_UNAVAILABLE_MESSAGE =
   'Для этой услуги пока не назначен мастер. Администратор свяжется с вами.';
 
+export const BLOCKED_CLIENT_BOOKING_MESSAGE =
+  'К сожалению, онлайн-запись для этого номера недоступна. Администратор свяжется с вами.';
+
 export function localDateStr(offsetDays = 0): string {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);

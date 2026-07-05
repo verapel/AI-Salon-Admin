@@ -29,6 +29,7 @@ import {
   localDateStr,
   resolveServiceByName,
   STAFF_UNAVAILABLE_MESSAGE,
+  BLOCKED_CLIENT_BOOKING_MESSAGE,
 } from './lib/telegramBooking.js';
 
 const app = express();
@@ -470,12 +471,26 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
 
       // 2. Найти или создать клиента
       const { data: existingClient, error: lookupError } = await (supabase as any)
-        .from("clients").select("id").eq("phone", phone).maybeSingle();
+        .from("clients").select("id, is_blocked").eq("phone", phone).maybeSingle();
 
       if (lookupError) {
         console.error("Client lookup error:", lookupError);
         bookingState.delete(chatId); chatHistory.delete(chatId);
         return "Произошла ошибка при поиске клиента. Попробуйте ещё раз.";
+      }
+
+      if (existingClient?.is_blocked) {
+        bookingState.delete(chatId);
+        chatHistory.delete(chatId);
+        await sendTelegramMessage(chatId, BLOCKED_CLIENT_BOOKING_MESSAGE);
+        const adminChatId = process.env.TELEGRAM_CHAT_ID;
+        if (adminChatId) {
+          await sendTelegramMessage(
+            Number(adminChatId),
+            `⚠️ Заблокированный клиент пытался записаться онлайн\n\n👤 ${name}\n📞 ${phone}\n💇 ${service}\n📅 ${date} ${time}`
+          );
+        }
+        return null;
       }
 
       let clientId: string;

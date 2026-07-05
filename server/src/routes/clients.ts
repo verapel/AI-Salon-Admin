@@ -69,6 +69,42 @@ router.put('/:id', async (req, res) => {
   res.json(mapClient(data));
 });
 
+router.post('/:id/block', async (req, res) => {
+  const { blockedReason } = req.body ?? {};
+  const reason =
+    typeof blockedReason === 'string' && blockedReason.trim() ? blockedReason.trim() : null;
+
+  const { data, error } = await supabase
+    .from('clients')
+    .update({
+      is_blocked: true,
+      blocked_at: new Date().toISOString(),
+      blocked_reason: reason,
+    })
+    .eq('id', req.params.id)
+    .select('*')
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Client not found' });
+  res.json(mapClient(data));
+});
+
+router.post('/:id/unblock', async (req, res) => {
+  const { data, error } = await supabase
+    .from('clients')
+    .update({
+      is_blocked: false,
+      blocked_at: null,
+      blocked_reason: null,
+    })
+    .eq('id', req.params.id)
+    .select('*')
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'Client not found' });
+  res.json(mapClient(data));
+});
+
 router.delete('/:id', async (req, res) => {
   const { error } = await supabase.from('clients').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ error: error.message });
