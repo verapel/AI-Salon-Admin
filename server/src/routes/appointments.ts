@@ -8,7 +8,7 @@ const router = Router();
 
 const APPOINTMENT_SELECT = `
   *,
-  clients(name),
+  clients(name, birthday),
   staff(name),
   services(name, price, duration)
 `;

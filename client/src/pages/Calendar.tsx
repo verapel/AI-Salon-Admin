@@ -64,6 +64,54 @@ function matchesStaffFilter(apt: Appointment, staffFilter: 'all' | string): bool
   return apt.staffId === staffFilter;
 }
 
+function monthDayFromDateStr(dateStr: string): { month: number; day: number } | null {
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  return { month: Number(match[2]), day: Number(match[3]) };
+}
+
+function nextCalendarDayMonthDay(dateStr: string): { month: number; day: number } | null {
+  const parts = monthDayFromDateStr(dateStr);
+  if (!parts) return null;
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), parts.month - 1, parts.day);
+  date.setDate(date.getDate() + 1);
+  return { month: date.getMonth() + 1, day: date.getDate() };
+}
+
+/** Show 🎂 when birthday is on the appointment date or the next calendar day. */
+function isBirthdayIndicatorVisible(
+  appointmentDate: string,
+  clientBirthday: string | null | undefined
+): boolean {
+  if (!clientBirthday) return false;
+
+  const birthdayMd = monthDayFromDateStr(clientBirthday);
+  const appointmentMd = monthDayFromDateStr(appointmentDate);
+  const nextDayMd = nextCalendarDayMonthDay(appointmentDate);
+  if (!birthdayMd || !appointmentMd || !nextDayMd) return false;
+
+  const sameDay =
+    birthdayMd.month === appointmentMd.month && birthdayMd.day === appointmentMd.day;
+  const nextDay =
+    birthdayMd.month === nextDayMd.month && birthdayMd.day === nextDayMd.day;
+
+  return sameDay || nextDay;
+}
+
+function BirthdayIndicator({ visible }: { visible: boolean }) {
+  if (!visible) return null;
+  return (
+    <span
+      className="pointer-events-none absolute right-0.5 top-0.5 text-[10px] leading-none"
+      aria-hidden="true"
+    >
+      🎂
+    </span>
+  );
+}
+
 export default function Calendar() {
   const { language, t } = useLanguage();
   const locale = LOCALE[language];
@@ -260,8 +308,11 @@ export default function Calendar() {
                   {appts.map((apt, index) => (
                     <div
                       key={apt.id}
-                      className={index > 0 ? 'border-t border-gray-100 pt-3 dark:border-gray-800' : ''}
+                      className={`relative ${index > 0 ? 'border-t border-gray-100 pt-3 dark:border-gray-800' : ''}`}
                     >
+                      <BirthdayIndicator
+                        visible={isBirthdayIndicatorVisible(apt.date, apt.clientBirthday)}
+                      />
                       <div className="flex items-start justify-between gap-2">
                         <p className="truncate text-base font-semibold text-gray-900 dark:text-white">
                           {apt.clientName}
@@ -338,8 +389,11 @@ export default function Calendar() {
                       {dayAppts.map((apt) => (
                         <div
                           key={apt.id}
-                          className={`shrink-0 rounded-md p-1.5 text-xs leading-tight ${getStatusColor(apt.status)}`}
+                          className={`relative shrink-0 rounded-md p-1.5 text-xs leading-tight ${getStatusColor(apt.status)}`}
                         >
+                          <BirthdayIndicator
+                            visible={isBirthdayIndicatorVisible(apt.date, apt.clientBirthday)}
+                          />
                           <p className="truncate font-medium">{apt.clientName}</p>
                           <p className="truncate opacity-75">{apt.serviceName}</p>
                           {showStaffOnCards && apt.staffName && (

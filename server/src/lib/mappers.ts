@@ -123,7 +123,7 @@ type AppointmentJoinRow = {
   notes: string;
   reminder_sent: boolean;
   created_at: string;
-  clients: { name: string } | null;
+  clients: { name: string; birthday: string | null } | null;
   staff: { name: string } | null;
   services: { name: string; price: number; duration: number } | null;
 };
@@ -133,6 +133,7 @@ export function mapEnrichedAppointment(row: AppointmentJoinRow) {
   return {
     ...base,
     clientName: row.clients?.name ?? 'Unknown',
+    clientBirthday: row.clients?.birthday ?? null,
     staffName: row.staff?.name ?? 'Unknown',
     serviceName: row.services?.name ?? 'Unknown',
     servicePrice: Number(row.services?.price ?? 0),

@@ -47,6 +47,7 @@ export interface Appointment {
   reminderSent: boolean;
   createdAt: string;
   clientName?: string;
+  clientBirthday?: string | null;
   staffName?: string;
   serviceName?: string;
   servicePrice?: number;
