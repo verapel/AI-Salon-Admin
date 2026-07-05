@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
 import { mapStaff, initialsAvatar } from '../lib/mappers.js';
+import { PILOT_SALON_ID } from '../lib/pilotSalon.js';
 import type { Database } from '../types/database.js';
 
 const router = Router();
@@ -9,6 +10,7 @@ router.get('/', async (_req, res) => {
   const { data, error } = await supabase
     .from('staff')
     .select('*')
+    .eq('salon_id', PILOT_SALON_ID)
     .order('name');
 
   if (error) return res.status(500).json({ error: error.message });
@@ -20,6 +22,7 @@ router.get('/:id', async (req, res) => {
     .from('staff')
     .select('*')
     .eq('id', req.params.id)
+    .eq('salon_id', PILOT_SALON_ID)
     .single();
 
   if (error || !data) return res.status(404).json({ error: 'Staff member not found' });
@@ -40,6 +43,7 @@ router.post('/', async (req, res) => {
       specialties: specialties || [],
       avatar: initialsAvatar(name),
       active: true,
+      salon_id: PILOT_SALON_ID,
     })
     .select('*')
     .single();
@@ -66,6 +70,7 @@ router.put('/:id', async (req, res) => {
     .from('staff')
     .update(updates)
     .eq('id', req.params.id)
+    .eq('salon_id', PILOT_SALON_ID)
     .select('*')
     .single();
 
@@ -78,6 +83,7 @@ router.delete('/:id', async (req, res) => {
     .from('staff')
     .update({ active: false })
     .eq('id', req.params.id)
+    .eq('salon_id', PILOT_SALON_ID)
     .select('*')
     .single();
 

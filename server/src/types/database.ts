@@ -122,6 +122,7 @@ export interface Database {
           blocked_at: string | null;
           blocked_reason: string | null;
           birthday: string | null;
+          salon_id: string | null;
         };
         Insert: {
           id?: string;
@@ -136,6 +137,7 @@ export interface Database {
           blocked_at?: string | null;
           blocked_reason?: string | null;
           birthday?: string | null;
+          salon_id?: string | null;
         };
         Update: {
           id?: string;
@@ -150,6 +152,7 @@ export interface Database {
           blocked_at?: string | null;
           blocked_reason?: string | null;
           birthday?: string | null;
+          salon_id?: string | null;
         };
         Relationships: [];
       };
@@ -163,6 +166,7 @@ export interface Database {
           category: string;
           active: boolean;
           created_at: string;
+          salon_id: string | null;
         };
         Insert: {
           id?: string;
@@ -173,6 +177,7 @@ export interface Database {
           category?: string;
           active?: boolean;
           created_at?: string;
+          salon_id?: string | null;
         };
         Update: {
           id?: string;
@@ -183,6 +188,7 @@ export interface Database {
           category?: string;
           active?: boolean;
           created_at?: string;
+          salon_id?: string | null;
         };
         Relationships: [];
       };
@@ -197,6 +203,7 @@ export interface Database {
           avatar: string;
           active: boolean;
           created_at: string;
+          salon_id: string | null;
         };
         Insert: {
           id?: string;
@@ -208,6 +215,7 @@ export interface Database {
           avatar?: string;
           active?: boolean;
           created_at?: string;
+          salon_id?: string | null;
         };
         Update: {
           id?: string;
@@ -219,6 +227,7 @@ export interface Database {
           avatar?: string;
           active?: boolean;
           created_at?: string;
+          salon_id?: string | null;
         };
         Relationships: [];
       };
@@ -235,6 +244,7 @@ export interface Database {
           notes: string;
           reminder_sent: boolean;
           created_at: string;
+          salon_id: string | null;
         };
         Insert: {
           id?: string;
@@ -248,6 +258,7 @@ export interface Database {
           notes?: string;
           reminder_sent?: boolean;
           created_at?: string;
+          salon_id?: string | null;
         };
         Update: {
           id?: string;
@@ -261,6 +272,7 @@ export interface Database {
           notes?: string;
           reminder_sent?: boolean;
           created_at?: string;
+          salon_id?: string | null;
         };
         Relationships: [];
       };
@@ -273,6 +285,7 @@ export interface Database {
           status: 'pending' | 'sent' | 'failed';
           message: string;
           created_at: string;
+          salon_id: string | null;
         };
         Insert: {
           id?: string;
@@ -282,6 +295,7 @@ export interface Database {
           status?: 'pending' | 'sent' | 'failed';
           message?: string;
           created_at?: string;
+          salon_id?: string | null;
         };
         Update: {
           id?: string;
@@ -291,6 +305,7 @@ export interface Database {
           status?: 'pending' | 'sent' | 'failed';
           message?: string;
           created_at?: string;
+          salon_id?: string | null;
         };
         Relationships: [];
       };

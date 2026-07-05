@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
 import { mapClient } from '../lib/mappers.js';
+import { PILOT_SALON_ID } from '../lib/pilotSalon.js';
 import type { Database } from '../types/database.js';
 
 const router = Router();
@@ -9,6 +10,7 @@ router.get('/', async (_req, res) => {
   const { data, error } = await supabase
     .from('clients')
     .select('*')
+    .eq('salon_id', PILOT_SALON_ID)
     .order('name');
 
   if (error) return res.status(500).json({ error: error.message });
@@ -20,6 +22,7 @@ router.get('/:id', async (req, res) => {
     .from('clients')
     .select('*')
     .eq('id', req.params.id)
+    .eq('salon_id', PILOT_SALON_ID)
     .single();
 
   if (error || !data) return res.status(404).json({ error: 'Client not found' });
@@ -40,6 +43,7 @@ router.post('/', async (req, res) => {
       birthday: birthday || null,
       total_visits: 0,
       last_visit: null,
+      salon_id: PILOT_SALON_ID,
     })
     .select('*')
     .single();
@@ -64,6 +68,7 @@ router.put('/:id', async (req, res) => {
     .from('clients')
     .update(updates)
     .eq('id', req.params.id)
+    .eq('salon_id', PILOT_SALON_ID)
     .select('*')
     .single();
 
@@ -84,6 +89,7 @@ router.post('/:id/block', async (req, res) => {
       blocked_reason: reason,
     })
     .eq('id', req.params.id)
+    .eq('salon_id', PILOT_SALON_ID)
     .select('*')
     .single();
 
@@ -100,6 +106,7 @@ router.post('/:id/unblock', async (req, res) => {
       blocked_reason: null,
     })
     .eq('id', req.params.id)
+    .eq('salon_id', PILOT_SALON_ID)
     .select('*')
     .single();
 
@@ -108,8 +115,16 @@ router.post('/:id/unblock', async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
-  const { error } = await supabase.from('clients').delete().eq('id', req.params.id);
+  const { data, error } = await supabase
+    .from('clients')
+    .delete()
+    .eq('id', req.params.id)
+    .eq('salon_id', PILOT_SALON_ID)
+    .select('id')
+    .maybeSingle();
+
   if (error) return res.status(500).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: 'Client not found' });
   res.status(204).send();
 });
 
