@@ -413,6 +413,16 @@ const en = {
   'developer.health.telegramNotConnected': 'Not configured',
   'developer.health.telegramError': 'Error',
   'developer.health.version': 'App version',
+
+  // Auth / Login
+  'auth.login.title': 'Sign in',
+  'auth.login.subtitle': 'Sign in to your salon or developer account',
+  'auth.login.email': 'Email',
+  'auth.login.password': 'Password',
+  'auth.login.submit': 'Sign in',
+  'auth.login.signingIn': 'Signing in...',
+  'auth.login.error': 'Sign in failed. Check your email and password.',
+  'auth.login.noAccess': 'No access assigned to this account.',
 } as const;
 
 export type TranslationKey = keyof typeof en;
@@ -816,6 +826,14 @@ const ru: Record<TranslationKey, string> = {
   'developer.health.telegramNotConnected': 'Не настроен',
   'developer.health.telegramError': 'Ошибка',
   'developer.health.version': 'Версия приложения',
+  'auth.login.title': 'Вход',
+  'auth.login.subtitle': 'Войдите в кабинет салона или developer',
+  'auth.login.email': 'Email',
+  'auth.login.password': 'Пароль',
+  'auth.login.submit': 'Войти',
+  'auth.login.signingIn': 'Вход...',
+  'auth.login.error': 'Не удалось войти. Проверьте email и пароль.',
+  'auth.login.noAccess': 'У этой учётной записи нет доступа.',
 };
 
 const hy: Record<TranslationKey, string> = {
@@ -1217,6 +1235,14 @@ const hy: Record<TranslationKey, string> = {
   'developer.health.telegramNotConnected': 'Not configured',
   'developer.health.telegramError': 'Error',
   'developer.health.version': 'App version',
+  'auth.login.title': 'Sign in',
+  'auth.login.subtitle': 'Sign in to your salon or developer account',
+  'auth.login.email': 'Email',
+  'auth.login.password': 'Password',
+  'auth.login.submit': 'Sign in',
+  'auth.login.signingIn': 'Signing in...',
+  'auth.login.error': 'Sign in failed. Check your email and password.',
+  'auth.login.noAccess': 'No access assigned to this account.',
 };
 
 export const translations: Record<LangCode, Record<TranslationKey, string>> = {

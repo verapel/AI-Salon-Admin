@@ -1,9 +1,21 @@
 const API_BASE = '/api';
 
+let accessToken: string | null = null;
+
+export function setAccessToken(token: string | null) {
+  accessToken = token;
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    ...(options?.headers as Record<string, string> | undefined),
+  };
+
   const res = await fetch(`${API_BASE}${url}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers,
   });
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: 'Request failed' }));
@@ -14,6 +26,17 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  auth: {
+    getMe: () =>
+      request<{
+        userId: string;
+        email: string;
+        isDeveloper: boolean;
+        platformRole: 'developer' | null;
+        salonId: string | null;
+        role: 'owner' | 'admin' | 'staff_readonly' | null;
+      }>('/auth/me'),
+  },
   clients: {
     getAll: () => request<import('@/types').Client[]>('/clients'),
     get: (id: string) => request<import('@/types').Client>(`/clients/${id}`),

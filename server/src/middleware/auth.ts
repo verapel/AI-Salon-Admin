@@ -2,6 +2,60 @@ import type { NextFunction, Request, Response } from 'express';
 import { supabase } from '../lib/supabase.js';
 import type { PlatformUserRole, RequestAuth, SalonMemberRole } from '../types/auth.js';
 
+export interface AuthMeResponse {
+  userId: string;
+  email: string;
+  isDeveloper: boolean;
+  platformRole: PlatformUserRole | null;
+  salonId: string | null;
+  role: SalonMemberRole | null;
+}
+
+export function toAuthMeResponse(auth: RequestAuth): AuthMeResponse {
+  return {
+    userId: auth.userId,
+    email: auth.email,
+    isDeveloper: auth.isDeveloper,
+    platformRole: auth.platformRole ?? null,
+    salonId: auth.salonId ?? null,
+    role: auth.role ?? null,
+  };
+}
+
+export async function populateAuthFromDb(auth: RequestAuth): Promise<void> {
+  const { data: platformUser, error: platformError } = await supabase
+    .from('platform_users')
+    .select('role')
+    .eq('user_id', auth.userId)
+    .eq('active', true)
+    .maybeSingle();
+
+  if (platformError) {
+    throw new Error(platformError.message);
+  }
+
+  if (platformUser) {
+    auth.isDeveloper = true;
+    auth.platformRole = platformUser.role as PlatformUserRole;
+  }
+
+  const { data: memberships, error: membershipError } = await supabase
+    .from('salon_members')
+    .select('salon_id, role')
+    .eq('user_id', auth.userId)
+    .eq('active', true);
+
+  if (membershipError) {
+    throw new Error(membershipError.message);
+  }
+
+  if (memberships?.length) {
+    const membership = memberships[0];
+    auth.salonId = membership.salon_id;
+    auth.role = membership.role as SalonMemberRole;
+  }
+}
+
 function parseBearerToken(authorization: string | undefined): string | null {
   if (!authorization?.startsWith('Bearer ')) return null;
   const token = authorization.slice('Bearer '.length).trim();
@@ -45,36 +99,11 @@ export async function requireSalonAuth(req: Request, res: Response, next: NextFu
   try {
     if (!(await loadAuthUser(req, res))) return;
 
-    const { data: memberships, error: membershipError } = await supabase
-      .from('salon_members')
-      .select('salon_id, role')
-      .eq('user_id', req.auth!.userId)
-      .eq('active', true);
+    await populateAuthFromDb(req.auth!);
 
-    if (membershipError) {
-      res.status(500).json({ error: membershipError.message });
-      return;
-    }
-
-    if (!memberships?.length) {
+    if (!req.auth!.salonId) {
       res.status(403).json({ error: 'No salon access' });
       return;
-    }
-
-    const membership = memberships[0];
-    req.auth!.salonId = membership.salon_id;
-    req.auth!.role = membership.role as SalonMemberRole;
-
-    const { data: platformUser } = await supabase
-      .from('platform_users')
-      .select('role')
-      .eq('user_id', req.auth!.userId)
-      .eq('active', true)
-      .maybeSingle();
-
-    if (platformUser) {
-      req.auth!.isDeveloper = true;
-      req.auth!.platformRole = platformUser.role as PlatformUserRole;
     }
 
     next();
@@ -88,25 +117,13 @@ export async function requireDeveloperAuth(req: Request, res: Response, next: Ne
   try {
     if (!(await loadAuthUser(req, res))) return;
 
-    const { data: platformUser, error: platformError } = await supabase
-      .from('platform_users')
-      .select('role')
-      .eq('user_id', req.auth!.userId)
-      .eq('active', true)
-      .maybeSingle();
+    await populateAuthFromDb(req.auth!);
 
-    if (platformError) {
-      res.status(500).json({ error: platformError.message });
-      return;
-    }
-
-    if (!platformUser) {
+    if (!req.auth!.isDeveloper) {
       res.status(403).json({ error: 'Developer access required' });
       return;
     }
 
-    req.auth!.isDeveloper = true;
-    req.auth!.platformRole = platformUser.role as PlatformUserRole;
     next();
   } catch (err) {
     console.error('[auth] requireDeveloperAuth error:', err);
