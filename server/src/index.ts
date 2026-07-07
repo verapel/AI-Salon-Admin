@@ -250,7 +250,8 @@ async function handleBirthdayCollection(
   const { error } = await (supabase as any)
     .from('clients')
     .update({ birthday: parsed })
-    .eq('id', state.clientId);
+    .eq('id', state.clientId)
+    .eq('salon_id', ctx.salonId);
 
   birthdayState.delete(stateKey);
   if (error) {
@@ -310,7 +311,7 @@ async function generateAIResponse(
     if (manage.step === 'ask_phone') {
       const phone = text;
       const { data: client } = await (supabase as any)
-        .from('clients').select('id').eq('phone', phone).maybeSingle();
+        .from('clients').select('id').eq('phone', phone).eq('salon_id', ctx.salonId).maybeSingle();
       if (!client) {
         manageState.delete(stateKey);
         const msg = 'Не нашла запись с таким номером. Если хотите записаться, напишите название услуги.';
@@ -322,6 +323,7 @@ async function generateAIResponse(
       const { data: appointments } = await (supabase as any)
         .from('appointments')
         .select('id, date, start_time, notes')
+        .eq('salon_id', ctx.salonId)
         .eq('client_id', client.id)
         .gte('date', today)
         .in('status', ACTIVE_SLOT_STATUSES)
@@ -466,6 +468,7 @@ async function generateAIResponse(
       const { data: existingSlot } = await (supabase as any)
         .from('appointments')
         .select('id')
+        .eq('salon_id', ctx.salonId)
         .eq('date', appointmentDate)
         .eq('start_time', `${appointmentTime}:00`)
         .eq('staff_id', currentState.staffId)
@@ -534,7 +537,7 @@ async function generateAIResponse(
 
       // 2. Найти или создать клиента
       const { data: existingClient, error: lookupError } = await (supabase as any)
-        .from("clients").select("id, is_blocked").eq("phone", phone).maybeSingle();
+        .from("clients").select("id, is_blocked").eq("phone", phone).eq("salon_id", ctx.salonId).maybeSingle();
 
       if (lookupError) {
         console.error("Client lookup error:", lookupError);
@@ -562,7 +565,7 @@ async function generateAIResponse(
         clientId = existingClient.id;
       } else {
         const { data: newClient, error: insertClientError } = await (supabase as any)
-          .from("clients").insert({ name, phone, email: "" }).select("id").single();
+          .from("clients").insert({ salon_id: ctx.salonId, name, phone, email: "" }).select("id").single();
         if (insertClientError || !newClient) {
           console.error("Client insert error:", insertClientError);
           bookingState.delete(stateKey); chatHistory.delete(stateKey);
@@ -596,6 +599,7 @@ async function generateAIResponse(
       const { data: conflictingSlot } = await (supabase as any)
         .from('appointments')
         .select('id')
+        .eq('salon_id', ctx.salonId)
         .eq('date', appointmentDate)
         .eq('start_time', `${appointmentTime}:00`)
         .eq('staff_id', staffRow.id)
@@ -625,6 +629,7 @@ async function generateAIResponse(
       const { data: appointment, error: appointmentError } = await (supabase as any)
         .from("appointments")
         .insert({
+          salon_id: ctx.salonId,
           client_id: clientId,
           service_id: serviceRow.id,
           staff_id: staffRow.id,
@@ -644,6 +649,7 @@ async function generateAIResponse(
       }
 
       await (supabase as any).from('reminders').insert({
+        salon_id: ctx.salonId,
         appointment_id: appointment.id,
         type: 'email',
         scheduled_for: `${appointmentDate}T08:00:00`,
@@ -1008,11 +1014,12 @@ async function answerCallbackQuery(callbackQueryId: string) {
   });
 }
 
-async function getAppointmentStaffId(_salonId: string, appointmentId: string): Promise<string | null> {
+async function getAppointmentStaffId(salonId: string, appointmentId: string): Promise<string | null> {
   const { data, error } = await (supabase as any)
     .from('appointments')
     .select('staff_id')
     .eq('id', appointmentId)
+    .eq('salon_id', salonId)
     .maybeSingle();
 
   if (error) {
@@ -1025,7 +1032,7 @@ async function getAppointmentStaffId(_salonId: string, appointmentId: string): P
 }
 
 async function getAvailableSlots(
-  _salonId: string,
+  salonId: string,
   date: string,
   staffId: string,
   excludeAppointmentId?: string
@@ -1044,6 +1051,7 @@ async function getAvailableSlots(
   const baseQ = (supabase as any)
     .from('appointments')
     .select('start_time')
+    .eq('salon_id', salonId)
     .eq('date', date)
     .eq('staff_id', staffId)
     .in('status', ACTIVE_SLOT_STATUSES);
@@ -1136,22 +1144,25 @@ async function startTelegramPolling() {
           if (!cqChatId) { continue; }
 
           const cqStateKey = getTelegramStateKey(defaultTelegramSalonContext.salonId, cqChatId);
+          const tgSalonId = defaultTelegramSalonContext.salonId;
 
           // --- Отмена записи ---
           if (cqData.startsWith('cancel_confirm:')) {
             const appointmentId = cqData.slice('cancel_confirm:'.length);
             const { data: apptInfo } = await (supabase as any)
-              .from('appointments').select('date, start_time, notes').eq('id', appointmentId).maybeSingle();
+              .from('appointments').select('date, start_time, notes').eq('id', appointmentId).eq('salon_id', tgSalonId).maybeSingle();
             const { error } = await (supabase as any)
               .from('appointments')
               .update({ status: 'cancelled' })
-              .eq('id', appointmentId);
+              .eq('id', appointmentId)
+              .eq('salon_id', tgSalonId);
             if (error) {
               await sendTelegramMessage(cqChatId, 'Не удалось отменить запись. Попробуйте ещё раз.');
             } else {
               await (supabase as any)
                 .from('reminders')
                 .update({ status: 'failed', message: 'Cancelled — appointment was cancelled' })
+                .eq('salon_id', tgSalonId)
                 .eq('appointment_id', appointmentId)
                 .eq('status', 'pending');
               manageState.delete(cqStateKey);
@@ -1174,7 +1185,7 @@ async function startTelegramPolling() {
           if (cqData.startsWith('select_cancel:')) {
             const appointmentId = cqData.slice('select_cancel:'.length);
             const { data: appt } = await (supabase as any)
-              .from('appointments').select('id, date, start_time, notes').eq('id', appointmentId).maybeSingle();
+              .from('appointments').select('id, date, start_time, notes').eq('id', appointmentId).eq('salon_id', tgSalonId).maybeSingle();
             const apptText = appt ? formatAppointmentForUser(appt) : `Запись ${appointmentId}`;
             const keyboard = [[
               { text: '✅ Да, отменить', callback_data: `cancel_confirm:${appointmentId}` },
@@ -1190,7 +1201,7 @@ async function startTelegramPolling() {
             const cur = manageState.get(cqStateKey);
             if (cur) manageState.set(cqStateKey, { ...cur, step: 'select_new_date', appointmentId });
             const { data: appt } = await (supabase as any)
-              .from('appointments').select('id, date, start_time, notes').eq('id', appointmentId).maybeSingle();
+              .from('appointments').select('id, date, start_time, notes').eq('id', appointmentId).eq('salon_id', tgSalonId).maybeSingle();
             const apptText = appt ? formatAppointmentForUser(appt) : `Запись ${appointmentId}`;
             await sendTelegramMessageWithKeyboard(cqChatId, `${apptText}\n\nВыберите новую дату:`, getRescheduleDateKeyboard(appointmentId));
             continue;
@@ -1252,6 +1263,7 @@ async function startTelegramPolling() {
             // Проверяем слот мастера (исключаем саму переносимую запись)
             const { data: existingSlot } = await (supabase as any)
               .from('appointments').select('id')
+              .eq('salon_id', tgSalonId)
               .eq('date', newDate).eq('start_time', `${parsedTime}:00`)
               .eq('staff_id', staffId)
               .in('status', ACTIVE_SLOT_STATUSES)
@@ -1274,6 +1286,7 @@ async function startTelegramPolling() {
               .from('appointments')
               .select('service_id, services(duration)')
               .eq('id', appointmentId)
+              .eq('salon_id', tgSalonId)
               .maybeSingle();
             const duration = apptForDuration?.services?.duration ?? 60;
             const newEndTime = computeAppointmentEndTime(parsedTime, duration);
@@ -1281,7 +1294,7 @@ async function startTelegramPolling() {
               date: newDate,
               start_time: `${parsedTime}:00`,
               end_time: newEndTime
-            }).eq('id', appointmentId);
+            }).eq('id', appointmentId).eq('salon_id', tgSalonId);
             if (error) {
               await sendTelegramMessage(cqChatId, 'Не удалось перенести запись. Попробуйте ещё раз.');
             } else {
@@ -1291,6 +1304,7 @@ async function startTelegramPolling() {
                   scheduled_for: `${newDate}T08:00:00`,
                   message: `Reminder: Your appointment on ${newDate} at ${newTime}`,
                 })
+                .eq('salon_id', tgSalonId)
                 .eq('appointment_id', appointmentId)
                 .eq('status', 'pending');
               manageState.delete(cqStateKey);
