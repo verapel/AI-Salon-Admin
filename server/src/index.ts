@@ -432,6 +432,11 @@ async function generateAIResponse(
           service: serviceName,
           staffId: staffMatches[0].id,
         });
+        const datePrompt = 'На какой день вы хотите записаться?';
+        history.push({ role: 'assistant', content: datePrompt });
+        chatHistory.set(stateKey, history.slice(-10));
+        await sendTelegramMessageWithKeyboard(chatId, datePrompt, getDateKeyboard(), botToken);
+        return null;
       } else {
         bookingState.set(stateKey, { ...currentState, step: 'staff', service: serviceName });
         const staffQuestion = 'К какому мастеру хотите записаться?';
@@ -457,8 +462,30 @@ async function generateAIResponse(
         return STAFF_UNAVAILABLE_MESSAGE;
       }
       console.log(`[step:date] raw text: "${text}" | bookingState before:`, JSON.stringify(currentState));
+      const parsedDate = parseAppointmentDate(text);
+      console.log(`[step:date] parsedDate passed to getAvailableSlots: "${parsedDate}"`);
+      const freeSlots = await getAvailableSlots(ctx.salonId, parsedDate, currentState.staffId);
+
+      if (freeSlots.length === 0) {
+        bookingState.set(stateKey, { ...currentState, step: 'date', date: '' });
+        const noSlotsMsg = `К сожалению, на выбранную дату нет свободного времени. Выберите другой день:`;
+        history.push({ role: 'assistant', content: noSlotsMsg });
+        chatHistory.set(stateKey, history.slice(-10));
+        await sendTelegramMessageWithKeyboard(chatId, noSlotsMsg, getDateKeyboard(), botToken);
+        return null;
+      }
+
       bookingState.set(stateKey, { ...currentState, step: 'time', date: text });
       console.log(`[step:date] bookingState after:`, JSON.stringify(bookingState.get(stateKey)));
+      const timePrompt = 'На какое время вам удобно записаться?';
+      history.push({ role: 'assistant', content: timePrompt });
+      chatHistory.set(stateKey, history.slice(-10));
+      const timeKeyboard: { text: string; callback_data: string }[][] = [];
+      for (let i = 0; i < freeSlots.length; i += 3) {
+        timeKeyboard.push(freeSlots.slice(i, i + 3).map(s => ({ text: s, callback_data: `time:${s}` })));
+      }
+      await sendTelegramMessageWithKeyboard(chatId, timePrompt, timeKeyboard, botToken);
+      return null;
 
     } else if (currentState.step === 'time') {
       if (!currentState.staffId?.trim()) {
@@ -771,22 +798,28 @@ chatHistory.set(stateKey, history.slice(-10));
 
   // Инициализировать step-машину после первого ответа AI (приветствие)
   const assistantCount = history.filter(m => m.role === 'assistant').length;
-  if (!bookingState.has(stateKey) && assistantCount === 1) {
-    bookingState.set(stateKey, {
-      step: 'service',
-      service: '',
-      staffId: '',
-      date: '',
-      time: '',
-      name: '',
-      phone: '',
-    });
+  const existingBooking = bookingState.get(stateKey);
+  if (
+    (!bookingState.has(stateKey) && assistantCount === 1) ||
+    existingBooking?.step === 'service'
+  ) {
+    if (!existingBooking) {
+      bookingState.set(stateKey, {
+        step: 'service',
+        service: '',
+        staffId: '',
+        date: '',
+        time: '',
+        name: '',
+        phone: '',
+      });
+    }
     const serviceKeyboard = await buildServiceKeyboard();
     await sendTelegramMessageWithKeyboard(chatId, answer, serviceKeyboard, botToken);
     return null;
   }
 
-  // После получения услуги — кнопки дат
+  // Fallback: date keyboard after staff→date via OpenRouter (service→date handled in step machine)
   const currentStepAfterAI = bookingState.get(stateKey)?.step;
   if (currentStepAfterAI === 'date') {
     const stateForDate = bookingState.get(stateKey)!;
@@ -799,7 +832,7 @@ chatHistory.set(stateKey, history.slice(-10));
     return null;
   }
 
-  // После получения даты — кнопки свободного времени
+  // Fallback: time keyboard after staff→date path via OpenRouter (date→time handled in step machine)
   if (currentStepAfterAI === 'time') {
     const stateForTime = bookingState.get(stateKey)!;
     if (!stateForTime.staffId?.trim()) {
@@ -1018,7 +1051,7 @@ async function sendTelegramMessageWithKeyboard(
   const token = botToken?.trim() || process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) return;
 
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -1027,6 +1060,10 @@ async function sendTelegramMessageWithKeyboard(
       reply_markup: { inline_keyboard: keyboard }
     })
   });
+  const data = (await response.json()) as { ok?: boolean; description?: string };
+  if (!data.ok) {
+    console.error('[telegram/sendKeyboard] failed:', data.description ?? `HTTP ${response.status}`);
+  }
 }
 
 async function answerCallbackQuery(callbackQueryId: string, botToken?: string) {
