@@ -27,6 +27,10 @@ import {
   type TelegramSalonContext,
 } from './lib/telegramContext.js';
 import {
+  isMultiTelegramEnabled,
+  telegramBotManager,
+} from './lib/telegramBotManager.js';
+import {
   ACTIVE_SLOT_STATUSES,
   buildServiceKeyboard,
   buildStaffSelectionKeyboard,
@@ -963,7 +967,17 @@ async function bootstrap() {
   app.listen(PORT, () => {
     console.log(`AI Salon Admin running on http://localhost:${PORT}`);
     console.log(`Supabase: ${process.env.SUPABASE_URL ?? 'NOT CONFIGURED'}`);
-    startTelegramPolling();
+    if (isMultiTelegramEnabled()) {
+      console.log('[telegram] MULTI_TELEGRAM_ENABLED=true — starting bot manager');
+      void telegramBotManager.startAll(async (runtimeCtx, update) => {
+        await processTelegramUpdate(update, {
+          salonId: runtimeCtx.salonId,
+          salonSlug: runtimeCtx.salonSlug,
+        });
+      });
+    } else {
+      startTelegramPolling();
+    }
   });
 }
 
@@ -1094,6 +1108,11 @@ let pollingIntervalId: ReturnType<typeof setInterval> | null = null;
 
 /** Останавливает текущий polling и запускает новый с токеном из process.env */
 function restartTelegramPolling() {
+  if (isMultiTelegramEnabled()) {
+    void telegramBotManager.restartAll();
+    return;
+  }
+
   if (pollingIntervalId !== null) {
     clearInterval(pollingIntervalId);
     pollingIntervalId = null;
@@ -1105,34 +1124,7 @@ function restartTelegramPolling() {
 
 registerTelegramPollingRestarter(restartTelegramPolling);
 
-async function startTelegramPolling() {
-  if (pollingIntervalId !== null) return;
-
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-
-  if (!token) {
-    console.log('Telegram bot token not configured');
-    return;
-  }
-
-  console.log('Telegram polling started');
-
-  pollingIntervalId = setInterval(async () => {
-    // Если предыдущий тик ещё выполняется — пропустить этот
-    if (isPolling) return;
-    isPolling = true;
-    try {
-      const response = await fetch(
-        `https://api.telegram.org/bot${token}/getUpdates?offset=${telegramOffset + 1}`
-      );
-
-      const data = await response.json();
-
-      if (!data.ok) return;
-
-      for (const update of data.result) {
-        telegramOffset = update.update_id;
-
+async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Promise<void> {
         // Нажатие на inline-кнопку (услуга / дата / время)
         if (update.callback_query) {
           const cq = update.callback_query;
@@ -1141,10 +1133,10 @@ async function startTelegramPolling() {
 
           await answerCallbackQuery(cq.id);
 
-          if (!cqChatId) { continue; }
+          if (!cqChatId) { return; }
 
-          const cqStateKey = getTelegramStateKey(defaultTelegramSalonContext.salonId, cqChatId);
-          const tgSalonId = defaultTelegramSalonContext.salonId;
+          const cqStateKey = getTelegramStateKey(ctx.salonId, cqChatId);
+          const tgSalonId = ctx.salonId;
 
           // --- Отмена записи ---
           if (cqData.startsWith('cancel_confirm:')) {
@@ -1173,13 +1165,13 @@ async function startTelegramPolling() {
                 await sendTelegramMessage(Number(adminChatId), `❌ Клиент отменил запись.\n${info}`);
               }
             }
-            continue;
+            return;
           }
 
           if (cqData === 'cancel_keep') {
             manageState.delete(cqStateKey);
             await sendTelegramMessage(cqChatId, 'Хорошо, запись оставлена. Будем ждать вас! 🌸');
-            continue;
+            return;
           }
 
           if (cqData.startsWith('select_cancel:')) {
@@ -1192,7 +1184,7 @@ async function startTelegramPolling() {
               { text: '❌ Нет, оставить', callback_data: 'cancel_keep' }
             ]];
             await sendTelegramMessageWithKeyboard(cqChatId, `${apptText}\n\nОтменить эту запись?`, keyboard);
-            continue;
+            return;
           }
 
           // --- Перенос записи ---
@@ -1204,13 +1196,13 @@ async function startTelegramPolling() {
               .from('appointments').select('id, date, start_time, notes').eq('id', appointmentId).eq('salon_id', tgSalonId).maybeSingle();
             const apptText = appt ? formatAppointmentForUser(appt) : `Запись ${appointmentId}`;
             await sendTelegramMessageWithKeyboard(cqChatId, `${apptText}\n\nВыберите новую дату:`, getRescheduleDateKeyboard(appointmentId));
-            continue;
+            return;
           }
 
           if (cqData.startsWith('rdate_manual:')) {
             // Пользователь хочет ввести дату вручную — не меняем шаг, ждём текст
             await sendTelegramMessage(cqChatId, 'Напишите дату (например: «завтра», «30 июня»).');
-            continue;
+            return;
           }
 
           if (cqData.startsWith('rdate:')) {
@@ -1223,13 +1215,13 @@ async function startTelegramPolling() {
             console.log(`[rdate] appointmentId="${appointmentId}" dateStr="${dateStr}" parsedDate="${newDate}"`);
             const cur = manageState.get(cqStateKey);
             if (cur) manageState.set(cqStateKey, { ...cur, step: 'select_new_time', appointmentId, newDate });
-            const staffId = await getAppointmentStaffId(defaultTelegramSalonContext.salonId, appointmentId);
+            const staffId = await getAppointmentStaffId(ctx.salonId, appointmentId);
             if (!staffId) {
               await sendTelegramMessage(cqChatId, 'Не удалось определить мастера для этой записи. Обратитесь к администратору.');
-              continue;
+              return;
             }
             // Исключаем саму переносимую запись, чтобы её слот не блокировался у этого мастера
-            const freeSlots = await getAvailableSlots(defaultTelegramSalonContext.salonId, newDate, staffId, appointmentId);
+            const freeSlots = await getAvailableSlots(ctx.salonId, newDate, staffId, appointmentId);
             if (freeSlots.length === 0) {
               await sendTelegramMessageWithKeyboard(cqChatId, 'На эту дату нет свободного времени. Выберите другой день:', getRescheduleDateKeyboard(appointmentId));
             } else {
@@ -1239,7 +1231,7 @@ async function startTelegramPolling() {
               }
               await sendTelegramMessageWithKeyboard(cqChatId, 'Выберите новое время:', keyboard);
             }
-            continue;
+            return;
           }
 
           if (cqData.startsWith('rtime:')) {
@@ -1252,13 +1244,13 @@ async function startTelegramPolling() {
             if (!newDate) {
               await sendTelegramMessage(cqChatId, 'Ошибка: дата не найдена. Начните перенос заново.');
               manageState.delete(cqStateKey);
-              continue;
+              return;
             }
             const parsedTime = parseAppointmentTime(newTime);
-            const staffId = await getAppointmentStaffId(defaultTelegramSalonContext.salonId, appointmentId);
+            const staffId = await getAppointmentStaffId(ctx.salonId, appointmentId);
             if (!staffId) {
               await sendTelegramMessage(cqChatId, 'Не удалось определить мастера для этой записи. Обратитесь к администратору.');
-              continue;
+              return;
             }
             // Проверяем слот мастера (исключаем саму переносимую запись)
             const { data: existingSlot } = await (supabase as any)
@@ -1270,7 +1262,7 @@ async function startTelegramPolling() {
               .neq('id', appointmentId).limit(1).maybeSingle();
             if (existingSlot) {
               // Исключаем саму переносимую запись из занятых слотов мастера
-              const freeSlots = await getAvailableSlots(defaultTelegramSalonContext.salonId, newDate, staffId, appointmentId);
+              const freeSlots = await getAvailableSlots(ctx.salonId, newDate, staffId, appointmentId);
               if (freeSlots.length === 0) {
                 await sendTelegramMessageWithKeyboard(cqChatId, 'Это время занято, и других свободных слотов на эту дату нет. Выберите другой день:', getRescheduleDateKeyboard(appointmentId));
               } else {
@@ -1280,7 +1272,7 @@ async function startTelegramPolling() {
                 }
                 await sendTelegramMessageWithKeyboard(cqChatId, 'Это время уже занято. Выберите другое:', keyboard);
               }
-              continue;
+              return;
             }
             const { data: apptForDuration } = await (supabase as any)
               .from('appointments')
@@ -1315,17 +1307,17 @@ async function startTelegramPolling() {
                 await sendTelegramMessage(Number(adminChatId), `🔄 Перенос записи!\n📅 Новая дата: ${formattedDate}\n🕒 Новое время: ${newTime}`);
               }
             }
-            continue;
+            return;
           }
 
           // Кнопка "Ввести вручную" — просто подсказка, шаг-машину не трогаем
           if (cqData === 'service:manual') {
             await sendTelegramMessage(cqChatId, 'Напишите, какая услуга вас интересует.');
-            continue;
+            return;
           }
           if (cqData === 'date:manual') {
             await sendTelegramMessage(cqChatId, 'Напишите дату в удобном формате — например: «сегодня», «завтра», «30 июня».');
-            continue;
+            return;
           }
 
           if (cqData === 'birthday:skip') {
@@ -1333,7 +1325,7 @@ async function startTelegramPolling() {
               birthdayState.delete(cqStateKey);
               await sendTelegramMessage(cqChatId, BIRTHDAY_SKIPPED_MESSAGE);
             }
-            continue;
+            return;
           }
 
           // service:, date:, time: — передаём значение в шаг-машину (только на ожидаемом шаге)
@@ -1347,17 +1339,17 @@ async function startTelegramPolling() {
                   ? 'time'
                   : 'staff';
             if (!booking || booking.step !== expectedStep) {
-              continue;
+              return;
             }
             const value = cqData.startsWith('staff:')
               ? cqData.slice('staff:'.length)
               : cqData.slice(cqData.indexOf(':') + 1);
-            const answer = await generateAIResponse(defaultTelegramSalonContext, cqChatId, value);
+            const answer = await generateAIResponse(ctx, cqChatId, value);
             if (answer !== null) {
               await sendTelegramMessage(cqChatId, answer);
             }
           }
-          continue;
+          return;
         }
 
         // Обычное текстовое сообщение
@@ -1365,12 +1357,42 @@ async function startTelegramPolling() {
         const text = message?.text;
         const chatId = message?.chat?.id;
 
-        if (!text || !chatId) continue;
+        if (!text || !chatId) return;
 
-        const answer = await generateAIResponse(defaultTelegramSalonContext, chatId, text);
+        const answer = await generateAIResponse(ctx, chatId, text);
         if (answer !== null) {
           await sendTelegramMessage(chatId, answer);
         }
+}
+
+async function startTelegramPolling() {
+  if (pollingIntervalId !== null) return;
+
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+
+  if (!token) {
+    console.log('Telegram bot token not configured');
+    return;
+  }
+
+  console.log('Telegram polling started');
+
+  pollingIntervalId = setInterval(async () => {
+    // Если предыдущий тик ещё выполняется — пропустить этот
+    if (isPolling) return;
+    isPolling = true;
+    try {
+      const response = await fetch(
+        `https://api.telegram.org/bot${token}/getUpdates?offset=${telegramOffset + 1}`
+      );
+
+      const data = await response.json();
+
+      if (!data.ok) return;
+
+      for (const update of data.result) {
+        telegramOffset = update.update_id;
+        await processTelegramUpdate(update, defaultTelegramSalonContext);
       }
     } catch (error) {
       console.error('Telegram polling error', error);
