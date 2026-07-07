@@ -1,10 +1,12 @@
 import { PILOT_SALON_ID } from './pilotSalon.js';
 import { DEFAULT_SALON_SLUG } from './telegramToken.js';
 
-/** Salon scope for Telegram booking runtime (I3b-0: no botToken yet). */
+/** Salon scope for Telegram booking runtime (botToken set by multi-bot manager when enabled). */
 export interface TelegramSalonContext {
   salonId: string;
   salonSlug: string;
+  botToken?: string;
+  botUsername?: string | null;
 }
 
 /** Default / Tatev pilot salon — sole active Telegram bot in I3b-0. */
