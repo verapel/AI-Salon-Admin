@@ -74,6 +74,112 @@ function mapSalonOverview(
   };
 }
 
+function mapSalonCore(row: SalonRow) {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    active: row.active,
+    timezone: row.timezone,
+    country: row.country,
+    currency: row.currency,
+    language: row.language,
+    createdAt: row.created_at,
+  };
+}
+
+function emptyTelegramSummary() {
+  return {
+    status: 'not_connected' as IntegrationStatus,
+    health: 'unknown' as IntegrationHealth,
+    botUsername: null,
+    botDisplayName: null,
+    connectedAt: null,
+    lastCheckedAt: null,
+    lastError: null,
+  };
+}
+
+function mapTelegramSummary(integration: IntegrationRow | null) {
+  if (!integration) return emptyTelegramSummary();
+  return {
+    status: integration.status,
+    health: integration.health,
+    botUsername: integration.bot_username,
+    botDisplayName: displayBotDisplayName(integration),
+    connectedAt: integration.connected_at,
+    lastCheckedAt: integration.last_checked_at,
+    lastError: integration.last_error,
+  };
+}
+
+async function countSalonTable(
+  salonId: string,
+  table: 'clients' | 'appointments' | 'services' | 'staff'
+): Promise<number> {
+  const { count, error } = await supabase
+    .from(table)
+    .select('id', { count: 'exact', head: true })
+    .eq('salon_id', salonId);
+
+  if (error) {
+    console.error(`[developer] count ${table} for salon ${salonId}:`, error.message);
+    return 0;
+  }
+  return count ?? 0;
+}
+
+async function getSalonEntityCounts(salonId: string) {
+  const [clients, appointments, services, staff] = await Promise.all([
+    countSalonTable(salonId, 'clients'),
+    countSalonTable(salonId, 'appointments'),
+    countSalonTable(salonId, 'services'),
+    countSalonTable(salonId, 'staff'),
+  ]);
+  return { clients, appointments, services, staff };
+}
+
+async function resolveSalonOwner(salonId: string) {
+  const { data: membership, error } = await supabase
+    .from('salon_members')
+    .select('id, user_id, role, active')
+    .eq('salon_id', salonId)
+    .eq('role', 'owner')
+    .eq('active', true)
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !membership) {
+    if (error) {
+      console.error('[developer] owner membership lookup:', error.message);
+    }
+    return null;
+  }
+
+  let email: string | null = null;
+  let fullName: string | null = null;
+
+  const { data: authData, error: authError } = await supabase.auth.admin.getUserById(membership.user_id);
+  if (authError) {
+    console.error('[developer] owner auth lookup:', authError.message);
+  } else if (authData.user) {
+    email = authData.user.email ?? null;
+    const metadata = authData.user.user_metadata as { full_name?: string } | undefined;
+    if (typeof metadata?.full_name === 'string' && metadata.full_name.trim()) {
+      fullName = metadata.full_name.trim();
+    }
+  }
+
+  return {
+    membershipId: membership.id,
+    userId: membership.user_id,
+    email,
+    fullName,
+    role: membership.role,
+    membershipActive: membership.active,
+  };
+}
+
 function readAppVersion(): string {
   const candidates = [
     path.resolve(process.cwd(), '../package.json'),
@@ -299,14 +405,10 @@ router.get('/salons', async (_req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
 
-  const [{ count: totalClients }, { count: totalAppointments }, integrationsRes] = await Promise.all([
-    supabase.from('clients').select('id', { count: 'exact', head: true }),
-    supabase.from('appointments').select('id', { count: 'exact', head: true }),
-    (supabase as any)
-      .from('salon_integrations')
-      .select('salon_id, connected_at')
-      .eq('provider', TELEGRAM_PROVIDER),
-  ]);
+  const integrationsRes = await (supabase as any)
+    .from('salon_integrations')
+    .select('salon_id, connected_at')
+    .eq('provider', TELEGRAM_PROVIDER);
 
   if (integrationsRes.error) return res.status(500).json({ error: integrationsRes.error.message });
 
@@ -316,17 +418,139 @@ router.get('/salons', async (_req, res) => {
       .map((row) => [row.salon_id, row.connected_at!])
   );
 
-  const rows = (salons as SalonRow[]).map((salon) => {
-    const isDefault = salon.slug === DEFAULT_SALON_SLUG;
-    return mapSalonOverview(
-      salon,
-      connectedAtBySalon.get(salon.id) ?? (isDefault ? salon.created_at : null),
-      isDefault ? (totalClients ?? 0) : 0,
-      isDefault ? (totalAppointments ?? 0) : 0
-    );
-  });
+  const rows = await Promise.all(
+    (salons as SalonRow[]).map(async (salon) => {
+      const isDefault = salon.slug === DEFAULT_SALON_SLUG;
+      const counts = await getSalonEntityCounts(salon.id);
+      return mapSalonOverview(
+        salon,
+        connectedAtBySalon.get(salon.id) ?? (isDefault ? salon.created_at : null),
+        counts.clients,
+        counts.appointments
+      );
+    })
+  );
 
   res.json(rows);
+});
+
+router.get('/salons/:id', async (req, res) => {
+  const salonId = req.params.id?.trim();
+  if (!salonId) {
+    return res.status(400).json({ error: 'Salon id is required' });
+  }
+
+  const { data: salon, error: salonError } = await supabase
+    .from('salons')
+    .select('*')
+    .eq('id', salonId)
+    .maybeSingle();
+
+  if (salonError) return res.status(500).json({ error: salonError.message });
+  if (!salon) return res.status(404).json({ error: 'Salon not found' });
+
+  const row = salon as SalonRow;
+
+  const [counts, owner, integrationRes] = await Promise.all([
+    getSalonEntityCounts(salonId),
+    resolveSalonOwner(salonId),
+    (supabase as any)
+      .from('salon_integrations')
+      .select(
+        'status, health, bot_username, bot_display_name, connected_at, last_checked_at, last_error'
+      )
+      .eq('salon_id', salonId)
+      .eq('provider', TELEGRAM_PROVIDER)
+      .maybeSingle(),
+  ]);
+
+  if (integrationRes.error) {
+    return res.status(500).json({ error: integrationRes.error.message });
+  }
+
+  res.json({
+    ...mapSalonCore(row),
+    counts,
+    owner,
+    telegram: mapTelegramSummary((integrationRes.data as IntegrationRow | null) ?? null),
+  });
+});
+
+router.patch('/salons/:id', async (req, res) => {
+  const salonId = req.params.id?.trim();
+  if (!salonId) {
+    return res.status(400).json({ success: false, error: 'Salon id is required' });
+  }
+
+  const body = req.body as Record<string, unknown>;
+  const updates: Partial<
+    Pick<SalonRow, 'name' | 'active' | 'timezone' | 'country' | 'currency' | 'language'>
+  > = {};
+
+  if (body.name !== undefined) {
+    if (typeof body.name !== 'string') {
+      return res.status(400).json({ success: false, error: 'Invalid name' });
+    }
+    const trimmed = body.name.trim();
+    if (trimmed.length < 2) {
+      return res.status(400).json({ success: false, error: 'Salon name must be at least 2 characters' });
+    }
+    updates.name = trimmed;
+  }
+
+  if (body.active !== undefined) {
+    if (typeof body.active !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'Invalid active value' });
+    }
+    updates.active = body.active;
+  }
+
+  if (body.timezone !== undefined) {
+    if (typeof body.timezone !== 'string' || !body.timezone.trim()) {
+      return res.status(400).json({ success: false, error: 'Invalid timezone' });
+    }
+    updates.timezone = body.timezone.trim();
+  }
+
+  if (body.country !== undefined) {
+    if (typeof body.country !== 'string' || !body.country.trim()) {
+      return res.status(400).json({ success: false, error: 'Invalid country' });
+    }
+    updates.country = body.country.trim();
+  }
+
+  if (body.currency !== undefined) {
+    if (typeof body.currency !== 'string' || !body.currency.trim()) {
+      return res.status(400).json({ success: false, error: 'Invalid currency' });
+    }
+    updates.currency = body.currency.trim();
+  }
+
+  if (body.language !== undefined) {
+    if (typeof body.language !== 'string' || !body.language.trim()) {
+      return res.status(400).json({ success: false, error: 'Invalid language' });
+    }
+    updates.language = body.language.trim();
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ success: false, error: 'No valid fields to update' });
+  }
+
+  const { data: salon, error: salonError } = await supabase
+    .from('salons')
+    .update(updates)
+    .eq('id', salonId)
+    .select('*')
+    .maybeSingle();
+
+  if (salonError) return res.status(500).json({ success: false, error: salonError.message });
+  if (!salon) return res.status(404).json({ success: false, error: 'Salon not found' });
+
+  return res.json({
+    success: true,
+    salon: mapSalonCore(salon as SalonRow),
+  });
 });
 
 function isValidEmail(email: string): boolean {

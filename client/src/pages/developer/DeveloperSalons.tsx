@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Building2, AlertCircle, Plus } from 'lucide-react';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import CreateSalonModal from '@/components/developer/CreateSalonModal';
+import SalonDetailModal from '@/components/developer/SalonDetailModal';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -32,11 +33,15 @@ function ActiveBadge({ active }: { active: boolean }) {
   );
 }
 
-function SalonCard({ salon }: { salon: DeveloperSalon }) {
+function SalonCard({ salon, onClick }: { salon: DeveloperSalon; onClick: () => void }) {
   const { t } = useLanguage();
 
   return (
-    <div className="card w-full min-w-0 max-w-full p-4 sm:p-5">
+    <button
+      type="button"
+      onClick={onClick}
+      className="card w-full min-w-0 max-w-full p-4 text-left transition-colors hover:border-violet-200 dark:hover:border-violet-800 sm:p-5"
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-950/50">
@@ -61,7 +66,7 @@ function SalonCard({ salon }: { salon: DeveloperSalon }) {
           <dd className="font-medium text-gray-900 dark:text-gray-200">{salon.appointmentCount}</dd>
         </div>
       </dl>
-    </div>
+    </button>
   );
 }
 
@@ -70,7 +75,9 @@ export default function DeveloperSalons() {
   const [salons, setSalons] = useState<DeveloperSalon[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [detailSalonId, setDetailSalonId] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -88,6 +95,23 @@ export default function DeveloperSalons() {
   useEffect(() => {
     loadSalons();
   }, [loadSalons]);
+
+  function openCreateModal() {
+    setDetailOpen(false);
+    setDetailSalonId(null);
+    setCreateModalOpen(true);
+  }
+
+  function openDetailModal(salonId: string) {
+    setCreateModalOpen(false);
+    setDetailSalonId(salonId);
+    setDetailOpen(true);
+  }
+
+  function closeDetailModal() {
+    setDetailOpen(false);
+    setDetailSalonId(null);
+  }
 
   async function handleCreate(params: {
     name: string;
@@ -133,7 +157,7 @@ export default function DeveloperSalons() {
         <div />
         <button
           type="button"
-          onClick={() => setModalOpen(true)}
+          onClick={openCreateModal}
           className="btn-primary inline-flex w-full items-center justify-center gap-2 sm:w-auto"
         >
           <Plus className="h-4 w-4" />
@@ -155,7 +179,7 @@ export default function DeveloperSalons() {
         <div className="w-full min-w-0 max-w-full space-y-4 overflow-x-clip animate-fade-in">
           <div className="grid gap-4 lg:hidden">
             {salons.map((salon) => (
-              <SalonCard key={salon.id} salon={salon} />
+              <SalonCard key={salon.id} salon={salon} onClick={() => openDetailModal(salon.id)} />
             ))}
           </div>
 
@@ -183,7 +207,11 @@ export default function DeveloperSalons() {
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {salons.map((salon) => (
-                    <tr key={salon.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                    <tr
+                      key={salon.id}
+                      onClick={() => openDetailModal(salon.id)}
+                      className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                    >
                       <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{salon.name}</td>
                       <td className="px-4 py-3">
                         <ActiveBadge active={salon.active} />
@@ -203,13 +231,20 @@ export default function DeveloperSalons() {
       )}
 
       <CreateSalonModal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        open={createModalOpen}
+        onClose={() => setCreateModalOpen(false)}
         creating={creating}
         createError={createError}
         onCreate={handleCreate}
         onClearError={() => setCreateError('')}
         onSuccess={() => setSuccessMessage(t('developer.salons.created'))}
+      />
+
+      <SalonDetailModal
+        salonId={detailSalonId}
+        isOpen={detailOpen}
+        onClose={closeDetailModal}
+        onUpdated={loadSalons}
       />
     </>
   );

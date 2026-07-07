@@ -98,6 +98,13 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(body),
       }),
+    getSalon: (id: string) =>
+      request<import('@/types').DeveloperSalonDetail>(`/developer/salons/${id}`),
+    updateSalon: (id: string, body: import('@/types').UpdateDeveloperSalonRequest) =>
+      request<import('@/types').UpdateDeveloperSalonResponse>(`/developer/salons/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
     getTelegramIntegrations: () =>
       request<import('@/types').DeveloperTelegramIntegration[]>('/developer/integrations/telegram'),
     connectTelegram: (body: {

@@ -114,6 +114,71 @@ export interface CreateSalonResponse {
   };
 }
 
+export interface DeveloperSalonCounts {
+  clients: number;
+  appointments: number;
+  services: number;
+  staff: number;
+}
+
+export interface DeveloperSalonOwner {
+  membershipId: string;
+  userId: string;
+  email: string | null;
+  fullName: string | null;
+  role: string;
+  membershipActive: boolean;
+}
+
+export interface DeveloperSalonTelegramSummary {
+  status: IntegrationConnectionStatus;
+  health: IntegrationHealthStatus;
+  botUsername: string | null;
+  botDisplayName: string | null;
+  connectedAt: string | null;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+}
+
+export interface DeveloperSalonDetail {
+  id: string;
+  name: string;
+  slug: string;
+  active: boolean;
+  timezone: string;
+  country: string;
+  currency: string;
+  language: string;
+  createdAt: string;
+  counts: DeveloperSalonCounts;
+  owner: DeveloperSalonOwner | null;
+  telegram: DeveloperSalonTelegramSummary;
+}
+
+export interface UpdateDeveloperSalonRequest {
+  name?: string;
+  active?: boolean;
+  timezone?: string;
+  country?: string;
+  currency?: string;
+  language?: string;
+}
+
+export interface UpdateDeveloperSalonResponse {
+  success: true;
+  salon: {
+    id: string;
+    name: string;
+    slug: string;
+    active: boolean;
+    timezone: string;
+    country: string;
+    currency: string;
+    language: string;
+    createdAt: string;
+  };
+}
+
 export interface DeveloperHealth {
   api: { status: 'ok' };
   supabase: { status: 'connected' | 'disconnected' };
