@@ -329,6 +329,162 @@ router.get('/salons', async (_req, res) => {
   res.json(rows);
 });
 
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isExistingAuthUserError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('already') ||
+    lower.includes('registered') ||
+    lower.includes('exists')
+  );
+}
+
+async function deleteProvisionedAuthUser(userId: string | null): Promise<boolean> {
+  if (!userId) return true;
+  const { error } = await supabase.auth.admin.deleteUser(userId);
+  if (error) {
+    console.error('[developer] POST /salons cleanup auth user failed:', error.message);
+    return false;
+  }
+  return true;
+}
+
+async function deleteProvisionedSalon(salonId: string | null): Promise<boolean> {
+  if (!salonId) return true;
+  const { error } = await supabase.from('salons').delete().eq('id', salonId);
+  if (error) {
+    console.error('[developer] POST /salons cleanup salon failed:', error.message);
+    return false;
+  }
+  return true;
+}
+
+router.post('/salons', async (req, res) => {
+  const body = req.body as {
+    name?: string;
+    ownerEmail?: string;
+    ownerPassword?: string;
+    ownerName?: string;
+  };
+
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const ownerEmail =
+    typeof body.ownerEmail === 'string' ? body.ownerEmail.trim().toLowerCase() : '';
+  const ownerPassword = typeof body.ownerPassword === 'string' ? body.ownerPassword : '';
+  const ownerName = typeof body.ownerName === 'string' ? body.ownerName.trim() : '';
+
+  if (name.length < 2) {
+    return res.status(400).json({ success: false, error: 'Salon name is required (min 2 characters)' });
+  }
+  if (!ownerEmail || !isValidEmail(ownerEmail)) {
+    return res.status(400).json({ success: false, error: 'Valid owner email is required' });
+  }
+  if (ownerPassword.length < 6) {
+    return res.status(400).json({ success: false, error: 'Owner password must be at least 6 characters' });
+  }
+
+  let createdUserId: string | null = null;
+  let createdSalonId: string | null = null;
+
+  try {
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email: ownerEmail,
+      password: ownerPassword,
+      email_confirm: true,
+      user_metadata: ownerName ? { full_name: ownerName } : undefined,
+    });
+
+    if (authError || !authData.user) {
+      if (authError && isExistingAuthUserError(authError.message)) {
+        return res.status(409).json({ success: false, error: 'Owner email is already registered' });
+      }
+      console.error('[developer] POST /salons auth error:', authError?.message);
+      return res.status(500).json({ success: false, error: 'Could not create owner account' });
+    }
+
+    createdUserId = authData.user.id;
+
+    const slug = await uniqueSlug(slugify(name));
+    const { data: salon, error: salonError } = await supabase
+      .from('salons')
+      .insert({
+        name,
+        slug,
+        timezone: 'Europe/Moscow',
+        country: 'RU',
+        currency: 'RUB',
+        language: 'ru',
+        active: true,
+      })
+      .select('*')
+      .single();
+
+    if (salonError || !salon) {
+      const authCleanupOk = await deleteProvisionedAuthUser(createdUserId);
+      console.error('[developer] POST /salons salon error:', salonError?.message);
+      if (!authCleanupOk) {
+        return res.status(500).json({ success: false, error: 'Salon provisioning failed during cleanup' });
+      }
+      return res.status(500).json({ success: false, error: 'Could not create salon' });
+    }
+
+    createdSalonId = salon.id;
+
+    const { data: membership, error: membershipError } = await supabase
+      .from('salon_members')
+      .insert({
+        user_id: createdUserId,
+        salon_id: createdSalonId,
+        role: 'owner',
+        active: true,
+      })
+      .select('*')
+      .single();
+
+    if (membershipError || !membership) {
+      const salonCleanupOk = await deleteProvisionedSalon(createdSalonId);
+      const authCleanupOk = await deleteProvisionedAuthUser(createdUserId);
+      console.error('[developer] POST /salons membership error:', membershipError?.message);
+      if (!salonCleanupOk || !authCleanupOk) {
+        return res.status(500).json({ success: false, error: 'Salon provisioning failed during cleanup' });
+      }
+      return res.status(500).json({ success: false, error: 'Could not create salon membership' });
+    }
+
+    return res.status(201).json({
+      success: true,
+      salon: {
+        id: salon.id,
+        name: salon.name,
+        slug: salon.slug,
+        active: salon.active,
+        createdAt: salon.created_at,
+      },
+      owner: {
+        userId: createdUserId,
+        email: ownerEmail,
+      },
+      membership: {
+        id: membership.id,
+        salonId: membership.salon_id,
+        role: membership.role,
+        active: membership.active,
+      },
+    });
+  } catch (err) {
+    console.error('[developer] POST /salons error:', err);
+    const salonCleanupOk = await deleteProvisionedSalon(createdSalonId);
+    const authCleanupOk = await deleteProvisionedAuthUser(createdUserId);
+    if (!salonCleanupOk || !authCleanupOk) {
+      return res.status(500).json({ success: false, error: 'Salon provisioning failed during cleanup' });
+    }
+    return res.status(500).json({ success: false, error: 'Salon provisioning failed' });
+  }
+});
+
 router.get('/health', async (_req, res) => {
   const dbConnected = await checkSupabaseConnection();
 

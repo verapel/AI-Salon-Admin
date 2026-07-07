@@ -93,6 +93,27 @@ export interface DeveloperSalon {
   createdAt: string;
 }
 
+export interface CreateSalonResponse {
+  success: true;
+  salon: {
+    id: string;
+    name: string;
+    slug: string;
+    active: boolean;
+    createdAt: string;
+  };
+  owner: {
+    userId: string;
+    email: string;
+  };
+  membership: {
+    id: string;
+    salonId: string;
+    role: string;
+    active: boolean;
+  };
+}
+
 export interface DeveloperHealth {
   api: { status: 'ok' };
   supabase: { status: 'connected' | 'disconnected' };

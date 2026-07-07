@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Building2, AlertCircle } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Building2, AlertCircle, Plus } from 'lucide-react';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import CreateSalonModal from '@/components/developer/CreateSalonModal';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -69,14 +70,44 @@ export default function DeveloperSalons() {
   const [salons, setSalons] = useState<DeveloperSalon[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
-  useEffect(() => {
-    api.developer
+  const loadSalons = useCallback(() => {
+    setLoading(true);
+    setError(false);
+    return api.developer
       .getSalons()
       .then(setSalons)
       .catch(() => setError(true))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    loadSalons();
+  }, [loadSalons]);
+
+  async function handleCreate(params: {
+    name: string;
+    ownerEmail: string;
+    ownerPassword: string;
+    ownerName?: string;
+  }): Promise<boolean> {
+    setCreating(true);
+    setCreateError('');
+    try {
+      await api.developer.createSalon(params);
+      await loadSalons();
+      return true;
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : t('developer.salons.createError'));
+      return false;
+    } finally {
+      setCreating(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -96,62 +127,90 @@ export default function DeveloperSalons() {
     );
   }
 
-  if (salons.length === 0) {
-    return (
-      <div className="card w-full min-w-0 p-6 text-center text-sm text-gray-500 dark:text-gray-400">
-        {t('developer.salons.empty')}
-      </div>
-    );
-  }
-
   return (
-    <div className="w-full min-w-0 max-w-full space-y-4 overflow-x-clip animate-fade-in">
-      <div className="grid gap-4 lg:hidden">
-        {salons.map((salon) => (
-          <SalonCard key={salon.id} salon={salon} />
-        ))}
+    <>
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div />
+        <button
+          type="button"
+          onClick={() => setModalOpen(true)}
+          className="btn-primary inline-flex w-full items-center justify-center gap-2 sm:w-auto"
+        >
+          <Plus className="h-4 w-4" />
+          {t('developer.salons.addSalon')}
+        </button>
       </div>
 
-      <div className="card hidden w-full min-w-0 max-w-full lg:block">
-        <div className="w-full min-w-0 overflow-x-auto">
-          <table className="w-full min-w-0 text-sm">
-            <thead>
-              <tr className="border-b border-gray-200 text-left dark:border-gray-700">
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  {t('developer.salons.name')}
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  {t('developer.salons.status')}
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  {t('developer.salons.connectedAt')}
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  {t('developer.salons.clientCount')}
-                </th>
-                <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
-                  {t('developer.salons.appointmentCount')}
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {salons.map((salon) => (
-                <tr key={salon.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                  <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{salon.name}</td>
-                  <td className="px-4 py-3">
-                    <ActiveBadge active={salon.active} />
-                  </td>
-                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
-                    {formatDate(salon.connectedAt)}
-                  </td>
-                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{salon.clientCount}</td>
-                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{salon.appointmentCount}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {successMessage && (
+        <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-300">
+          {successMessage}
         </div>
-      </div>
-    </div>
+      )}
+
+      {salons.length === 0 ? (
+        <div className="card w-full min-w-0 p-6 text-center text-sm text-gray-500 dark:text-gray-400">
+          {t('developer.salons.empty')}
+        </div>
+      ) : (
+        <div className="w-full min-w-0 max-w-full space-y-4 overflow-x-clip animate-fade-in">
+          <div className="grid gap-4 lg:hidden">
+            {salons.map((salon) => (
+              <SalonCard key={salon.id} salon={salon} />
+            ))}
+          </div>
+
+          <div className="card hidden w-full min-w-0 max-w-full lg:block">
+            <div className="w-full min-w-0 overflow-x-auto">
+              <table className="w-full min-w-0 text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 text-left dark:border-gray-700">
+                    <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
+                      {t('developer.salons.name')}
+                    </th>
+                    <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
+                      {t('developer.salons.status')}
+                    </th>
+                    <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
+                      {t('developer.salons.connectedAt')}
+                    </th>
+                    <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
+                      {t('developer.salons.clientCount')}
+                    </th>
+                    <th className="px-4 py-3 font-medium text-gray-500 dark:text-gray-400">
+                      {t('developer.salons.appointmentCount')}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                  {salons.map((salon) => (
+                    <tr key={salon.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                      <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{salon.name}</td>
+                      <td className="px-4 py-3">
+                        <ActiveBadge active={salon.active} />
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
+                        {formatDate(salon.connectedAt)}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{salon.clientCount}</td>
+                      <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{salon.appointmentCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <CreateSalonModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        creating={creating}
+        createError={createError}
+        onCreate={handleCreate}
+        onClearError={() => setCreateError('')}
+        onSuccess={() => setSuccessMessage(t('developer.salons.created'))}
+      />
+    </>
   );
 }
