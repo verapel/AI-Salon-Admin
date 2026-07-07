@@ -22,6 +22,11 @@ import { supabase, checkSupabaseConnection } from './lib/supabase.js';
 import { loadTelegramTokenFromDb, saveTelegramTokenToDb } from './lib/telegramToken.js';
 import { registerTelegramPollingRestarter } from './lib/telegramPollingControl.js';
 import {
+  defaultTelegramSalonContext,
+  getTelegramStateKey,
+  type TelegramSalonContext,
+} from './lib/telegramContext.js';
+import {
   ACTIVE_SLOT_STATUSES,
   buildServiceKeyboard,
   buildStaffSelectionKeyboard,
@@ -42,7 +47,7 @@ import {
 
 const app = express();
 
-const chatHistory = new Map<number, any[]>();
+const chatHistory = new Map<string, any[]>();
 type BookingStep = 'service' | 'staff' | 'date' | 'time' | 'name' | 'phone';
 
 interface BookingData {
@@ -55,7 +60,7 @@ interface BookingData {
   phone: string;
 }
 
-const bookingState = new Map<number, BookingData>();
+const bookingState = new Map<string, BookingData>();
 
 type ManageAction = 'cancel' | 'reschedule';
 type ManageStep = 'ask_phone' | 'confirm_appointment' | 'select_new_date' | 'select_new_time';
@@ -69,14 +74,14 @@ interface ManageData {
   newDate?: string;
 }
 
-const manageState = new Map<number, ManageData>();
+const manageState = new Map<string, ManageData>();
 
 interface BirthdayCollectionState {
   clientId: string;
   invalidAttempts: number;
 }
 
-const birthdayState = new Map<number, BirthdayCollectionState>();
+const birthdayState = new Map<string, BirthdayCollectionState>();
 
 const PORT = process.env.PORT || 3001;
 
@@ -222,17 +227,22 @@ function parseAppointmentTime(input: string): string {
   return `${hours}:${minutes}`;
 }
 
-async function handleBirthdayCollection(chatId: number, text: string): Promise<string | null> {
-  const state = birthdayState.get(chatId);
+async function handleBirthdayCollection(
+  ctx: TelegramSalonContext,
+  chatId: number,
+  text: string
+): Promise<string | null> {
+  const stateKey = getTelegramStateKey(ctx.salonId, chatId);
+  const state = birthdayState.get(stateKey);
   if (!state) return null;
 
   const parsed = parseBirthdayDate(text);
   if (!parsed) {
     if (state.invalidAttempts >= 1) {
-      birthdayState.delete(chatId);
+      birthdayState.delete(stateKey);
       return BIRTHDAY_SKIPPED_MESSAGE;
     }
-    birthdayState.set(chatId, { ...state, invalidAttempts: state.invalidAttempts + 1 });
+    birthdayState.set(stateKey, { ...state, invalidAttempts: state.invalidAttempts + 1 });
     await sendTelegramMessageWithKeyboard(chatId, BIRTHDAY_INVALID_MESSAGE, getBirthdaySkipKeyboard());
     return null;
   }
@@ -242,7 +252,7 @@ async function handleBirthdayCollection(chatId: number, text: string): Promise<s
     .update({ birthday: parsed })
     .eq('id', state.clientId);
 
-  birthdayState.delete(chatId);
+  birthdayState.delete(stateKey);
   if (error) {
     console.error('[birthday] save error:', error);
     return BIRTHDAY_SKIPPED_MESSAGE;
@@ -252,18 +262,23 @@ async function handleBirthdayCollection(chatId: number, text: string): Promise<s
 
 app.use(cors());
 app.use(express.json());
-async function generateAIResponse(chatId: number, text: string): Promise<string | null> {
+async function generateAIResponse(
+  ctx: TelegramSalonContext,
+  chatId: number,
+  text: string
+): Promise<string | null> {
+  const stateKey = getTelegramStateKey(ctx.salonId, chatId);
   const openRouterKey = process.env.OPENROUTER_API_KEY;
 
   if (!openRouterKey) {
     return 'OpenRouter API key not configured';
   }
 
-  if (birthdayState.has(chatId)) {
-    return handleBirthdayCollection(chatId, text);
+  if (birthdayState.has(stateKey)) {
+    return handleBirthdayCollection(ctx, chatId, text);
   }
 
-  const history = [...(chatHistory.get(chatId) || [])];
+  const history = [...(chatHistory.get(stateKey) || [])];
 
   history.push({
     role: 'user',
@@ -272,35 +287,35 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
 
   // --- 0. Определяем intent: отмена / перенос ---
   const lowerText = text.toLowerCase().trim();
-  if (!manageState.has(chatId)) {
+  if (!manageState.has(stateKey)) {
     const isCancelIntent = /отмен|cancel/.test(lowerText);
     const isRescheduleIntent = /перенос|перенес|перенести/.test(lowerText);
     if (isCancelIntent || isRescheduleIntent) {
-      bookingState.delete(chatId);
-      birthdayState.delete(chatId);
+      bookingState.delete(stateKey);
+      birthdayState.delete(stateKey);
       const action: ManageAction = isCancelIntent ? 'cancel' : 'reschedule';
-      manageState.set(chatId, { action, step: 'ask_phone' });
+      manageState.set(stateKey, { action, step: 'ask_phone' });
       const msg = action === 'cancel'
         ? 'Конечно, помогу отменить запись. Введите номер телефона, по которому вы записаны.'
         : 'Конечно, помогу перенести запись. Введите номер телефона, по которому вы записаны.';
       history.push({ role: 'assistant', content: msg });
-      chatHistory.set(chatId, history.slice(-10));
+      chatHistory.set(stateKey, history.slice(-10));
       return msg;
     }
   }
 
   // --- 1. Обработка шагов manage (отмена / перенос) ---
-  const manage = manageState.get(chatId);
+  const manage = manageState.get(stateKey);
   if (manage) {
     if (manage.step === 'ask_phone') {
       const phone = text;
       const { data: client } = await (supabase as any)
         .from('clients').select('id').eq('phone', phone).maybeSingle();
       if (!client) {
-        manageState.delete(chatId);
+        manageState.delete(stateKey);
         const msg = 'Не нашла запись с таким номером. Если хотите записаться, напишите название услуги.';
         history.push({ role: 'assistant', content: msg });
-        chatHistory.set(chatId, history.slice(-10));
+        chatHistory.set(stateKey, history.slice(-10));
         return msg;
       }
       const today = localDateStr(0);
@@ -312,13 +327,13 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
         .in('status', ACTIVE_SLOT_STATUSES)
         .order('date', { ascending: true });
       if (!appointments || appointments.length === 0) {
-        manageState.delete(chatId);
+        manageState.delete(stateKey);
         const msg = 'Будущих записей не найдено. Если хотите записаться, напишите название услуги.';
         history.push({ role: 'assistant', content: msg });
-        chatHistory.set(chatId, history.slice(-10));
+        chatHistory.set(stateKey, history.slice(-10));
         return msg;
       }
-      manageState.set(chatId, { ...manage, step: 'confirm_appointment', phone, clientId: client.id });
+      manageState.set(stateKey, { ...manage, step: 'confirm_appointment', phone, clientId: client.id });
       if (appointments.length === 1) {
         const appt = appointments[0];
         const apptText = formatAppointmentForUser(appt);
@@ -329,14 +344,14 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
             { text: '❌ Нет, оставить', callback_data: 'cancel_keep' }
           ]];
           history.push({ role: 'assistant', content: msg });
-          chatHistory.set(chatId, history.slice(-10));
+          chatHistory.set(stateKey, history.slice(-10));
           await sendTelegramMessageWithKeyboard(chatId, msg, keyboard);
           return null;
         } else {
-          manageState.set(chatId, { ...manage, step: 'select_new_date', phone, clientId: client.id, appointmentId: appt.id });
+          manageState.set(stateKey, { ...manage, step: 'select_new_date', phone, clientId: client.id, appointmentId: appt.id });
           const msg = `Ваша запись:\n${apptText}\n\nВыберите новую дату:`;
           history.push({ role: 'assistant', content: msg });
-          chatHistory.set(chatId, history.slice(-10));
+          chatHistory.set(stateKey, history.slice(-10));
           await sendTelegramMessageWithKeyboard(chatId, msg, getRescheduleDateKeyboard(appt.id));
           return null;
         }
@@ -347,7 +362,7 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
         }]);
         const msg = manage.action === 'cancel' ? 'Какую запись вы хотите отменить?' : 'Какую запись вы хотите перенести?';
         history.push({ role: 'assistant', content: msg });
-        chatHistory.set(chatId, history.slice(-10));
+        chatHistory.set(stateKey, history.slice(-10));
         await sendTelegramMessageWithKeyboard(chatId, msg, keyboard);
         return null;
       }
@@ -356,18 +371,18 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
     if (manage.step === 'select_new_date') {
       // Пользователь ввёл дату вручную при переносе
       const parsedDate = parseAppointmentDate(text);
-      manageState.set(chatId, { ...manage, newDate: parsedDate });
-      const staffId = await getAppointmentStaffId(manage.appointmentId!);
+      manageState.set(stateKey, { ...manage, newDate: parsedDate });
+      const staffId = await getAppointmentStaffId(ctx.salonId, manage.appointmentId!);
       if (!staffId) {
-        manageState.delete(chatId);
+        manageState.delete(stateKey);
         return 'Не удалось определить мастера для этой записи. Обратитесь к администратору.';
       }
       // Исключаем саму переносимую запись из занятых слотов мастера
-      const freeSlots = await getAvailableSlots(parsedDate, staffId, manage.appointmentId);
+      const freeSlots = await getAvailableSlots(ctx.salonId, parsedDate, staffId, manage.appointmentId);
       if (freeSlots.length === 0) {
         const msg = 'На эту дату нет свободного времени. Выберите другой день:';
         history.push({ role: 'assistant', content: msg });
-        chatHistory.set(chatId, history.slice(-10));
+        chatHistory.set(stateKey, history.slice(-10));
         await sendTelegramMessageWithKeyboard(chatId, msg, getRescheduleDateKeyboard(manage.appointmentId!));
         return null;
       }
@@ -377,7 +392,7 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
       }
       const msg = 'Выберите удобное время:';
       history.push({ role: 'assistant', content: msg });
-      chatHistory.set(chatId, history.slice(-10));
+      chatHistory.set(stateKey, history.slice(-10));
       await sendTelegramMessageWithKeyboard(chatId, msg, keyboard);
       return null;
     }
@@ -387,32 +402,32 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
   }
 
   // --- Шаг-машина: обработка шага ДО вызова OpenRouter ---
-  const currentState = bookingState.get(chatId);
+  const currentState = bookingState.get(stateKey);
 
   if (currentState?.step) {
     if (currentState.step === 'service') {
       const serviceName = text.trim();
-      const staffMatches = await findStaffForServiceSpecialization(serviceName);
+      const staffMatches = await findStaffForServiceSpecialization(ctx.salonId, serviceName);
 
       if (staffMatches.length === 0) {
         history.push({ role: 'assistant', content: STAFF_UNAVAILABLE_MESSAGE });
-        chatHistory.set(chatId, history.slice(-10));
-        bookingState.delete(chatId);
+        chatHistory.set(stateKey, history.slice(-10));
+        bookingState.delete(stateKey);
         return STAFF_UNAVAILABLE_MESSAGE;
       }
 
       if (staffMatches.length === 1) {
-        bookingState.set(chatId, {
+        bookingState.set(stateKey, {
           ...currentState,
           step: 'date',
           service: serviceName,
           staffId: staffMatches[0].id,
         });
       } else {
-        bookingState.set(chatId, { ...currentState, step: 'staff', service: serviceName });
+        bookingState.set(stateKey, { ...currentState, step: 'staff', service: serviceName });
         const staffQuestion = 'К какому мастеру хотите записаться?';
         history.push({ role: 'assistant', content: staffQuestion });
-        chatHistory.set(chatId, history.slice(-10));
+        chatHistory.set(stateKey, history.slice(-10));
         await sendTelegramMessageWithKeyboard(
           chatId,
           staffQuestion,
@@ -422,24 +437,24 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
       }
 
     } else if (currentState.step === 'staff') {
-      bookingState.set(chatId, { ...currentState, step: 'date', staffId: text.trim() });
+      bookingState.set(stateKey, { ...currentState, step: 'date', staffId: text.trim() });
 
     } else if (currentState.step === 'date') {
       if (!currentState.staffId?.trim()) {
-        bookingState.delete(chatId);
+        bookingState.delete(stateKey);
         history.push({ role: 'assistant', content: STAFF_UNAVAILABLE_MESSAGE });
-        chatHistory.set(chatId, history.slice(-10));
+        chatHistory.set(stateKey, history.slice(-10));
         return STAFF_UNAVAILABLE_MESSAGE;
       }
       console.log(`[step:date] raw text: "${text}" | bookingState before:`, JSON.stringify(currentState));
-      bookingState.set(chatId, { ...currentState, step: 'time', date: text });
-      console.log(`[step:date] bookingState after:`, JSON.stringify(bookingState.get(chatId)));
+      bookingState.set(stateKey, { ...currentState, step: 'time', date: text });
+      console.log(`[step:date] bookingState after:`, JSON.stringify(bookingState.get(stateKey)));
 
     } else if (currentState.step === 'time') {
       if (!currentState.staffId?.trim()) {
-        bookingState.delete(chatId);
+        bookingState.delete(stateKey);
         history.push({ role: 'assistant', content: STAFF_UNAVAILABLE_MESSAGE });
-        chatHistory.set(chatId, history.slice(-10));
+        chatHistory.set(stateKey, history.slice(-10));
         return STAFF_UNAVAILABLE_MESSAGE;
       }
       // Проверяем слот СРАЗУ — до того как AI спросит имя
@@ -459,14 +474,14 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
         .maybeSingle();
 
       if (existingSlot) {
-        const freeSlots = await getAvailableSlots(appointmentDate, currentState.staffId);
+        const freeSlots = await getAvailableSlots(ctx.salonId, appointmentDate, currentState.staffId);
 
         if (freeSlots.length === 0) {
           // На эту дату нет ни одного свободного слота — просим выбрать другой день
-          bookingState.set(chatId, { ...currentState, step: 'date', time: '' });
+          bookingState.set(stateKey, { ...currentState, step: 'date', time: '' });
           const noSlotsMsg = `На эту дату свободного времени нет. Пожалуйста, выберите другой день.`;
           history.push({ role: 'assistant', content: noSlotsMsg });
-          chatHistory.set(chatId, history.slice(-10));
+          chatHistory.set(stateKey, history.slice(-10));
           return noSlotsMsg;
         }
 
@@ -480,7 +495,7 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
 
         const busyMsg = `К сожалению, это время уже занято. Доступное время на ${currentState.date}:`;
         history.push({ role: 'assistant', content: busyMsg });
-        chatHistory.set(chatId, history.slice(-10));
+        chatHistory.set(stateKey, history.slice(-10));
 
         // Отправляем с кнопками — polling не должен отправлять ещё раз
         await sendTelegramMessageWithKeyboard(chatId, busyMsg, keyboard);
@@ -488,29 +503,29 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
       }
 
       // Слот свободен — сохраняем время, сразу спрашиваем имя (без OpenRouter)
-      bookingState.set(chatId, { ...currentState, step: 'name', time: text });
+      bookingState.set(stateKey, { ...currentState, step: 'name', time: text });
       const nameQuestion = "Отлично, записываю. Подскажите, как вас зовут?";
       history.push({ role: 'assistant', content: nameQuestion });
-      chatHistory.set(chatId, history.slice(-10));
+      chatHistory.set(stateKey, history.slice(-10));
       return nameQuestion;
 
     } else if (currentState.step === 'name') {
       if (/^\d{1,2}:\d{2}$/.test(text.trim())) {
         const nameQuestion = 'Отлично, записываю. Подскажите, как вас зовут?';
         history.push({ role: 'assistant', content: nameQuestion });
-        chatHistory.set(chatId, history.slice(-10));
+        chatHistory.set(stateKey, history.slice(-10));
         return nameQuestion;
       }
       // Сохраняем имя, сразу спрашиваем телефон (без OpenRouter)
-      bookingState.set(chatId, { ...currentState, step: 'phone', name: text });
+      bookingState.set(stateKey, { ...currentState, step: 'phone', name: text });
       const phoneQuestion = "И оставьте, пожалуйста, номер телефона для связи.";
       history.push({ role: 'assistant', content: phoneQuestion });
-      chatHistory.set(chatId, history.slice(-10));
+      chatHistory.set(stateKey, history.slice(-10));
       return phoneQuestion;
 
     } else if (currentState.step === 'phone') {
       const finalState = { ...currentState, phone: text };
-      bookingState.set(chatId, finalState);
+      bookingState.set(stateKey, finalState);
 
       const { service, date, time, name, phone } = finalState;
 
@@ -523,13 +538,13 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
 
       if (lookupError) {
         console.error("Client lookup error:", lookupError);
-        bookingState.delete(chatId); chatHistory.delete(chatId);
+        bookingState.delete(stateKey); chatHistory.delete(stateKey);
         return "Произошла ошибка при поиске клиента. Попробуйте ещё раз.";
       }
 
       if (existingClient?.is_blocked) {
-        bookingState.delete(chatId);
-        chatHistory.delete(chatId);
+        bookingState.delete(stateKey);
+        chatHistory.delete(stateKey);
         await sendTelegramMessage(chatId, BLOCKED_CLIENT_BOOKING_MESSAGE);
         const adminChatId = process.env.TELEGRAM_CHAT_ID;
         if (adminChatId) {
@@ -550,7 +565,7 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
           .from("clients").insert({ name, phone, email: "" }).select("id").single();
         if (insertClientError || !newClient) {
           console.error("Client insert error:", insertClientError);
-          bookingState.delete(chatId); chatHistory.delete(chatId);
+          bookingState.delete(stateKey); chatHistory.delete(stateKey);
           return "Не удалось сохранить данные клиента. Попробуйте ещё раз.";
         }
         clientId = newClient.id;
@@ -558,19 +573,19 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
       }
 
       // 3. Получить услугу и мастера из каталога салона
-      const serviceRow = await resolveServiceByName(service);
+      const serviceRow = await resolveServiceByName(ctx.salonId, service);
       if (!serviceRow) {
         console.error('Service lookup error: no active services in catalog');
-        bookingState.delete(chatId); chatHistory.delete(chatId);
+        bookingState.delete(stateKey); chatHistory.delete(stateKey);
         return "В салоне пока нет услуг. Добавьте услуги в панели администратора и попробуйте снова.";
       }
 
       const staffRow = finalState.staffId
-        ? await getActiveStaffById(finalState.staffId)
+        ? await getActiveStaffById(ctx.salonId, finalState.staffId)
         : null;
       if (!staffRow) {
         console.error('Staff lookup error: no staff assigned for booking');
-        bookingState.delete(chatId); chatHistory.delete(chatId);
+        bookingState.delete(stateKey); chatHistory.delete(stateKey);
         return STAFF_UNAVAILABLE_MESSAGE;
       }
 
@@ -589,10 +604,10 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
         .maybeSingle();
 
       if (conflictingSlot) {
-        bookingState.set(chatId, { ...finalState, step: 'time', time: '' });
-        const freeSlots = await getAvailableSlots(appointmentDate, staffRow.id);
+        bookingState.set(stateKey, { ...finalState, step: 'time', time: '' });
+        const freeSlots = await getAvailableSlots(ctx.salonId, appointmentDate, staffRow.id);
         if (freeSlots.length === 0) {
-          bookingState.set(chatId, { ...finalState, step: 'date', date: '', time: '' });
+          bookingState.set(stateKey, { ...finalState, step: 'date', date: '', time: '' });
           return `К сожалению, это время уже занято, и на ${date} у мастера больше нет свободных слотов. Выберите другой день.`;
         }
         const keyboard: { text: string; callback_data: string }[][] = [];
@@ -624,7 +639,7 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
 
       if (appointmentError || !appointment) {
         console.error("Appointment insert error:", appointmentError);
-        bookingState.delete(chatId); chatHistory.delete(chatId);
+        bookingState.delete(stateKey); chatHistory.delete(stateKey);
         return "Не удалось создать запись. Попробуйте ещё раз или обратитесь к администратору.";
       }
 
@@ -656,11 +671,11 @@ async function generateAIResponse(chatId: number, text: string): Promise<string 
         console.warn("[admin notify] TELEGRAM_CHAT_ID не задан — уведомление пропущено");
       }
 
-      bookingState.delete(chatId);
-      chatHistory.delete(chatId);
+      bookingState.delete(stateKey);
+      chatHistory.delete(stateKey);
 
       if (isNewClient) {
-        birthdayState.set(chatId, { clientId, invalidAttempts: 0 });
+        birthdayState.set(stateKey, { clientId, invalidAttempts: 0 });
         await sendTelegramMessageWithKeyboard(chatId, BIRTHDAY_PROMPT_MESSAGE, getBirthdaySkipKeyboard());
       }
 
@@ -737,12 +752,12 @@ history.push({
   content: answer
 });
 
-chatHistory.set(chatId, history.slice(-10));
+chatHistory.set(stateKey, history.slice(-10));
 
   // Инициализировать step-машину после первого ответа AI (приветствие)
   const assistantCount = history.filter(m => m.role === 'assistant').length;
-  if (!bookingState.has(chatId) && assistantCount === 1) {
-    bookingState.set(chatId, {
+  if (!bookingState.has(stateKey) && assistantCount === 1) {
+    bookingState.set(stateKey, {
       step: 'service',
       service: '',
       staffId: '',
@@ -757,11 +772,11 @@ chatHistory.set(chatId, history.slice(-10));
   }
 
   // После получения услуги — кнопки дат
-  const currentStepAfterAI = bookingState.get(chatId)?.step;
+  const currentStepAfterAI = bookingState.get(stateKey)?.step;
   if (currentStepAfterAI === 'date') {
-    const stateForDate = bookingState.get(chatId)!;
+    const stateForDate = bookingState.get(stateKey)!;
     if (!stateForDate.staffId?.trim()) {
-      bookingState.delete(chatId);
+      bookingState.delete(stateKey);
       await sendTelegramMessage(chatId, STAFF_UNAVAILABLE_MESSAGE);
       return null;
     }
@@ -771,20 +786,20 @@ chatHistory.set(chatId, history.slice(-10));
 
   // После получения даты — кнопки свободного времени
   if (currentStepAfterAI === 'time') {
-    const stateForTime = bookingState.get(chatId)!;
+    const stateForTime = bookingState.get(stateKey)!;
     if (!stateForTime.staffId?.trim()) {
-      bookingState.delete(chatId);
+      bookingState.delete(stateKey);
       await sendTelegramMessage(chatId, STAFF_UNAVAILABLE_MESSAGE);
       return null;
     }
     console.log(`[timeKeyboard] stateForTime.date: "${stateForTime.date}"`);
     const parsedDate = parseAppointmentDate(stateForTime.date);
     console.log(`[timeKeyboard] parsedDate passed to getAvailableSlots: "${parsedDate}"`);
-    const freeSlots = await getAvailableSlots(parsedDate, stateForTime.staffId);
+    const freeSlots = await getAvailableSlots(ctx.salonId, parsedDate, stateForTime.staffId);
 
     if (freeSlots.length === 0) {
       // Нет слотов — возвращаем на выбор даты
-      bookingState.set(chatId, { ...stateForTime, step: 'date', date: '' });
+      bookingState.set(stateKey, { ...stateForTime, step: 'date', date: '' });
       const noSlotsMsg = `К сожалению, на выбранную дату нет свободного времени. Выберите другой день:`;
       await sendTelegramMessageWithKeyboard(chatId, noSlotsMsg, getDateKeyboard());
       return null;
@@ -993,7 +1008,7 @@ async function answerCallbackQuery(callbackQueryId: string) {
   });
 }
 
-async function getAppointmentStaffId(appointmentId: string): Promise<string | null> {
+async function getAppointmentStaffId(_salonId: string, appointmentId: string): Promise<string | null> {
   const { data, error } = await (supabase as any)
     .from('appointments')
     .select('staff_id')
@@ -1010,6 +1025,7 @@ async function getAppointmentStaffId(appointmentId: string): Promise<string | nu
 }
 
 async function getAvailableSlots(
+  _salonId: string,
   date: string,
   staffId: string,
   excludeAppointmentId?: string
@@ -1119,6 +1135,8 @@ async function startTelegramPolling() {
 
           if (!cqChatId) { continue; }
 
+          const cqStateKey = getTelegramStateKey(defaultTelegramSalonContext.salonId, cqChatId);
+
           // --- Отмена записи ---
           if (cqData.startsWith('cancel_confirm:')) {
             const appointmentId = cqData.slice('cancel_confirm:'.length);
@@ -1136,7 +1154,7 @@ async function startTelegramPolling() {
                 .update({ status: 'failed', message: 'Cancelled — appointment was cancelled' })
                 .eq('appointment_id', appointmentId)
                 .eq('status', 'pending');
-              manageState.delete(cqChatId);
+              manageState.delete(cqStateKey);
               await sendTelegramMessage(cqChatId, 'Запись отменена. Будем рады видеть вас снова! 🌸');
               const adminChatId = process.env.TELEGRAM_CHAT_ID;
               if (adminChatId) {
@@ -1148,7 +1166,7 @@ async function startTelegramPolling() {
           }
 
           if (cqData === 'cancel_keep') {
-            manageState.delete(cqChatId);
+            manageState.delete(cqStateKey);
             await sendTelegramMessage(cqChatId, 'Хорошо, запись оставлена. Будем ждать вас! 🌸');
             continue;
           }
@@ -1169,8 +1187,8 @@ async function startTelegramPolling() {
           // --- Перенос записи ---
           if (cqData.startsWith('select_reschedule:')) {
             const appointmentId = cqData.slice('select_reschedule:'.length);
-            const cur = manageState.get(cqChatId);
-            if (cur) manageState.set(cqChatId, { ...cur, step: 'select_new_date', appointmentId });
+            const cur = manageState.get(cqStateKey);
+            if (cur) manageState.set(cqStateKey, { ...cur, step: 'select_new_date', appointmentId });
             const { data: appt } = await (supabase as any)
               .from('appointments').select('id, date, start_time, notes').eq('id', appointmentId).maybeSingle();
             const apptText = appt ? formatAppointmentForUser(appt) : `Запись ${appointmentId}`;
@@ -1192,15 +1210,15 @@ async function startTelegramPolling() {
             const appointmentId = cqData.slice('rdate:'.length, lastColon); // UUID
             const newDate = parseAppointmentDate(dateStr);
             console.log(`[rdate] appointmentId="${appointmentId}" dateStr="${dateStr}" parsedDate="${newDate}"`);
-            const cur = manageState.get(cqChatId);
-            if (cur) manageState.set(cqChatId, { ...cur, step: 'select_new_time', appointmentId, newDate });
-            const staffId = await getAppointmentStaffId(appointmentId);
+            const cur = manageState.get(cqStateKey);
+            if (cur) manageState.set(cqStateKey, { ...cur, step: 'select_new_time', appointmentId, newDate });
+            const staffId = await getAppointmentStaffId(defaultTelegramSalonContext.salonId, appointmentId);
             if (!staffId) {
               await sendTelegramMessage(cqChatId, 'Не удалось определить мастера для этой записи. Обратитесь к администратору.');
               continue;
             }
             // Исключаем саму переносимую запись, чтобы её слот не блокировался у этого мастера
-            const freeSlots = await getAvailableSlots(newDate, staffId, appointmentId);
+            const freeSlots = await getAvailableSlots(defaultTelegramSalonContext.salonId, newDate, staffId, appointmentId);
             if (freeSlots.length === 0) {
               await sendTelegramMessageWithKeyboard(cqChatId, 'На эту дату нет свободного времени. Выберите другой день:', getRescheduleDateKeyboard(appointmentId));
             } else {
@@ -1218,15 +1236,15 @@ async function startTelegramPolling() {
             const parts = cqData.split(':');
             const appointmentId = parts[1];
             const newTime = `${parts[2]}:${parts[3]}`; // 'HH:MM'
-            const cur = manageState.get(cqChatId);
+            const cur = manageState.get(cqStateKey);
             const newDate = cur?.newDate;
             if (!newDate) {
               await sendTelegramMessage(cqChatId, 'Ошибка: дата не найдена. Начните перенос заново.');
-              manageState.delete(cqChatId);
+              manageState.delete(cqStateKey);
               continue;
             }
             const parsedTime = parseAppointmentTime(newTime);
-            const staffId = await getAppointmentStaffId(appointmentId);
+            const staffId = await getAppointmentStaffId(defaultTelegramSalonContext.salonId, appointmentId);
             if (!staffId) {
               await sendTelegramMessage(cqChatId, 'Не удалось определить мастера для этой записи. Обратитесь к администратору.');
               continue;
@@ -1240,7 +1258,7 @@ async function startTelegramPolling() {
               .neq('id', appointmentId).limit(1).maybeSingle();
             if (existingSlot) {
               // Исключаем саму переносимую запись из занятых слотов мастера
-              const freeSlots = await getAvailableSlots(newDate, staffId, appointmentId);
+              const freeSlots = await getAvailableSlots(defaultTelegramSalonContext.salonId, newDate, staffId, appointmentId);
               if (freeSlots.length === 0) {
                 await sendTelegramMessageWithKeyboard(cqChatId, 'Это время занято, и других свободных слотов на эту дату нет. Выберите другой день:', getRescheduleDateKeyboard(appointmentId));
               } else {
@@ -1275,7 +1293,7 @@ async function startTelegramPolling() {
                 })
                 .eq('appointment_id', appointmentId)
                 .eq('status', 'pending');
-              manageState.delete(cqChatId);
+              manageState.delete(cqStateKey);
               const formattedDate = formatDateForUser(newDate);
               await sendTelegramMessage(cqChatId, `Готово! Запись перенесена на ${formattedDate} в ${newTime} ✨`);
               const adminChatId = process.env.TELEGRAM_CHAT_ID;
@@ -1297,8 +1315,8 @@ async function startTelegramPolling() {
           }
 
           if (cqData === 'birthday:skip') {
-            if (birthdayState.has(cqChatId)) {
-              birthdayState.delete(cqChatId);
+            if (birthdayState.has(cqStateKey)) {
+              birthdayState.delete(cqStateKey);
               await sendTelegramMessage(cqChatId, BIRTHDAY_SKIPPED_MESSAGE);
             }
             continue;
@@ -1306,7 +1324,7 @@ async function startTelegramPolling() {
 
           // service:, date:, time: — передаём значение в шаг-машину (только на ожидаемом шаге)
           if (cqData.startsWith('service:') || cqData.startsWith('date:') || cqData.startsWith('time:') || cqData.startsWith('staff:')) {
-            const booking = bookingState.get(cqChatId);
+            const booking = bookingState.get(cqStateKey);
             const expectedStep = cqData.startsWith('service:')
               ? 'service'
               : cqData.startsWith('date:')
@@ -1320,7 +1338,7 @@ async function startTelegramPolling() {
             const value = cqData.startsWith('staff:')
               ? cqData.slice('staff:'.length)
               : cqData.slice(cqData.indexOf(':') + 1);
-            const answer = await generateAIResponse(cqChatId, value);
+            const answer = await generateAIResponse(defaultTelegramSalonContext, cqChatId, value);
             if (answer !== null) {
               await sendTelegramMessage(cqChatId, answer);
             }
@@ -1335,7 +1353,7 @@ async function startTelegramPolling() {
 
         if (!text || !chatId) continue;
 
-        const answer = await generateAIResponse(chatId, text);
+        const answer = await generateAIResponse(defaultTelegramSalonContext, chatId, text);
         if (answer !== null) {
           await sendTelegramMessage(chatId, answer);
         }

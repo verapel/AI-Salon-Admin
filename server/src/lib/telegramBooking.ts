@@ -54,7 +54,7 @@ export function localDateStr(offsetDays = 0): string {
   return `${y}-${m}-${day}`;
 }
 
-export async function fetchActiveServices(): Promise<ServiceRow[]> {
+export async function fetchActiveServices(_salonId: string): Promise<ServiceRow[]> {
   const { data, error } = await supabase
     .from('services')
     .select('id, name, duration, category')
@@ -116,6 +116,7 @@ async function fetchActiveStaff(): Promise<StaffRow[]> {
 
 /** Active staff whose specialties match the selected Telegram service name. */
 export async function findStaffForServiceSpecialization(
+  _salonId: string,
   serviceName: string
 ): Promise<StaffRow[]> {
   const trimmed = serviceName.trim();
@@ -125,7 +126,7 @@ export async function findStaffForServiceSpecialization(
   return staffList.filter((member) => staffMatchesServiceSpecialization(member, trimmed));
 }
 
-export async function getActiveStaffById(staffId: string): Promise<StaffRow | null> {
+export async function getActiveStaffById(_salonId: string, staffId: string): Promise<StaffRow | null> {
   const { data, error } = await supabase
     .from('staff')
     .select('id, name, specialties')
@@ -160,7 +161,7 @@ export function buildStaffSelectionKeyboard(
 }
 
 /** Exact name match; creates a placeholder service when missing (Telegram booking). */
-export async function resolveServiceByName(serviceName: string): Promise<ServiceRow | null> {
+export async function resolveServiceByName(_salonId: string, serviceName: string): Promise<ServiceRow | null> {
   const trimmed = serviceName.trim();
   if (!trimmed || trimmed.toLowerCase() === 'manual') return null;
 
