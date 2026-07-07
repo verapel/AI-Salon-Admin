@@ -138,6 +138,7 @@ export interface DeveloperSalonTelegramSummary {
   connectedAt: string | null;
   lastCheckedAt: string | null;
   lastError: string | null;
+  livePolling: boolean;
 }
 
 export interface DeveloperSalonDetail {

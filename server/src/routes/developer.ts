@@ -97,10 +97,11 @@ function emptyTelegramSummary() {
     connectedAt: null,
     lastCheckedAt: null,
     lastError: null,
+    livePolling: false,
   };
 }
 
-function mapTelegramSummary(integration: IntegrationRow | null) {
+function mapTelegramSummary(integration: IntegrationRow | null, salonSlug: string) {
   if (!integration) return emptyTelegramSummary();
   return {
     status: integration.status,
@@ -110,6 +111,7 @@ function mapTelegramSummary(integration: IntegrationRow | null) {
     connectedAt: integration.connected_at,
     lastCheckedAt: integration.last_checked_at,
     lastError: integration.last_error,
+    livePolling: salonSlug === DEFAULT_SALON_SLUG && integration.status === 'connected',
   };
 }
 
@@ -472,7 +474,7 @@ router.get('/salons/:id', async (req, res) => {
     ...mapSalonCore(row),
     counts,
     owner,
-    telegram: mapTelegramSummary((integrationRes.data as IntegrationRow | null) ?? null),
+    telegram: mapTelegramSummary((integrationRes.data as IntegrationRow | null) ?? null, row.slug),
   });
 });
 

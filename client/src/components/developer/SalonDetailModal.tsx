@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLanguage } from '@/context/LanguageContext';
+import ConnectSalonTelegramModal from '@/components/developer/ConnectSalonTelegramModal';
 import IntegrationStatusBadge from '@/components/developer/IntegrationStatusBadge';
 import IntegrationHealthBadge from '@/components/developer/IntegrationHealthBadge';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
@@ -36,6 +37,7 @@ export default function SalonDetailModal({
   const [saveError, setSaveError] = useState('');
   const [validationError, setValidationError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [connectTelegramOpen, setConnectTelegramOpen] = useState(false);
 
   const [name, setName] = useState('');
   const [active, setActive] = useState(true);
@@ -74,6 +76,7 @@ export default function SalonDetailModal({
     setSaveError('');
     setValidationError('');
     setSuccessMessage('');
+    setConnectTelegramOpen(false);
     loadDetail();
   }, [isOpen, salonId, loadDetail]);
 
@@ -115,6 +118,12 @@ export default function SalonDetailModal({
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleTelegramConnected() {
+    await loadDetail();
+    setSuccessMessage(t('developer.salons.telegramConnectedSuccess'));
+    onUpdated();
   }
 
   const displayError = validationError || saveError;
@@ -284,22 +293,49 @@ export default function SalonDetailModal({
                   <IntegrationHealthBadge health={detail.telegram.health} />
                 </div>
                 {detail.telegram.status === 'not_connected' ? (
-                  <p className="mt-2 text-sm text-gray-400">{t('developer.salons.notConnected')}</p>
+                  <>
+                    <p className="mt-2 text-sm text-gray-400">{t('developer.salons.notConnected')}</p>
+                    <button
+                      type="button"
+                      onClick={() => setConnectTelegramOpen(true)}
+                      className="mt-3 w-full rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-purple-700 sm:w-auto"
+                    >
+                      {t('developer.salons.connectTelegram')}
+                    </button>
+                  </>
                 ) : (
-                  <dl className="mt-3 grid gap-2 text-sm">
-                    {detail.telegram.botUsername && (
-                      <div className="flex justify-between gap-3">
-                        <dt className="text-gray-400">{t('developer.salons.botUsername')}</dt>
-                        <dd className="text-right text-gray-200">@{detail.telegram.botUsername}</dd>
-                      </div>
+                  <>
+                    <dl className="mt-3 grid gap-2 text-sm">
+                      {detail.telegram.botUsername && (
+                        <div className="flex justify-between gap-3">
+                          <dt className="text-gray-400">{t('developer.salons.botUsername')}</dt>
+                          <dd className="text-right text-gray-200">@{detail.telegram.botUsername}</dd>
+                        </div>
+                      )}
+                      {detail.telegram.botDisplayName && (
+                        <div className="flex justify-between gap-3">
+                          <dt className="text-gray-400">{t('developer.salons.botDisplayName')}</dt>
+                          <dd className="text-right text-gray-200">{detail.telegram.botDisplayName}</dd>
+                        </div>
+                      )}
+                    </dl>
+                    {detail.telegram.livePolling ? (
+                      <p className="mt-3 text-sm text-green-400">
+                        {t('developer.salons.telegramBookingActive')}
+                      </p>
+                    ) : (
+                      <p className="mt-3 text-sm text-amber-400/90">
+                        {t('developer.salons.telegramConnectedNotActive')}
+                      </p>
                     )}
-                    {detail.telegram.botDisplayName && (
-                      <div className="flex justify-between gap-3">
-                        <dt className="text-gray-400">{t('developer.salons.botDisplayName')}</dt>
-                        <dd className="text-right text-gray-200">{detail.telegram.botDisplayName}</dd>
-                      </div>
-                    )}
-                  </dl>
+                    <button
+                      type="button"
+                      onClick={() => setConnectTelegramOpen(true)}
+                      className="mt-3 w-full rounded-lg border border-slate-600 bg-slate-800 px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:bg-slate-700 sm:w-auto"
+                    >
+                      {t('developer.salons.reconnectTelegram')}
+                    </button>
+                  </>
                 )}
               </div>
 
@@ -332,6 +368,16 @@ export default function SalonDetailModal({
           )}
         </div>
       </div>
+
+      {detail && salonId && (
+        <ConnectSalonTelegramModal
+          isOpen={connectTelegramOpen}
+          salonId={salonId}
+          salonName={detail.name}
+          onClose={() => setConnectTelegramOpen(false)}
+          onConnected={handleTelegramConnected}
+        />
+      )}
     </div>
   );
 }
