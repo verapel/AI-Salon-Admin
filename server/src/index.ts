@@ -584,13 +584,10 @@ async function generateAIResponse(
         bookingState.delete(stateKey);
         chatHistory.delete(stateKey);
         await sendTelegramMessage(chatId, BLOCKED_CLIENT_BOOKING_MESSAGE, botToken);
-        const adminChatId = process.env.TELEGRAM_CHAT_ID;
-        if (adminChatId) {
-          await sendTelegramMessage(
-            Number(adminChatId),
-            `⚠️ Заблокированный клиент пытался записаться онлайн\n\n👤 ${name}\n📞 ${phone}\n💇 ${service}\n📅 ${date} ${time}`
-          );
-        }
+        await notifySalonAdmin(
+          ctx,
+          `⚠️ Заблокированный клиент пытался записаться онлайн\n\n👤 ${name}\n📞 ${phone}\n💇 ${service}\n📅 ${date} ${time}`
+        );
         return null;
       }
 
@@ -699,19 +696,11 @@ async function generateAIResponse(
         botToken
       );
 
-      // 7. Уведомление мастеру/администратору (только в TELEGRAM_CHAT_ID)
-      const adminChatId = process.env.TELEGRAM_CHAT_ID;
-      console.log("[admin notify] adminChatId =", adminChatId, "| clientChatId =", chatId);
-      if (adminChatId) {
-        console.log("[admin notify] отправляем уведомление в", Number(adminChatId));
-        await sendTelegramMessage(
-          Number(adminChatId),
-          `🔔 Новая запись!\n\n💇 Услуга: ${serviceRow.name}\n📅 День: ${date}\n🕒 Время: ${time}\n👤 Клиент: ${name}\n📞 Телефон: ${phone}`
-        );
-        console.log("[admin notify] уведомление отправлено");
-      } else {
-        console.warn("[admin notify] TELEGRAM_CHAT_ID не задан — уведомление пропущено");
-      }
+      // 7. Уведомление мастеру/администратору
+      await notifySalonAdmin(
+        ctx,
+        `🔔 Новая запись!\n\n💇 Услуга: ${serviceRow.name}\n📅 День: ${date}\n🕒 Время: ${time}\n👤 Клиент: ${name}\n📞 Телефон: ${phone}`
+      );
 
       bookingState.delete(stateKey);
       chatHistory.delete(stateKey);
@@ -1025,6 +1014,46 @@ function resolveTelegramBotToken(ctx: TelegramSalonContext): string | undefined 
   return ctx.botToken?.trim() || process.env.TELEGRAM_BOT_TOKEN?.trim();
 }
 
+async function notifySalonAdmin(ctx: TelegramSalonContext, message: string): Promise<void> {
+  let salonAdminChatId: number | null = null;
+
+  try {
+    const { data, error } = await (supabase as any)
+      .from('salon_integrations')
+      .select('admin_chat_id')
+      .eq('salon_id', ctx.salonId)
+      .eq('provider', 'telegram')
+      .maybeSingle();
+
+    if (error) {
+      console.warn(
+        `[admin notify] salonId=${ctx.salonId} query failed:`,
+        error.message ?? 'unknown error'
+      );
+    } else if (data?.admin_chat_id != null) {
+      salonAdminChatId = Number(data.admin_chat_id);
+    }
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : 'unknown error';
+    console.warn(`[admin notify] salonId=${ctx.salonId} query failed:`, errMsg);
+  }
+
+  if (salonAdminChatId != null && !Number.isNaN(salonAdminChatId)) {
+    await sendTelegramMessage(salonAdminChatId, message, ctx.botToken);
+    console.log(`[admin notify] salonId=${ctx.salonId} target=salon`);
+    return;
+  }
+
+  const envChatId = process.env.TELEGRAM_CHAT_ID;
+  if (envChatId) {
+    await sendTelegramMessage(Number(envChatId), message);
+    console.log(`[admin notify] salonId=${ctx.salonId} target=env`);
+    return;
+  }
+
+  console.warn(`[admin notify] salonId=${ctx.salonId} target=none`);
+}
+
 async function sendTelegramMessage(chatId: number, text: string, botToken?: string) {
   const token = botToken?.trim() || process.env.TELEGRAM_BOT_TOKEN?.trim();
 
@@ -1209,11 +1238,8 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
                 .eq('status', 'pending');
               manageState.delete(cqStateKey);
               await sendTelegramMessage(cqChatId, 'Запись отменена. Будем рады видеть вас снова! 🌸', botToken);
-              const adminChatId = process.env.TELEGRAM_CHAT_ID;
-              if (adminChatId) {
-                const info = apptInfo ? formatAppointmentForUser(apptInfo) : `ID: ${appointmentId}`;
-                await sendTelegramMessage(Number(adminChatId), `❌ Клиент отменил запись.\n${info}`);
-              }
+              const info = apptInfo ? formatAppointmentForUser(apptInfo) : `ID: ${appointmentId}`;
+              await notifySalonAdmin(ctx, `❌ Клиент отменил запись.\n${info}`);
             }
             return;
           }
@@ -1352,10 +1378,10 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
               manageState.delete(cqStateKey);
               const formattedDate = formatDateForUser(newDate);
               await sendTelegramMessage(cqChatId, `Готово! Запись перенесена на ${formattedDate} в ${newTime} ✨`, botToken);
-              const adminChatId = process.env.TELEGRAM_CHAT_ID;
-              if (adminChatId) {
-                await sendTelegramMessage(Number(adminChatId), `🔄 Перенос записи!\n📅 Новая дата: ${formattedDate}\n🕒 Новое время: ${newTime}`);
-              }
+              await notifySalonAdmin(
+                ctx,
+                `🔄 Перенос записи!\n📅 Новая дата: ${formattedDate}\n🕒 Новое время: ${newTime}`
+              );
             }
             return;
           }

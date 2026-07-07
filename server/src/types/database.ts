@@ -77,6 +77,7 @@ export interface Database {
           last_checked_at: string | null;
           last_error: string | null;
           token_ciphertext: string | null;
+          admin_chat_id: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -92,6 +93,7 @@ export interface Database {
           last_checked_at?: string | null;
           last_error?: string | null;
           token_ciphertext?: string | null;
+          admin_chat_id?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -107,6 +109,7 @@ export interface Database {
           last_checked_at?: string | null;
           last_error?: string | null;
           token_ciphertext?: string | null;
+          admin_chat_id?: number | null;
           created_at?: string;
           updated_at?: string;
         };
