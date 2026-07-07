@@ -231,6 +231,11 @@ function parseAppointmentTime(input: string): string {
   return `${hours}:${minutes}`;
 }
 
+function isServiceSelectionPrompt(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return /на какую услугу/.test(normalized) || /какую услугу/.test(normalized);
+}
+
 async function handleBirthdayCollection(
   ctx: TelegramSalonContext,
   chatId: number,
@@ -785,12 +790,11 @@ history.push({
 
 chatHistory.set(stateKey, history.slice(-10));
 
-  // Инициализировать step-машину после первого ответа AI (приветствие)
-  const assistantCount = history.filter(m => m.role === 'assistant').length;
+  // Инициализировать step-машину и клавиатуру услуг, когда AI спрашивает услугу
   const existingBooking = bookingState.get(stateKey);
   if (
-    (!bookingState.has(stateKey) && assistantCount === 1) ||
-    existingBooking?.step === 'service'
+    existingBooking?.step === 'service' ||
+    (!bookingState.has(stateKey) && isServiceSelectionPrompt(answer))
   ) {
     if (!existingBooking) {
       bookingState.set(stateKey, {
