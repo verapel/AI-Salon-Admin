@@ -120,6 +120,7 @@ function emptyTelegramSummary() {
 
 function mapTelegramSummary(integration: IntegrationRow | null, salonSlug: string) {
   if (!integration) return emptyTelegramSummary();
+  const multiTelegramEnabled = process.env.MULTI_TELEGRAM_ENABLED === 'true';
   return {
     status: integration.status,
     health: integration.health,
@@ -128,7 +129,9 @@ function mapTelegramSummary(integration: IntegrationRow | null, salonSlug: strin
     connectedAt: integration.connected_at,
     lastCheckedAt: integration.last_checked_at,
     lastError: integration.last_error,
-    livePolling: salonSlug === DEFAULT_SALON_SLUG && integration.status === 'connected',
+    livePolling:
+      integration.status === 'connected' &&
+      (multiTelegramEnabled || salonSlug === DEFAULT_SALON_SLUG),
     adminChatId: integration.admin_chat_id ?? null,
   };
 }
