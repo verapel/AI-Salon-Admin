@@ -1018,8 +1018,8 @@ function resolveTelegramBotToken(ctx: TelegramSalonContext): string | undefined 
   return ctx.botToken?.trim() || process.env.TELEGRAM_BOT_TOKEN?.trim();
 }
 
-/** Exact /start or /start@BotUsername (case-insensitive). */
-const TELEGRAM_START_COMMAND_RE = /^\/start(?:@[A-Za-z0-9_]+)?$/i;
+/** /start or /start@BotUsername, optional payload (case-insensitive). */
+const TELEGRAM_START_COMMAND_RE = /^\/start(?:@[A-Za-z0-9_]+)?(?:\s|$)/i;
 
 function isTelegramStartCommand(text: string): boolean {
   return TELEGRAM_START_COMMAND_RE.test(text.trim());
