@@ -214,4 +214,18 @@ export interface TestAdminNotificationResponse {
   error?: string;
 }
 
+export interface TelegramAdminChatCandidateResponse {
+  found: boolean;
+  expired?: boolean;
+  candidateChatId?: number | null;
+  detectedAt?: string | null;
+  expiresAt?: string | null;
+}
+
+export interface ConfirmTelegramAdminChatCandidateResponse {
+  success: boolean;
+  integration?: DeveloperTelegramIntegration;
+  error?: string;
+}
+
 export const DEFAULT_SALON_SLUG = 'default';

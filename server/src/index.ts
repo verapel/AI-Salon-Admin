@@ -1018,6 +1018,47 @@ function resolveTelegramBotToken(ctx: TelegramSalonContext): string | undefined 
   return ctx.botToken?.trim() || process.env.TELEGRAM_BOT_TOKEN?.trim();
 }
 
+/** Exact /start or /start@BotUsername (case-insensitive). */
+const TELEGRAM_START_COMMAND_RE = /^\/start(?:@[A-Za-z0-9_]+)?$/i;
+
+function isTelegramStartCommand(text: string): boolean {
+  return TELEGRAM_START_COMMAND_RE.test(text.trim());
+}
+
+/**
+ * Persist a temporary admin-chat candidate from /start.
+ * Never writes admin_chat_id — developer must confirm explicitly.
+ * Failures are logged and swallowed so booking flow continues.
+ */
+async function captureAdminChatCandidate(
+  ctx: TelegramSalonContext,
+  chatId: number
+): Promise<void> {
+  try {
+    const { error } = await (supabase as any)
+      .from('salon_integrations')
+      .update({
+        admin_chat_candidate_id: chatId,
+        admin_chat_candidate_at: new Date().toISOString(),
+      })
+      .eq('salon_id', ctx.salonId)
+      .eq('provider', 'telegram');
+
+    if (error) {
+      console.warn(
+        `[admin candidate] salonId=${ctx.salonId} capture failed:`,
+        error.message ?? 'unknown error'
+      );
+      return;
+    }
+
+    console.log(`[admin candidate] salonId=${ctx.salonId} captured`);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : 'unknown error';
+    console.warn(`[admin candidate] salonId=${ctx.salonId} capture failed:`, errMsg);
+  }
+}
+
 async function notifySalonAdmin(ctx: TelegramSalonContext, message: string): Promise<void> {
   let salonAdminChatId: number | null = null;
 
@@ -1438,6 +1479,11 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
         const chatId = message?.chat?.id;
 
         if (!text || !chatId) return;
+
+        // /start → candidate only (never admin_chat_id); then continue normal flow
+        if (isTelegramStartCommand(text)) {
+          await captureAdminChatCandidate(ctx, chatId);
+        }
 
         const answer = await generateAIResponse(ctx, chatId, text);
         if (answer !== null) {

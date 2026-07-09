@@ -139,6 +139,18 @@ export const api = {
         `/developer/integrations/telegram/${salonId}/test-admin-notification`,
         { method: 'POST' }
       ),
+    getTelegramAdminChatCandidate: (salonId: string) =>
+      request<import('@/types').TelegramAdminChatCandidateResponse>(
+        `/developer/integrations/telegram/${salonId}/admin-chat-candidate`
+      ),
+    confirmTelegramAdminChatCandidate: (salonId: string, candidateChatId: number) =>
+      request<import('@/types').ConfirmTelegramAdminChatCandidateResponse>(
+        `/developer/integrations/telegram/${salonId}/admin-chat-candidate/confirm`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ candidateChatId }),
+        }
+      ),
     getHealth: () => request<import('@/types').DeveloperHealth>('/developer/health'),
   },
 };

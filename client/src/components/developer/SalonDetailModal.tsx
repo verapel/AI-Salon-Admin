@@ -5,7 +5,7 @@ import IntegrationStatusBadge from '@/components/developer/IntegrationStatusBadg
 import IntegrationHealthBadge from '@/components/developer/IntegrationHealthBadge';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { api } from '@/lib/api';
-import type { DeveloperSalonDetail } from '@/types';
+import type { DeveloperSalonDetail, TelegramAdminChatCandidateResponse } from '@/types';
 
 interface SalonDetailModalProps {
   salonId: string | null;
@@ -22,6 +22,17 @@ function formatDate(iso: string | null): string {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
+  });
+}
+
+function formatDateTime(iso: string | null): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
 
@@ -48,6 +59,12 @@ export default function SalonDetailModal({
   const [testingAdminNotification, setTestingAdminNotification] = useState(false);
   const [adminChatTestError, setAdminChatTestError] = useState('');
   const [adminChatTestSuccess, setAdminChatTestSuccess] = useState('');
+  const [findingAdminChat, setFindingAdminChat] = useState(false);
+  const [confirmingAdminChatCandidate, setConfirmingAdminChatCandidate] = useState(false);
+  const [adminChatCandidate, setAdminChatCandidate] =
+    useState<TelegramAdminChatCandidateResponse | null>(null);
+  const [adminChatCandidateError, setAdminChatCandidateError] = useState('');
+  const [adminChatCandidateSuccess, setAdminChatCandidateSuccess] = useState('');
 
   const [name, setName] = useState('');
   const [active, setActive] = useState(true);
@@ -95,6 +112,11 @@ export default function SalonDetailModal({
     setAdminChatSuccessMessage('');
     setAdminChatTestError('');
     setAdminChatTestSuccess('');
+    setFindingAdminChat(false);
+    setConfirmingAdminChatCandidate(false);
+    setAdminChatCandidate(null);
+    setAdminChatCandidateError('');
+    setAdminChatCandidateSuccess('');
     loadDetail();
   }, [isOpen, salonId, loadDetail]);
 
@@ -205,6 +227,62 @@ export default function SalonDetailModal({
       );
     } finally {
       setTestingAdminNotification(false);
+    }
+  }
+
+  async function handleFindAdminChat() {
+    if (!salonId) return;
+
+    setAdminChatCandidateError('');
+    setAdminChatCandidateSuccess('');
+    setAdminChatCandidate(null);
+    setFindingAdminChat(true);
+    try {
+      const result = await api.developer.getTelegramAdminChatCandidate(salonId);
+      setAdminChatCandidate(result);
+      if (result.found) {
+        setAdminChatCandidateSuccess(t('developer.salons.adminChatCandidateFound'));
+      } else if (result.expired) {
+        setAdminChatCandidateError(t('developer.salons.adminChatCandidateExpired'));
+      } else {
+        setAdminChatCandidateError(t('developer.salons.adminChatCandidateNotFound'));
+      }
+    } catch (err) {
+      setAdminChatCandidateError(
+        err instanceof Error ? err.message : t('developer.salons.adminChatCandidateNotFound')
+      );
+    } finally {
+      setFindingAdminChat(false);
+    }
+  }
+
+  async function handleUseAdminChatCandidate() {
+    if (!salonId || adminChatCandidate?.candidateChatId == null) return;
+
+    setAdminChatCandidateError('');
+    setAdminChatCandidateSuccess('');
+    setConfirmingAdminChatCandidate(true);
+    try {
+      const result = await api.developer.confirmTelegramAdminChatCandidate(
+        salonId,
+        adminChatCandidate.candidateChatId
+      );
+      if (!result.success) {
+        setAdminChatCandidateError(
+          result.error ?? t('developer.salons.adminChatCandidateConfirmError')
+        );
+        return;
+      }
+      setAdminChatCandidate(null);
+      setAdminChatCandidateSuccess(t('developer.salons.adminChatCandidateConfirmed'));
+      await loadDetail();
+      onUpdated();
+    } catch (err) {
+      setAdminChatCandidateError(
+        err instanceof Error ? err.message : t('developer.salons.adminChatCandidateConfirmError')
+      );
+    } finally {
+      setConfirmingAdminChatCandidate(false);
     }
   }
 
@@ -425,6 +503,55 @@ export default function SalonDetailModal({
                       <p className="mb-3 text-xs text-gray-400">
                         {t('developer.salons.adminChatIdHint')}
                       </p>
+
+                      <div className="mb-4 space-y-2">
+                        <button
+                          type="button"
+                          onClick={handleFindAdminChat}
+                          disabled={findingAdminChat || confirmingAdminChatCandidate || loading}
+                          className="w-full rounded-lg border border-slate-600 bg-slate-800 px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                        >
+                          {findingAdminChat
+                            ? t('developer.salons.findingAdminChat')
+                            : t('developer.salons.findAdminChat')}
+                        </button>
+                        {adminChatCandidate?.found &&
+                          adminChatCandidate.candidateChatId != null && (
+                            <div className="rounded-lg border border-slate-600 bg-slate-800/60 px-3 py-3 text-sm text-gray-200">
+                              <p className="font-medium text-white">
+                                {t('developer.salons.adminChatCandidateFound')}
+                              </p>
+                              <p className="mt-1 text-gray-300">
+                                {t('developer.salons.adminChatId')}:{' '}
+                                {adminChatCandidate.candidateChatId}
+                              </p>
+                              {adminChatCandidate.detectedAt && (
+                                <p className="mt-1 text-xs text-gray-400">
+                                  {formatDateTime(adminChatCandidate.detectedAt)}
+                                </p>
+                              )}
+                              <button
+                                type="button"
+                                onClick={handleUseAdminChatCandidate}
+                                disabled={
+                                  confirmingAdminChatCandidate || findingAdminChat || loading
+                                }
+                                className="mt-3 w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                              >
+                                {confirmingAdminChatCandidate
+                                  ? t('developer.salons.confirmingAdminChatCandidate')
+                                  : t('developer.salons.useAdminChatCandidate')}
+                              </button>
+                            </div>
+                          )}
+                        {adminChatCandidateError && (
+                          <p className="text-sm text-red-400">{adminChatCandidateError}</p>
+                        )}
+                        {adminChatCandidateSuccess && !adminChatCandidate?.found && (
+                          <p className="text-sm text-green-400">{adminChatCandidateSuccess}</p>
+                        )}
+                      </div>
+
                       <label className="mb-1.5 block text-sm font-medium text-gray-300">
                         {t('developer.salons.adminChatId')}
                       </label>

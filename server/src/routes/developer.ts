@@ -928,6 +928,148 @@ router.patch('/integrations/telegram/:salonId', async (req, res) => {
   });
 });
 
+const ADMIN_CHAT_CANDIDATE_TTL_MS = 30 * 60 * 1000;
+
+router.get('/integrations/telegram/:salonId/admin-chat-candidate', async (req, res) => {
+  const salonId = req.params.salonId?.trim();
+  if (!salonId) {
+    return res.status(400).json({ error: 'salonId is required' });
+  }
+
+  const { data: integration, error } = await (supabase as any)
+    .from('salon_integrations')
+    .select('admin_chat_candidate_id, admin_chat_candidate_at')
+    .eq('salon_id', salonId)
+    .eq('provider', TELEGRAM_PROVIDER)
+    .maybeSingle();
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+  if (!integration) {
+    return res.status(404).json({ error: 'Telegram integration not found' });
+  }
+
+  const candidateId = integration.admin_chat_candidate_id;
+  const detectedAt = integration.admin_chat_candidate_at as string | null;
+
+  if (candidateId == null || !detectedAt) {
+    return res.json({ found: false });
+  }
+
+  const detectedMs = new Date(detectedAt).getTime();
+  if (Number.isNaN(detectedMs)) {
+    return res.json({ found: false });
+  }
+
+  const expiresAtMs = detectedMs + ADMIN_CHAT_CANDIDATE_TTL_MS;
+  if (Date.now() > expiresAtMs) {
+    // Leave expired row in place so Confirm can still reject with expired;
+    // GET does not clear — avoids surprising side effects on a read.
+    return res.json({ found: false, expired: true });
+  }
+
+  return res.json({
+    found: true,
+    candidateChatId: Number(candidateId),
+    detectedAt,
+    expiresAt: new Date(expiresAtMs).toISOString(),
+  });
+});
+
+router.post('/integrations/telegram/:salonId/admin-chat-candidate/confirm', async (req, res) => {
+  const salonId = req.params.salonId?.trim();
+  if (!salonId) {
+    return res.status(400).json({ success: false, error: 'salonId is required' });
+  }
+
+  const body = req.body as { candidateChatId?: unknown };
+  const parsed = parseAdminChatIdInput(body.candidateChatId);
+  if (!parsed.ok || parsed.value === null) {
+    return res.status(400).json({ success: false, error: 'Invalid candidateChatId' });
+  }
+  const requestedCandidateChatId = parsed.value;
+
+  const { data: salon, error: salonError } = await (supabase as any)
+    .from('salons')
+    .select('*')
+    .eq('id', salonId)
+    .maybeSingle();
+
+  if (salonError) {
+    return res.status(500).json({ success: false, error: salonError.message });
+  }
+  if (!salon) {
+    return res.status(404).json({ success: false, error: 'Salon not found' });
+  }
+
+  const { data: integration, error: integrationError } = await (supabase as any)
+    .from('salon_integrations')
+    .select(INTEGRATION_SUMMARY_SELECT + ', admin_chat_candidate_id, admin_chat_candidate_at')
+    .eq('salon_id', salonId)
+    .eq('provider', TELEGRAM_PROVIDER)
+    .maybeSingle();
+
+  if (integrationError) {
+    return res.status(500).json({ success: false, error: integrationError.message });
+  }
+  if (!integration) {
+    return res.status(404).json({ success: false, error: 'Telegram integration not found' });
+  }
+
+  const storedCandidateId = integration.admin_chat_candidate_id;
+  const detectedAt = integration.admin_chat_candidate_at as string | null;
+
+  if (storedCandidateId == null || !detectedAt) {
+    return res.status(400).json({ success: false, error: 'No admin chat candidate found' });
+  }
+
+  const detectedMs = new Date(detectedAt).getTime();
+  if (Number.isNaN(detectedMs) || Date.now() > detectedMs + ADMIN_CHAT_CANDIDATE_TTL_MS) {
+    return res.status(400).json({ success: false, error: 'Admin chat candidate has expired' });
+  }
+
+  if (Number(storedCandidateId) !== requestedCandidateChatId) {
+    return res.status(400).json({ success: false, error: 'candidateChatId does not match stored candidate' });
+  }
+
+  const now = new Date().toISOString();
+  const { data: updated, error: updateError } = await (supabase as any)
+    .from('salon_integrations')
+    .update({
+      admin_chat_id: Number(storedCandidateId),
+      admin_chat_candidate_id: null,
+      admin_chat_candidate_at: null,
+      updated_at: now,
+    })
+    .eq('salon_id', salonId)
+    .eq('provider', TELEGRAM_PROVIDER)
+    .eq('admin_chat_candidate_id', storedCandidateId)
+    .eq('admin_chat_candidate_at', detectedAt)
+    .select(INTEGRATION_SUMMARY_SELECT)
+    .maybeSingle();
+
+  if (updateError) {
+    return res.status(500).json({
+      success: false,
+      error: updateError.message ?? 'Could not confirm admin chat candidate',
+    });
+  }
+
+  // Zero rows: candidate changed between read and update (e.g. concurrent /start)
+  if (!updated) {
+    return res.status(409).json({
+      success: false,
+      error: 'Admin chat candidate changed. Find the candidate again.',
+    });
+  }
+
+  return res.json({
+    success: true,
+    integration: mapTelegramIntegration(salon as SalonRow, updated as IntegrationRow),
+  });
+});
+
 router.post('/integrations/telegram/:salonId/test-admin-notification', async (req, res) => {
   const salonId = req.params.salonId?.trim();
   if (!salonId) {

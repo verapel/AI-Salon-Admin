@@ -78,6 +78,8 @@ export interface Database {
           last_error: string | null;
           token_ciphertext: string | null;
           admin_chat_id: number | null;
+          admin_chat_candidate_id: number | null;
+          admin_chat_candidate_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -94,6 +96,8 @@ export interface Database {
           last_error?: string | null;
           token_ciphertext?: string | null;
           admin_chat_id?: number | null;
+          admin_chat_candidate_id?: number | null;
+          admin_chat_candidate_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -110,6 +114,8 @@ export interface Database {
           last_error?: string | null;
           token_ciphertext?: string | null;
           admin_chat_id?: number | null;
+          admin_chat_candidate_id?: number | null;
+          admin_chat_candidate_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
