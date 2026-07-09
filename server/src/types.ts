@@ -32,6 +32,8 @@ export interface Staff {
   specialties: string[];
   avatar: string;
   active: boolean;
+  /** Assigned service IDs from staff_services (empty if none). */
+  serviceIds?: string[];
 }
 
 export interface Appointment {

@@ -61,16 +61,19 @@ export function mapService(row: {
   };
 }
 
-export function mapStaff(row: {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  role: string;
-  specialties: string[];
-  avatar: string;
-  active: boolean;
-}): Staff {
+export function mapStaff(
+  row: {
+    id: string;
+    name: string;
+    email: string;
+    phone: string;
+    role: string;
+    specialties: string[];
+    avatar: string;
+    active: boolean;
+  },
+  serviceIds: string[] = []
+): Staff {
   return {
     id: row.id,
     name: row.name,
@@ -80,6 +83,7 @@ export function mapStaff(row: {
     specialties: row.specialties ?? [],
     avatar: row.avatar,
     active: row.active,
+    serviceIds,
   };
 }
 

@@ -116,7 +116,7 @@ async function fetchActiveStaff(salonId: string): Promise<StaffRow[]> {
   }));
 }
 
-/** Active staff whose specialties match the selected Telegram service name. */
+/** Active staff for a service: prefer staff_services assignments, else specialties text match. */
 export async function findStaffForServiceSpecialization(
   salonId: string,
   serviceName: string
@@ -124,6 +124,55 @@ export async function findStaffForServiceSpecialization(
   const trimmed = serviceName.trim();
   if (!trimmed || trimmed.toLowerCase() === 'manual') return [];
 
+  // Prefer stable join-table assignments when the service exists in this salon.
+  const { data: service, error: serviceError } = await supabase
+    .from('services')
+    .select('id')
+    .eq('salon_id', salonId)
+    .ilike('name', trimmed)
+    .maybeSingle();
+
+  if (serviceError) {
+    console.error('[telegram/staff] service resolve for assignments error:', serviceError.message);
+  } else if (service?.id) {
+    const { data: assignmentRows, error: assignmentError } = await (supabase as any)
+      .from('staff_services')
+      .select('staff_id')
+      .eq('salon_id', salonId)
+      .eq('service_id', service.id);
+
+    if (assignmentError) {
+      console.error('[telegram/staff] staff_services load error:', assignmentError.message);
+    } else if (assignmentRows && assignmentRows.length > 0) {
+      const assignedIds = [
+        ...new Set(
+          (assignmentRows as Array<{ staff_id: string }>).map((row) => row.staff_id)
+        ),
+      ] as string[];
+      const { data: assignedStaff, error: staffError } = await supabase
+        .from('staff')
+        .select('id, name, specialties')
+        .eq('salon_id', salonId)
+        .eq('active', true)
+        .in('id', assignedIds)
+        .order('name');
+
+      if (staffError) {
+        console.error('[telegram/staff] assigned staff load error:', staffError.message);
+      } else if (assignedStaff && assignedStaff.length > 0) {
+        return assignedStaff.map((row) => ({
+          id: row.id,
+          name: row.name,
+          specialties: row.specialties ?? [],
+        }));
+      }
+      // Assignments exist but no active staff — do not fall back to specialties
+      // (explicit empty assignment should win over fuzzy text match).
+      return [];
+    }
+  }
+
+  // Fallback: legacy specialties text matching (protects Tatev until assignments exist).
   const staffList = await fetchActiveStaff(salonId);
   return staffList.filter((member) => staffMatchesServiceSpecialization(member, trimmed));
 }

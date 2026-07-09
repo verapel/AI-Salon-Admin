@@ -67,6 +67,11 @@ export const api = {
       request<import('@/types').Staff>('/staff', { method: 'POST', body: JSON.stringify(data) }),
     update: (id: string, data: Partial<import('@/types').Staff>) =>
       request<import('@/types').Staff>(`/staff/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    updateServices: (id: string, serviceIds: string[]) =>
+      request<{ staffId: string; serviceIds: string[] }>(`/staff/${id}/services`, {
+        method: 'PUT',
+        body: JSON.stringify({ serviceIds }),
+      }),
     delete: (id: string) => request<import('@/types').Staff>(`/staff/${id}`, { method: 'DELETE' }),
   },
   appointments: {

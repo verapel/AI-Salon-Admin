@@ -244,6 +244,30 @@ export interface Database {
         };
         Relationships: [];
       };
+      staff_services: {
+        Row: {
+          id: string;
+          salon_id: string;
+          staff_id: string;
+          service_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          staff_id: string;
+          service_id: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          staff_id?: string;
+          service_id?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       appointments: {
         Row: {
           id: string;
