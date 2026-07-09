@@ -394,6 +394,120 @@ export interface Database {
         };
         Relationships: [];
       };
+      salon_weekly_hours: {
+        Row: {
+          id: string;
+          salon_id: string;
+          weekday: number;
+          is_closed: boolean;
+          open_time: string | null;
+          close_time: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          weekday: number;
+          is_closed?: boolean;
+          open_time?: string | null;
+          close_time?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          weekday?: number;
+          is_closed?: boolean;
+          open_time?: string | null;
+          close_time?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      staff_weekly_hours: {
+        Row: {
+          id: string;
+          salon_id: string;
+          staff_id: string;
+          weekday: number;
+          is_closed: boolean;
+          open_time: string | null;
+          close_time: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          staff_id: string;
+          weekday: number;
+          is_closed?: boolean;
+          open_time?: string | null;
+          close_time?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          staff_id?: string;
+          weekday?: number;
+          is_closed?: boolean;
+          open_time?: string | null;
+          close_time?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      schedule_exceptions: {
+        Row: {
+          id: string;
+          salon_id: string;
+          scope: 'salon' | 'staff';
+          staff_id: string | null;
+          kind: 'closed' | 'vacation' | 'holiday' | 'custom_hours';
+          start_date: string;
+          end_date: string;
+          open_time: string | null;
+          close_time: string | null;
+          note: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          scope: 'salon' | 'staff';
+          staff_id?: string | null;
+          kind: 'closed' | 'vacation' | 'holiday' | 'custom_hours';
+          start_date: string;
+          end_date: string;
+          open_time?: string | null;
+          close_time?: string | null;
+          note?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          scope?: 'salon' | 'staff';
+          staff_id?: string | null;
+          kind?: 'closed' | 'vacation' | 'holiday' | 'custom_hours';
+          start_date?: string;
+          end_date?: string;
+          open_time?: string | null;
+          close_time?: string | null;
+          note?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

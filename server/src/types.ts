@@ -74,3 +74,38 @@ export interface AnalyticsData {
   topServices: { name: string; count: number; revenue: number }[];
   staffPerformance: { name: string; appointments: number; revenue: number }[];
 }
+
+export type ScheduleExceptionScope = 'salon' | 'staff';
+export type ScheduleExceptionKind = 'closed' | 'vacation' | 'holiday' | 'custom_hours';
+
+export interface WeeklyHoursRow {
+  id: string;
+  salonId: string;
+  staffId?: string;
+  weekday: number;
+  isClosed: boolean;
+  openTime: string | null;
+  closeTime: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScheduleException {
+  id: string;
+  salonId: string;
+  scope: ScheduleExceptionScope;
+  staffId: string | null;
+  kind: ScheduleExceptionKind;
+  startDate: string;
+  endDate: string;
+  openTime: string | null;
+  closeTime: string | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScheduleWeeklyResponse {
+  salon: WeeklyHoursRow[];
+  staff: Record<string, WeeklyHoursRow[]>;
+}

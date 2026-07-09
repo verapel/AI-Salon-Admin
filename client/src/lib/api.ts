@@ -91,6 +91,38 @@ export const api = {
     getAnalytics: () => request<import('@/types').AnalyticsData>('/stats/analytics'),
     getReminders: () => request<import('@/types').Reminder[]>('/stats/reminders'),
   },
+  schedule: {
+    getWeekly: () =>
+      request<import('@/types').ScheduleWeeklyResponse>('/schedule/weekly'),
+    putSalonWeekly: (hours: import('@/types').WeeklyHoursInput[]) =>
+      request<import('@/types').WeeklyHoursRow[]>('/schedule/salon-weekly', {
+        method: 'PUT',
+        body: JSON.stringify({ hours }),
+      }),
+    putStaffWeekly: (staffId: string, hours: import('@/types').WeeklyHoursInput[]) =>
+      request<import('@/types').WeeklyHoursRow[]>(`/schedule/staff/${staffId}/weekly`, {
+        method: 'PUT',
+        body: JSON.stringify({ hours }),
+      }),
+    getExceptions: (params?: { staffId?: string; from?: string; to?: string }) => {
+      const query = params
+        ? '?' +
+          new URLSearchParams(
+            Object.entries(params)
+              .filter(([, v]) => typeof v === 'string' && v.length > 0)
+              .map(([k, v]) => [k, v as string])
+          ).toString()
+        : '';
+      return request<import('@/types').ScheduleException[]>(`/schedule/exceptions${query}`);
+    },
+    createException: (data: import('@/types').CreateScheduleExceptionInput) =>
+      request<import('@/types').ScheduleException>('/schedule/exceptions', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    deleteException: (id: string) =>
+      request<void>(`/schedule/exceptions/${id}`, { method: 'DELETE' }),
+  },
   developer: {
     getSalons: () => request<import('@/types').DeveloperSalon[]>('/developer/salons'),
     createSalon: (body: {

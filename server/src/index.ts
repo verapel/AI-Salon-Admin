@@ -15,6 +15,7 @@ import servicesRouter from './routes/services.js';
 import staffRouter from './routes/staff.js';
 import appointmentsRouter from './routes/appointments.js';
 import statsRouter from './routes/stats.js';
+import scheduleRouter from './routes/schedule.js';
 import developerRouter from './routes/developer.js';
 import authRouter from './routes/auth.js';
 import { requireDeveloperAuth, requireSalonAuth } from './middleware/auth.js';
@@ -964,6 +965,7 @@ app.use('/api/services', salonAuth, servicesRouter);
 app.use('/api/staff', salonAuth, staffRouter);
 app.use('/api/appointments', salonAuth, appointmentsRouter);
 app.use('/api/stats', salonAuth, statsRouter);
+app.use('/api/schedule', salonAuth, scheduleRouter);
 app.use('/api/developer', developerAuth, developerRouter);
 
 function resolveClientDist(): string | null {
