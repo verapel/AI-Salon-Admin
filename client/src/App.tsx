@@ -8,6 +8,7 @@ import Calendar from '@/pages/Calendar';
 import Clients from '@/pages/Clients';
 import Services from '@/pages/Services';
 import Staff from '@/pages/Staff';
+import Schedule from '@/pages/Schedule';
 import Bookings from '@/pages/Bookings';
 import Statistics from '@/pages/Statistics';
 import Reminders from '@/pages/Reminders';
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="/clients" element={<Clients />} />
           <Route path="/services" element={<Services />} />
           <Route path="/staff" element={<Staff />} />
+          <Route path="/schedule" element={<Schedule />} />
           <Route path="/bookings" element={<Bookings />} />
           <Route path="/statistics" element={<Statistics />} />
           <Route path="/reminders" element={<Reminders />} />

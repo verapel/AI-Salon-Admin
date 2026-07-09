@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, Mail, Phone, Users } from 'lucide-react';
+import { Plus, Pencil, Trash2, Mail, Phone, Users, Clock } from 'lucide-react';
 import SearchInput from '@/components/ui/SearchInput';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
+import StaffScheduleModal from '@/components/schedule/StaffScheduleModal';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import type { Service, Staff as StaffType } from '@/types';
@@ -29,6 +30,7 @@ export default function Staff() {
   const [form, setForm] = useState(emptyForm);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [formError, setFormError] = useState('');
+  const [scheduleStaff, setScheduleStaff] = useState<StaffType | null>(null);
 
   const loadStaff = () => {
     api.staff
@@ -211,6 +213,15 @@ export default function Staff() {
                     </div>
                     <div className="flex shrink-0 gap-1.5 transition-opacity sm:gap-1 sm:opacity-0 sm:group-hover:opacity-100">
                       <button
+                        onClick={() => setScheduleStaff(member)}
+                        disabled={actionBusy === member.id}
+                        className="btn-ghost min-h-[44px] min-w-[44px] p-2 sm:min-h-0 sm:min-w-0 sm:p-1.5"
+                        aria-label={t('staff.scheduleAria')}
+                        title={t('staff.schedule')}
+                      >
+                        <Clock className="h-4 w-4" />
+                      </button>
+                      <button
                         onClick={() => openEdit(member)}
                         disabled={actionBusy === member.id}
                         className="btn-ghost min-h-[44px] min-w-[44px] p-2 sm:min-h-0 sm:min-w-0 sm:p-1.5"
@@ -276,6 +287,12 @@ export default function Staff() {
           ))}
         </div>
       )}
+
+      <StaffScheduleModal
+        open={!!scheduleStaff}
+        staff={scheduleStaff}
+        onClose={() => setScheduleStaff(null)}
+      />
 
       <Modal
         open={modalOpen}
