@@ -6,7 +6,7 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
-import type { Staff as StaffType } from '@/types';
+import type { Service, Staff as StaffType } from '@/types';
 
 const emptyForm = () => ({
   name: '',
@@ -19,6 +19,7 @@ const emptyForm = () => ({
 export default function Staff() {
   const { t } = useLanguage();
   const [staff, setStaff] = useState<StaffType[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -26,6 +27,8 @@ export default function Staff() {
   const [submitting, setSubmitting] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
+  const [formError, setFormError] = useState('');
 
   const loadStaff = () => {
     api.staff
@@ -35,8 +38,16 @@ export default function Staff() {
       .finally(() => setLoading(false));
   };
 
+  const loadServices = () => {
+    api.services
+      .getAll()
+      .then((list) => setServices(list.filter((s) => s.active).sort((a, b) => a.name.localeCompare(b.name))))
+      .catch(console.error);
+  };
+
   useEffect(() => {
     loadStaff();
+    loadServices();
   }, []);
 
   const activeStaff = staff.filter((s) => s.active);
@@ -56,6 +67,8 @@ export default function Staff() {
   const openCreate = () => {
     setEditing(null);
     setForm(emptyForm());
+    setSelectedServiceIds([]);
+    setFormError('');
     setModalOpen(true);
   };
 
@@ -68,13 +81,22 @@ export default function Staff() {
       role: member.role,
       specialties: member.specialties.join(', '),
     });
+    setSelectedServiceIds(member.serviceIds ?? []);
+    setFormError('');
     setModalOpen(true);
+  };
+
+  const toggleService = (serviceId: string) => {
+    setSelectedServiceIds((prev) =>
+      prev.includes(serviceId) ? prev.filter((id) => id !== serviceId) : [...prev, serviceId]
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting) return;
     setSubmitting(true);
+    setFormError('');
     const data = {
       ...form,
       specialties: form.specialties
@@ -83,16 +105,30 @@ export default function Staff() {
         .filter(Boolean),
     };
     try {
+      let staffId: string;
       if (editing) {
         await api.staff.update(editing.id, data);
+        staffId = editing.id;
       } else {
-        await api.staff.create(data);
+        const created = await api.staff.create(data);
+        staffId = created.id;
       }
+
+      try {
+        await api.staff.updateServices(staffId, selectedServiceIds);
+      } catch (assignErr) {
+        console.error(assignErr);
+        setFormError(t('staff.servicesSaveError'));
+        loadStaff();
+        return;
+      }
+
       setModalOpen(false);
       setEditing(null);
       loadStaff();
     } catch (err) {
       console.error(err);
+      setFormError(err instanceof Error ? err.message : t('staff.servicesSaveError'));
     } finally {
       setSubmitting(false);
     }
@@ -206,6 +242,22 @@ export default function Staff() {
                     </div>
                   </div>
 
+                  {(member.serviceIds?.length ?? 0) > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {(member.serviceIds ?? [])
+                        .map((id) => services.find((s) => s.id === id)?.name)
+                        .filter(Boolean)
+                        .map((name) => (
+                          <span
+                            key={name as string}
+                            className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-950/40 dark:text-brand-300"
+                          >
+                            {name}
+                          </span>
+                        ))}
+                    </div>
+                  )}
+
                   {member.specialties.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-1.5">
                       {member.specialties.map((spec) => (
@@ -230,6 +282,7 @@ export default function Staff() {
         onClose={() => {
           setModalOpen(false);
           setEditing(null);
+          setFormError('');
         }}
         title={editing ? t('staff.editTitle') : t('staff.createTitle')}
       >
@@ -269,6 +322,42 @@ export default function Staff() {
               onChange={(e) => setForm({ ...form, role: e.target.value })}
             />
           </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">{t('staff.masterServices')}</label>
+            <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+              {t('staff.masterServicesHint')}
+            </p>
+            {services.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t('staff.noActiveServices')}</p>
+            ) : (
+              <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                {services.map((service) => {
+                  const checked = selectedServiceIds.includes(service.id);
+                  return (
+                    <label
+                      key={service.id}
+                      className="flex cursor-pointer items-center gap-2 text-sm text-gray-800 dark:text-gray-200"
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                        checked={checked}
+                        onChange={() => toggleService(service.id)}
+                      />
+                      <span className="min-w-0 truncate">{service.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            {selectedServiceIds.length === 0 && services.length > 0 && (
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                {t('staff.noServicesSelected')}
+              </p>
+            )}
+          </div>
+
           <div>
             <label className="mb-1.5 block text-sm font-medium">{t('staff.fieldSpecialties')}</label>
             <input
@@ -278,12 +367,20 @@ export default function Staff() {
               placeholder={t('staff.specialtiesPlaceholder')}
             />
           </div>
+
+          {formError && (
+            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+              {formError}
+            </p>
+          )}
+
           <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={() => {
                 setModalOpen(false);
                 setEditing(null);
+                setFormError('');
               }}
               className="btn-secondary w-full sm:w-auto"
               disabled={submitting}

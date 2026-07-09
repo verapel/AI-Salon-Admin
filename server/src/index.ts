@@ -38,6 +38,7 @@ import {
   findStaffForServiceSpecialization,
   getActiveStaffById,
   localDateStr,
+  resolveServiceById,
   resolveServiceByName,
   STAFF_UNAVAILABLE_MESSAGE,
   BLOCKED_CLIENT_BOOKING_MESSAGE,
@@ -807,7 +808,7 @@ chatHistory.set(stateKey, history.slice(-10));
         phone: '',
       });
     }
-    const serviceKeyboard = await buildServiceKeyboard();
+    const serviceKeyboard = await buildServiceKeyboard(ctx.salonId);
     await sendTelegramMessageWithKeyboard(chatId, answer, serviceKeyboard, botToken);
     return null;
   }
@@ -1449,22 +1450,46 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
             return;
           }
 
-          // service:, date:, time: — передаём значение в шаг-машину (только на ожидаемом шаге)
-          if (cqData.startsWith('service:') || cqData.startsWith('date:') || cqData.startsWith('time:') || cqData.startsWith('staff:')) {
+          // service: / service_id: / date: / time: / staff: — шаг-машина
+          if (
+            cqData.startsWith('service_id:') ||
+            cqData.startsWith('service:') ||
+            cqData.startsWith('date:') ||
+            cqData.startsWith('time:') ||
+            cqData.startsWith('staff:')
+          ) {
             const booking = bookingState.get(cqStateKey);
-            const expectedStep = cqData.startsWith('service:')
-              ? 'service'
-              : cqData.startsWith('date:')
-                ? 'date'
-                : cqData.startsWith('time:')
-                  ? 'time'
-                  : 'staff';
+            const expectedStep =
+              cqData.startsWith('service_id:') || cqData.startsWith('service:')
+                ? 'service'
+                : cqData.startsWith('date:')
+                  ? 'date'
+                  : cqData.startsWith('time:')
+                    ? 'time'
+                    : 'staff';
             if (!booking || booking.step !== expectedStep) {
               return;
             }
-            const value = cqData.startsWith('staff:')
-              ? cqData.slice('staff:'.length)
-              : cqData.slice(cqData.indexOf(':') + 1);
+
+            let value: string;
+            if (cqData.startsWith('service_id:')) {
+              const serviceId = cqData.slice('service_id:'.length).trim();
+              const resolved = await resolveServiceById(ctx.salonId, serviceId);
+              if (!resolved) {
+                await sendTelegramMessage(
+                  cqChatId,
+                  'Эта услуга недоступна. Выберите услугу из списка или напишите название.',
+                  botToken
+                );
+                return;
+              }
+              value = resolved.name;
+            } else if (cqData.startsWith('staff:')) {
+              value = cqData.slice('staff:'.length);
+            } else {
+              value = cqData.slice(cqData.indexOf(':') + 1);
+            }
+
             const answer = await generateAIResponse(ctx, cqChatId, value);
             if (answer !== null) {
               await sendTelegramMessage(cqChatId, answer, botToken);

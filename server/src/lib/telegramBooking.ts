@@ -252,11 +252,35 @@ export async function resolveServiceByName(salonId: string, serviceName: string)
   return created;
 }
 
+/** Resolve active/inactive service by id within salon (no cross-salon). */
+export async function resolveServiceById(
+  salonId: string,
+  serviceId: string
+): Promise<ServiceRow | null> {
+  const trimmed = serviceId.trim();
+  if (!trimmed) return null;
+
+  const { data, error } = await supabase
+    .from('services')
+    .select('id, name, duration, category')
+    .eq('salon_id', salonId)
+    .eq('id', trimmed)
+    .eq('active', true)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[telegram/services] lookup by id error:', error.message);
+    return null;
+  }
+  return data ?? null;
+}
+
 export function computeAppointmentEndTime(startTime: string, durationMinutes: number): string {
   return `${computeEndTime(startTime, durationMinutes)}:00`;
 }
 
-export async function buildServiceKeyboard(): Promise<{ text: string; callback_data: string }[][]> {
+/** Legacy hardcoded keyboard — Tatev / zero-catalog / load-error fallback. */
+export function buildLegacyServiceKeyboard(): { text: string; callback_data: string }[][] {
   return [
     [
       { text: '✂️ Стрижка', callback_data: 'service:Стрижка' },
@@ -267,6 +291,47 @@ export async function buildServiceKeyboard(): Promise<{ text: string; callback_d
       { text: '✍️ Другая услуга', callback_data: 'service:manual' },
     ],
   ];
+}
+
+const TELEGRAM_BUTTON_TEXT_MAX = 60;
+
+function truncateTelegramButtonText(name: string): string {
+  const trimmed = name.trim();
+  if (trimmed.length <= TELEGRAM_BUTTON_TEXT_MAX) return trimmed;
+  return `${trimmed.slice(0, TELEGRAM_BUTTON_TEXT_MAX - 1)}…`;
+}
+
+/**
+ * Salon-specific service keyboard from active catalog.
+ * Uses service_id:<uuid> (safe under Telegram 64-byte callback_data limit).
+ * Falls back to legacy hardcoded keyboard when catalog empty or load fails.
+ * Ordering: fetchActiveServices already orders by name ascending.
+ */
+export async function buildServiceKeyboard(
+  salonId: string
+): Promise<{ text: string; callback_data: string }[][]> {
+  try {
+    const services = await fetchActiveServices(salonId);
+    if (services.length === 0) {
+      return buildLegacyServiceKeyboard();
+    }
+
+    const buttons = services.map((service) => ({
+      text: truncateTelegramButtonText(service.name),
+      callback_data: `service_id:${service.id}`,
+    }));
+
+    const keyboard: { text: string; callback_data: string }[][] = [];
+    for (let i = 0; i < buttons.length; i += 2) {
+      keyboard.push(buttons.slice(i, i + 2));
+    }
+    keyboard.push([{ text: '✍️ Другая услуга', callback_data: 'service:manual' }]);
+    return keyboard;
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : 'unknown error';
+    console.error('[telegram/services] buildServiceKeyboard failed:', errMsg);
+    return buildLegacyServiceKeyboard();
+  }
 }
 
 /** Active appointments that occupy a time slot on a given date. */
