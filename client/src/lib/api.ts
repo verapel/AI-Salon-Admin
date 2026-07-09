@@ -125,7 +125,7 @@ export const api = {
       }),
     updateTelegramIntegration: (
       salonId: string,
-      body: { salonName?: string; botDisplayName?: string }
+      body: { salonName?: string; botDisplayName?: string; adminChatId?: number | null }
     ) =>
       request<{
         success: boolean;
@@ -134,6 +134,11 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify(body),
       }),
+    testAdminNotification: (salonId: string) =>
+      request<import('@/types').TestAdminNotificationResponse>(
+        `/developer/integrations/telegram/${salonId}/test-admin-notification`,
+        { method: 'POST' }
+      ),
     getHealth: () => request<import('@/types').DeveloperHealth>('/developer/health'),
   },
 };

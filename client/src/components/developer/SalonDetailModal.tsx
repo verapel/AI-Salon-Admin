@@ -14,6 +14,8 @@ interface SalonDetailModalProps {
   onUpdated: () => void;
 }
 
+const ADMIN_CHAT_ID_REGEX = /^-?\d+$/;
+
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString(undefined, {
@@ -38,6 +40,14 @@ export default function SalonDetailModal({
   const [validationError, setValidationError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [connectTelegramOpen, setConnectTelegramOpen] = useState(false);
+  const [adminChatIdInput, setAdminChatIdInput] = useState('');
+  const [savingAdminChat, setSavingAdminChat] = useState(false);
+  const [adminChatValidationError, setAdminChatValidationError] = useState('');
+  const [adminChatSaveError, setAdminChatSaveError] = useState('');
+  const [adminChatSuccessMessage, setAdminChatSuccessMessage] = useState('');
+  const [testingAdminNotification, setTestingAdminNotification] = useState(false);
+  const [adminChatTestError, setAdminChatTestError] = useState('');
+  const [adminChatTestSuccess, setAdminChatTestSuccess] = useState('');
 
   const [name, setName] = useState('');
   const [active, setActive] = useState(true);
@@ -63,6 +73,9 @@ export default function SalonDetailModal({
       const data = await api.developer.getSalon(salonId);
       setDetail(data);
       populateForm(data);
+      setAdminChatIdInput(
+        data.telegram.adminChatId != null ? String(data.telegram.adminChatId) : ''
+      );
     } catch (err) {
       setDetail(null);
       setLoadError(err instanceof Error ? err.message : t('developer.salons.detailError'));
@@ -77,6 +90,11 @@ export default function SalonDetailModal({
     setValidationError('');
     setSuccessMessage('');
     setConnectTelegramOpen(false);
+    setAdminChatValidationError('');
+    setAdminChatSaveError('');
+    setAdminChatSuccessMessage('');
+    setAdminChatTestError('');
+    setAdminChatTestSuccess('');
     loadDetail();
   }, [isOpen, salonId, loadDetail]);
 
@@ -124,6 +142,70 @@ export default function SalonDetailModal({
     await loadDetail();
     setSuccessMessage(t('developer.salons.telegramConnectedSuccess'));
     onUpdated();
+  }
+
+  async function handleSaveAdminChat() {
+    if (!salonId) return;
+
+    setAdminChatValidationError('');
+    setAdminChatSaveError('');
+    setAdminChatSuccessMessage('');
+    setAdminChatTestError('');
+    setAdminChatTestSuccess('');
+
+    const trimmed = adminChatIdInput.trim();
+    let adminChatId: number | null;
+
+    if (trimmed === '') {
+      adminChatId = null;
+    } else if (!ADMIN_CHAT_ID_REGEX.test(trimmed)) {
+      setAdminChatValidationError(t('developer.salons.adminChatIdInvalid'));
+      return;
+    } else {
+      const parsed = Number(trimmed);
+      if (parsed === 0) {
+        setAdminChatValidationError(t('developer.salons.adminChatIdInvalid'));
+        return;
+      }
+      adminChatId = parsed;
+    }
+
+    setSavingAdminChat(true);
+    try {
+      await api.developer.updateTelegramIntegration(salonId, { adminChatId });
+      await loadDetail();
+      setAdminChatSuccessMessage(t('developer.salons.adminChatIdSaved'));
+      onUpdated();
+    } catch (err) {
+      setAdminChatSaveError(
+        err instanceof Error ? err.message : t('developer.salons.updateError')
+      );
+    } finally {
+      setSavingAdminChat(false);
+    }
+  }
+
+  async function handleTestAdminNotification() {
+    if (!salonId || detail?.telegram.adminChatId == null) return;
+
+    setAdminChatTestError('');
+    setAdminChatTestSuccess('');
+
+    setTestingAdminNotification(true);
+    try {
+      const result = await api.developer.testAdminNotification(salonId);
+      if (!result.success) {
+        setAdminChatTestError(result.error ?? t('developer.salons.testAdminNotificationError'));
+        return;
+      }
+      setAdminChatTestSuccess(t('developer.salons.testAdminNotificationSuccess'));
+    } catch (err) {
+      setAdminChatTestError(
+        err instanceof Error ? err.message : t('developer.salons.testAdminNotificationError')
+      );
+    } finally {
+      setTestingAdminNotification(false);
+    }
   }
 
   const displayError = validationError || saveError;
@@ -335,6 +417,72 @@ export default function SalonDetailModal({
                     >
                       {t('developer.salons.reconnectTelegram')}
                     </button>
+
+                    <div className="mt-4 border-t border-slate-700 pt-4">
+                      <h5 className="mb-2 text-sm font-semibold text-white">
+                        {t('developer.salons.adminNotifications')}
+                      </h5>
+                      <p className="mb-3 text-xs text-gray-400">
+                        {t('developer.salons.adminChatIdHint')}
+                      </p>
+                      <label className="mb-1.5 block text-sm font-medium text-gray-300">
+                        {t('developer.salons.adminChatId')}
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={adminChatIdInput}
+                        onChange={(e) => setAdminChatIdInput(e.target.value)}
+                        placeholder={t('developer.salons.adminChatIdNotSet')}
+                        className={inputClassName}
+                      />
+                      {detail.telegram.adminChatId == null && adminChatIdInput.trim() === '' && (
+                        <p className="mt-1.5 text-xs text-gray-500">
+                          {t('developer.salons.adminChatIdNotSet')}
+                        </p>
+                      )}
+                      {adminChatValidationError && (
+                        <p className="mt-2 text-sm text-red-400">{adminChatValidationError}</p>
+                      )}
+                      {adminChatSaveError && (
+                        <p className="mt-2 text-sm text-red-400">{adminChatSaveError}</p>
+                      )}
+                      {adminChatSuccessMessage && (
+                        <p className="mt-2 text-sm text-green-400">{adminChatSuccessMessage}</p>
+                      )}
+                      {adminChatTestError && (
+                        <p className="mt-2 text-sm text-red-400">{adminChatTestError}</p>
+                      )}
+                      {adminChatTestSuccess && (
+                        <p className="mt-2 text-sm text-green-400">{adminChatTestSuccess}</p>
+                      )}
+                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                        <button
+                          type="button"
+                          onClick={handleSaveAdminChat}
+                          disabled={savingAdminChat || loading}
+                          className="w-full rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                        >
+                          {savingAdminChat
+                            ? t('developer.salons.savingAdminChatId')
+                            : t('developer.salons.saveAdminChatId')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleTestAdminNotification}
+                          disabled={
+                            testingAdminNotification ||
+                            loading ||
+                            detail.telegram.adminChatId == null
+                          }
+                          className="w-full rounded-lg border border-slate-600 bg-slate-800 px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                        >
+                          {testingAdminNotification
+                            ? t('developer.salons.testingAdminNotification')
+                            : t('developer.salons.testAdminNotification')}
+                        </button>
+                      </div>
+                    </div>
                   </>
                 )}
               </div>

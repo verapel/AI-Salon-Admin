@@ -139,6 +139,7 @@ export interface DeveloperSalonTelegramSummary {
   lastCheckedAt: string | null;
   lastError: string | null;
   livePolling: boolean;
+  adminChatId: number | null;
 }
 
 export interface DeveloperSalonDetail {
@@ -205,6 +206,12 @@ export interface DeveloperTelegramIntegration {
   connectedAt: string | null;
   lastCheckedAt: string | null;
   lastError: string | null;
+  adminChatId?: number | null;
+}
+
+export interface TestAdminNotificationResponse {
+  success: boolean;
+  error?: string;
 }
 
 export const DEFAULT_SALON_SLUG = 'default';
