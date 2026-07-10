@@ -326,14 +326,38 @@ function formatAppointmentForUser(appt: any): string {
 
 // Клавиатура выбора даты при переносе — see getRescheduleDateKeyboard above (schedule-aware).
 
-function parseAppointmentTime(input: string): string {
-  const match = input.match(/(\d{1,2})[:. ]?(\d{2})?/);
-  if (!match) return "10:00";
+/**
+ * Strict Telegram time parser. Accepts only a complete time expression (trimmed).
+ * Returns normalized HH:MM or null — never defaults to 10:00.
+ */
+function parseAppointmentTime(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
 
-  const hours = match[1].padStart(2, "0");
-  const minutes = match[2] || "00";
+  let hours: number;
+  let minutes: number;
 
-  return `${hours}:${minutes}`;
+  const colonOrDot = trimmed.match(/^(\d{1,2})[:.](\d{2})$/);
+  if (colonOrDot) {
+    hours = Number(colonOrDot[1]);
+    minutes = Number(colonOrDot[2]);
+  } else if (/^\d{4}$/.test(trimmed)) {
+    hours = Number(trimmed.slice(0, 2));
+    minutes = Number(trimmed.slice(2, 4));
+  } else if (/^\d{3}$/.test(trimmed)) {
+    hours = Number(trimmed.slice(0, 1));
+    minutes = Number(trimmed.slice(1, 3));
+  } else if (/^\d{1,2}$/.test(trimmed)) {
+    hours = Number(trimmed);
+    minutes = 0;
+  } else {
+    return null;
+  }
+
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 
 function isServiceSelectionPrompt(text: string): boolean {
@@ -639,6 +663,30 @@ async function generateAIResponse(
         duration
       );
 
+      // Strict parse failed — stay on time, re-show valid slots (no FSM advance).
+      if (!appointmentTime) {
+        bookingState.set(stateKey, { ...currentState, step: 'time' });
+        if (freeSlots.length === 0) {
+          bookingState.set(stateKey, { ...currentState, step: 'date', time: '' });
+          const noSlotsMsg = `На эту дату свободного времени нет. Пожалуйста, выберите другой день.`;
+          history.push({ role: 'assistant', content: noSlotsMsg });
+          chatHistory.set(stateKey, history.slice(-10));
+          await sendBookingDatePrompt(chatId, noSlotsMsg, ctx.salonId, currentState.staffId, duration, botToken);
+          return null;
+        }
+        const keyboard: { text: string; callback_data: string }[][] = [];
+        for (let i = 0; i < freeSlots.length; i += 3) {
+          keyboard.push(
+            freeSlots.slice(i, i + 3).map(slot => ({ text: slot, callback_data: `time:${slot}` }))
+          );
+        }
+        const busyMsg = `К сожалению, это время уже занято. Доступное время на ${currentState.date}:`;
+        history.push({ role: 'assistant', content: busyMsg });
+        chatHistory.set(stateKey, history.slice(-10));
+        await sendTelegramMessageWithKeyboard(chatId, busyMsg, keyboard, botToken);
+        return null;
+      }
+
       if (!freeSlots.includes(appointmentTime)) {
         if (freeSlots.length === 0) {
           // На эту дату нет ни одного свободного слота — просим выбрать другой день
@@ -667,8 +715,8 @@ async function generateAIResponse(
         return null;
       }
 
-      // Слот свободен — сохраняем время, сразу спрашиваем имя (без OpenRouter)
-      bookingState.set(stateKey, { ...currentState, step: 'name', time: text });
+      // Слот свободен — сохраняем нормализованное HH:MM, сразу спрашиваем имя (без OpenRouter)
+      bookingState.set(stateKey, { ...currentState, step: 'name', time: appointmentTime });
       const nameQuestion = "Отлично, записываю. Подскажите, как вас зовут?";
       history.push({ role: 'assistant', content: nameQuestion });
       chatHistory.set(stateKey, history.slice(-10));
@@ -753,9 +801,6 @@ async function generateAIResponse(
 
       const appointmentDate = await parseAppointmentDateForSalon(ctx.salonId, date);
       const appointmentTime = parseAppointmentTime(time);
-      const endTime = computeAppointmentEndTime(appointmentTime, serviceRow.duration);
-
-      // Final race/stale guard: duration-aware membership before INSERT.
       const duration = serviceRow.duration > 0 ? serviceRow.duration : 60;
       const freeSlots = await getAvailableSlots(
         ctx.salonId,
@@ -764,7 +809,9 @@ async function generateAIResponse(
         undefined,
         duration
       );
-      if (!freeSlots.includes(appointmentTime)) {
+
+      // Fail closed: corrupt/stale time must never INSERT.
+      if (!appointmentTime || !freeSlots.includes(appointmentTime)) {
         bookingState.set(stateKey, { ...finalState, step: 'time', time: '' });
         if (freeSlots.length === 0) {
           bookingState.set(stateKey, { ...finalState, step: 'date', date: '', time: '' });
@@ -785,6 +832,8 @@ async function generateAIResponse(
         return null;
       }
 
+      const endTime = computeAppointmentEndTime(appointmentTime, serviceRow.duration);
+
       // 5. INSERT appointment
       const { data: appointment, error: appointmentError } = await (supabase as any)
         .from("appointments")
@@ -798,7 +847,7 @@ async function generateAIResponse(
           end_time: endTime,
           status: 'scheduled',
           reminder_sent: false,
-          notes: `Источник: Telegram\nКлиент: ${name}\nТелефон: ${phone}\nУслуга: ${serviceRow.name}\nДата: ${date}\nВремя: ${time}`
+          notes: `Источник: Telegram\nКлиент: ${name}\nТелефон: ${phone}\nУслуга: ${serviceRow.name}\nДата: ${date}\nВремя: ${appointmentTime}`
         })
         .select("id").single();
 
@@ -820,14 +869,14 @@ async function generateAIResponse(
       // 6. Подтверждение клиенту (живым текстом, без служебных данных)
       await sendTelegramMessage(
         chatId,
-        `Готово, ${name}! Записала вас на ${serviceRow.name} — ${formatDateForUser(date)} в ${time} ✨\nБудем ждать вас!`,
+        `Готово, ${name}! Записала вас на ${serviceRow.name} — ${formatDateForUser(date)} в ${appointmentTime} ✨\nБудем ждать вас!`,
         botToken
       );
 
       // 7. Уведомление мастеру/администратору
       await notifySalonAdmin(
         ctx,
-        `🔔 Новая запись!\n\n💇 Услуга: ${serviceRow.name}\n📅 День: ${date}\n🕒 Время: ${time}\n👤 Клиент: ${name}\n📞 Телефон: ${phone}`
+        `🔔 Новая запись!\n\n💇 Услуга: ${serviceRow.name}\n📅 День: ${date}\n🕒 Время: ${appointmentTime}\n👤 Клиент: ${name}\n📞 Телефон: ${phone}`
       );
 
       bookingState.delete(stateKey);
@@ -1510,7 +1559,8 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
               appointmentId,
               rescheduleDuration
             );
-            if (!freeSlots.includes(parsedTime)) {
+            // Fail closed: invalid or unavailable time must not UPDATE; keep manage state.
+            if (!parsedTime || !freeSlots.includes(parsedTime)) {
               if (freeSlots.length === 0) {
                 await sendTelegramMessageWithKeyboard(
                   cqChatId,
