@@ -18,6 +18,7 @@ import statsRouter from './routes/stats.js';
 import scheduleRouter from './routes/schedule.js';
 import developerRouter from './routes/developer.js';
 import authRouter from './routes/auth.js';
+import internalRouter from './routes/internal.js';
 import { requireDeveloperAuth, requireSalonAuth } from './middleware/auth.js';
 import { supabase, checkSupabaseConnection } from './lib/supabase.js';
 import { loadTelegramTokenFromDb, saveTelegramTokenToDb } from './lib/telegramToken.js';
@@ -1133,6 +1134,7 @@ app.post('/api/integrations/telegram/connect', async (req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+app.use('/api/internal', internalRouter);
 
 const API_AUTH_REQUIRED = process.env.API_AUTH_REQUIRED === 'true';
 const noopAuth: RequestHandler = (_req, _res, next) => next();
