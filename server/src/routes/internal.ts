@@ -7,7 +7,7 @@ function isAuthorized(req: { headers: Record<string, unknown> }): boolean {
   const configured = process.env.BIRTHDAY_CRON_SECRET?.trim();
   if (!configured) return false;
 
-  const headerVal = req.headers['x-birthday-cron-secret'];
+  const headerVal = req.headers['x-cron-secret'];
   const provided = typeof headerVal === 'string' ? headerVal.trim() : '';
   return provided.length > 0 && provided === configured;
 }
@@ -15,7 +15,7 @@ function isAuthorized(req: { headers: Record<string, unknown> }): boolean {
 /**
  * POST /api/internal/birthday-owner-notify
  * Optional: ?dryRun=true — match only, no Telegram / no DB writes.
- * Auth: header x-birthday-cron-secret === BIRTHDAY_CRON_SECRET
+ * Auth: header x-cron-secret === BIRTHDAY_CRON_SECRET
  */
 router.post('/birthday-owner-notify', async (req, res) => {
   if (!isAuthorized(req)) {
@@ -30,13 +30,10 @@ router.post('/birthday-owner-notify', async (req, res) => {
     const summary = await runBirthdayOwnerNotifications({ dryRun });
     return res.status(200).json({
       ok: true,
-      dryRun,
-      salonsChecked: summary.salonsChecked,
-      clientsMatched: summary.clientsMatched,
-      sent: summary.sent,
-      skipped: summary.skipped,
-      failed: summary.failed,
-      errorCount: summary.errors.length,
+      salonsProcessed: summary.salonsProcessed,
+      notificationsSent: summary.notificationsSent,
+      notificationsSkipped: summary.notificationsSkipped,
+      notificationsFailed: summary.notificationsFailed,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'processor failed';

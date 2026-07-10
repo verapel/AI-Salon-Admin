@@ -2,8 +2,9 @@
  * Daily owner birthday notifications (1 day before).
  *
  * Leap-day rule (MVP):
- * In a non-leap year, clients with birthday February 29 are notified when
- * "tomorrow" is February 28 (same day as Feb 28 birthdays).
+ * - Leap years: February 29 birthdays match normally when tomorrow is Feb 29.
+ * - Non-leap years: February 29 birthdays are treated as March 1
+ *   (notify when tomorrow is March 1 — i.e. one day before the treated date).
  *
  * Does not use TELEGRAM_CHAT_ID fallback — salon bot + admin_chat_id only.
  */
@@ -21,11 +22,11 @@ export interface BirthdayOwnerNotifyOptions {
 }
 
 export interface BirthdayOwnerNotifyResult {
-  salonsChecked: number;
+  salonsProcessed: number;
+  notificationsSent: number;
+  notificationsSkipped: number;
+  notificationsFailed: number;
   clientsMatched: number;
-  sent: number;
-  skipped: number;
-  failed: number;
   errors: string[];
 }
 
@@ -40,7 +41,6 @@ interface SalonRow {
 interface ClientRow {
   id: string;
   name: string;
-  phone: string | null;
   birthday: string;
   salon_id: string | null;
 }
@@ -71,7 +71,7 @@ function monthDay(ymd: string): string {
 
 /**
  * Whether a client's birthday (YYYY-MM-DD) should notify for target "tomorrow" date.
- * Includes Feb 29 → Feb 28 in non-leap occurrence years.
+ * Non-leap: Feb 29 birthdays are treated as March 1.
  */
 export function birthdayMatchesNotifyTarget(
   birthdayYmd: string,
@@ -81,17 +81,15 @@ export function birthdayMatchesNotifyTarget(
   const bMd = monthDay(birthdayYmd);
   const tMd = monthDay(targetYmd);
   if (bMd === tMd) return true;
-  if (!isLeapYear(occurrenceYear) && tMd === '02-28' && bMd === '02-29') return true;
+  if (!isLeapYear(occurrenceYear) && tMd === '03-01' && bMd === '02-29') return true;
   return false;
 }
 
-function buildOwnerMessage(name: string, phone: string | null | undefined): string {
-  const phoneLine = phone?.trim() ? phone.trim() : 'не указан';
+function buildOwnerMessage(name: string): string {
   return [
-    '🎂 Завтра день рождения клиента!',
+    '🎂 Завтра день рождения у клиента!',
     '',
-    `👤 Клиент: ${name}`,
-    `📞 Телефон: ${phoneLine}`,
+    `👤 Имя: ${name}`,
     '🎁 Можно подготовить поздравление или бонус.',
   ].join('\n');
 }
@@ -181,8 +179,9 @@ async function loadSalonTelegramDelivery(salonId: string): Promise<
 async function loadSalonClientsWithBirthday(salonId: string): Promise<ClientRow[]> {
   const { data, error } = await supabase
     .from('clients')
-    .select('id, name, phone, birthday, salon_id')
+    .select('id, name, birthday, salon_id, is_blocked')
     .eq('salon_id', salonId)
+    .eq('is_blocked', false)
     .not('birthday', 'is', null);
 
   if (error) {
@@ -192,15 +191,16 @@ async function loadSalonClientsWithBirthday(salonId: string): Promise<ClientRow[
   return ((data ?? []) as Array<{
     id: string;
     name: string;
-    phone: string | null;
     birthday: string | null;
     salon_id: string | null;
+    is_blocked: boolean;
   }>)
-    .filter((c): c is ClientRow => typeof c.birthday === 'string' && c.birthday.length >= 10)
+    .filter((c): c is ClientRow & { is_blocked: boolean } =>
+      typeof c.birthday === 'string' && c.birthday.length >= 10 && c.is_blocked === false
+    )
     .map((c) => ({
       id: c.id,
       name: c.name,
-      phone: c.phone,
       birthday: c.birthday.slice(0, 10),
       salon_id: c.salon_id,
     }));
@@ -327,7 +327,7 @@ async function processClient(params: {
 
   // Explicit cross-salon guard (do not trust FKs alone)
   if (client.salon_id !== salonId) {
-    result.skipped += 1;
+    result.notificationsSkipped += 1;
     const msg = `cross-salon guard: client=${client.id} salon_id mismatch`;
     result.errors.push(msg);
     console.warn(`${LOG_PREFIX} ${msg}`);
@@ -335,7 +335,7 @@ async function processClient(params: {
   }
 
   if (dryRun) {
-    result.skipped += 1;
+    result.notificationsSkipped += 1;
     console.log(
       `${LOG_PREFIX} dryRun match salon=${salonId} client=${client.id} year=${occurrenceYear}`
     );
@@ -348,40 +348,40 @@ async function processClient(params: {
   }
 
   if (row.status === 'sent') {
-    result.skipped += 1;
+    result.notificationsSkipped += 1;
     return;
   }
 
   if (row.status === 'processing') {
     // Another run may be in-flight; skip to avoid double-send (MVP).
-    result.skipped += 1;
+    result.notificationsSkipped += 1;
     console.warn(`${LOG_PREFIX} skip in-flight processing id=${row.id}`);
     return;
   }
 
   if (row.status !== 'pending' && row.status !== 'failed') {
-    result.skipped += 1;
+    result.notificationsSkipped += 1;
     return;
   }
 
   const claimed = await claimForProcessing(row);
   if (!claimed) {
-    result.skipped += 1;
+    result.notificationsSkipped += 1;
     return;
   }
 
-  const message = buildOwnerMessage(client.name, client.phone);
+  const message = buildOwnerMessage(client.name);
   const sendResult = await sendTelegramText(delivery.adminChatId, message, delivery.botToken);
 
   if (sendResult.ok) {
     await markSent(claimed.id);
-    result.sent += 1;
+    result.notificationsSent += 1;
     console.log(`${LOG_PREFIX} sent salon=${salonId} client=${client.id} year=${occurrenceYear}`);
     return;
   }
 
   await markFailed(claimed.id, sendResult.error);
-  result.failed += 1;
+  result.notificationsFailed += 1;
   const errMsg = `send failed salon=${salonId} client=${client.id}: ${sendResult.error}`;
   result.errors.push(errMsg);
   console.warn(`${LOG_PREFIX} ${errMsg}`);
@@ -396,16 +396,16 @@ export async function runBirthdayOwnerNotifications(
 ): Promise<BirthdayOwnerNotifyResult> {
   const dryRun = options.dryRun === true;
   const result: BirthdayOwnerNotifyResult = {
-    salonsChecked: 0,
+    salonsProcessed: 0,
+    notificationsSent: 0,
+    notificationsSkipped: 0,
+    notificationsFailed: 0,
     clientsMatched: 0,
-    sent: 0,
-    skipped: 0,
-    failed: 0,
     errors: [],
   };
 
   const salons = await loadActiveSalons();
-  result.salonsChecked = salons.length;
+  result.salonsProcessed = salons.length;
 
   for (const salon of salons) {
     try {
@@ -418,13 +418,12 @@ export async function runBirthdayOwnerNotifications(
         console.warn(
           `${LOG_PREFIX} skip salon=${salon.id} reason=${deliveryResult.reason}`
         );
-        // Still count matching clients as skipped for visibility in dry-run/live
         const clients = await loadSalonClientsWithBirthday(salon.id);
         const matched = clients.filter((c) =>
           birthdayMatchesNotifyTarget(c.birthday, tomorrowYmd, occurrenceYear)
         );
         result.clientsMatched += matched.length;
-        result.skipped += matched.length;
+        result.notificationsSkipped += matched.length;
         if (matched.length > 0) {
           result.errors.push(
             `salon=${salon.id} skipped ${matched.length} client(s): ${deliveryResult.reason}`
@@ -450,7 +449,7 @@ export async function runBirthdayOwnerNotifications(
             result,
           });
         } catch (err) {
-          result.failed += 1;
+          result.notificationsFailed += 1;
           const msg = err instanceof Error ? err.message : 'unknown client error';
           result.errors.push(`salon=${salon.id} client=${client.id}: ${msg}`);
           console.warn(`${LOG_PREFIX} client error salon=${salon.id} client=${client.id}: ${msg}`);
