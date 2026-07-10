@@ -50,6 +50,14 @@ import {
   getBirthdaySkipKeyboard,
   parseBirthdayDate,
 } from './lib/telegramBooking.js';
+import {
+  computeAvailableSlots,
+  dateStrInTimezone,
+  findNextAvailableDates,
+  formatTelegramDateLabel,
+  getSalonTimezone,
+  NO_AVAILABLE_DATES_MESSAGE,
+} from './lib/scheduleSlots.js';
 
 const app = express();
 
@@ -107,7 +115,7 @@ const MONTH_MAP: Record<string, number> = {
   'декабрь': 12, 'декабря': 12,
 };
 
-function parseAppointmentDate(input: string): string {
+function parseAppointmentDate(input: string, timeZone?: string): string {
   const trimmed = input.trim();
   console.log(`[parseDate] raw input: "${trimmed}"`);
 
@@ -117,45 +125,63 @@ function parseAppointmentDate(input: string): string {
     return trimmed;
   }
 
-  const now = new Date();
+  const tz = timeZone?.trim() || undefined;
   const text = trimmed.toLowerCase();
 
-  // "сегодня"
-  if (text.includes("сегодня")) {
-    // остаётся today
+  // "сегодня" / "завтра" — salon timezone when provided
+  if (text.includes('сегодня')) {
+    const result = tz ? dateStrInTimezone(tz, 0) : (() => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    })();
+    console.log(`[parseDate] сегодня -> ${result}`);
+    return result;
   }
-  // "завтра"
-  else if (text.includes("завтра")) {
-    now.setDate(now.getDate() + 1);
+  if (text.includes('завтра')) {
+    const result = tz ? dateStrInTimezone(tz, 1) : (() => {
+      const now = new Date();
+      now.setDate(now.getDate() + 1);
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    })();
+    console.log(`[parseDate] завтра -> ${result}`);
+    return result;
   }
+
+  const todayYmd = tz
+    ? dateStrInTimezone(tz, 0)
+    : (() => {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      })();
+  const [ty, tm, td] = todayYmd.split('-').map(Number);
+  const todayUtc = Date.UTC(ty, tm - 1, td);
+
   // "DD месяц" / "DD-го месяц" — например "2 августа", "30 июня", "1 июля"
-  else {
-    const match = text.match(/(\d{1,2})(?:-?го)?\s+([а-яё]+)/);
-    if (match) {
-      const day = parseInt(match[1], 10);
-      const monthName = match[2];
-      const monthNum = MONTH_MAP[monthName];
-      if (monthNum) {
-        // Используем Date(year, month, day) чтобы избежать переполнения при setMonth
-        const year = now.getFullYear();
-        const candidate = new Date(year, monthNum - 1, day);
-        // Если дата уже прошла — берём следующий год
-        if (candidate < now) {
-          candidate.setFullYear(year + 1);
-        }
-        const formatted = `${candidate.getFullYear()}-${String(candidate.getMonth() + 1).padStart(2, '0')}-${String(candidate.getDate()).padStart(2, '0')}`;
-        console.log(`[parseDate] parsed "DD месяц": day=${day}, month=${monthNum}, result=${formatted}`);
-        return formatted;
+  const match = text.match(/(\d{1,2})(?:-?го)?\s+([а-яё]+)/);
+  if (match) {
+    const day = parseInt(match[1], 10);
+    const monthName = match[2];
+    const monthNum = MONTH_MAP[monthName];
+    if (monthNum) {
+      let year = ty;
+      let candidate = Date.UTC(year, monthNum - 1, day);
+      if (candidate < todayUtc) {
+        year += 1;
+        candidate = Date.UTC(year, monthNum - 1, day);
       }
+      const formatted = `${year}-${String(monthNum).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      console.log(`[parseDate] parsed "DD месяц": day=${day}, month=${monthNum}, result=${formatted}`);
+      return formatted;
     }
   }
 
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  const result = `${yyyy}-${mm}-${dd}`;
-  console.log(`[parseDate] result: "${result}"`);
-  return result;
+  console.log(`[parseDate] result: "${todayYmd}"`);
+  return todayYmd;
+}
+
+async function parseAppointmentDateForSalon(salonId: string, input: string): Promise<string> {
+  const tz = await getSalonTimezone(salonId);
+  return parseAppointmentDate(input, tz);
 }
 
 // Форматирует дату для пользователя: ISO → "29 июня", всё остальное — как есть
@@ -169,26 +195,120 @@ function formatDateForUser(input: string): string {
   return trimmed;
 }
 
-// Генерирует inline-кнопки с ближайшими 4 датами + "ввести вручную"
-function getDateKeyboard(): { text: string; callback_data: string }[][] {
-  const MONTHS = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
-  const buttons: { text: string; callback_data: string }[] = [];
+/** Read-only service duration lookup (does not create services). Fallback 60. */
+async function resolveBookingDurationMinutes(
+  salonId: string,
+  serviceName?: string
+): Promise<number> {
+  const trimmed = serviceName?.trim();
+  if (!trimmed) return 60;
 
-  for (let i = 0; i < 4; i++) {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const label = i === 0 ? 'Сегодня' : i === 1 ? 'Завтра' : `${d.getDate()} ${MONTHS[d.getMonth()]}`;
-    buttons.push({ text: label, callback_data: `date:${iso}` });
+  const { data, error } = await supabase
+    .from('services')
+    .select('duration')
+    .eq('salon_id', salonId)
+    .ilike('name', trimmed)
+    .eq('active', true)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[slots] duration lookup error:', error.message);
+    return 60;
   }
-  buttons.push({ text: '✍️ Ввести дату', callback_data: 'date:manual' });
+  const duration = (data as { duration?: number } | null)?.duration;
+  return typeof duration === 'number' && duration > 0 ? duration : 60;
+}
 
-  // По 2 кнопки в ряд
+async function resolveAppointmentDurationMinutes(
+  salonId: string,
+  appointmentId: string
+): Promise<number> {
+  const { data, error } = await (supabase as any)
+    .from('appointments')
+    .select('service_id, services(duration)')
+    .eq('id', appointmentId)
+    .eq('salon_id', salonId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[slots] appointment duration lookup error:', error.message);
+    return 60;
+  }
+  const duration = data?.services?.duration;
+  return typeof duration === 'number' && duration > 0 ? duration : 60;
+}
+
+function layoutDateButtons(
+  buttons: { text: string; callback_data: string }[]
+): { text: string; callback_data: string }[][] {
   const keyboard: { text: string; callback_data: string }[][] = [];
   for (let i = 0; i < buttons.length; i += 2) {
     keyboard.push(buttons.slice(i, i + 2));
   }
   return keyboard;
+}
+
+/** Next open dates for staff/service (skip closed) + manual entry. */
+async function getDateKeyboard(
+  salonId: string,
+  staffId: string,
+  durationMinutes: number
+): Promise<{ text: string; callback_data: string }[][]> {
+  const tz = await getSalonTimezone(salonId);
+  const dates = await findNextAvailableDates({
+    salonId,
+    staffId,
+    durationMinutes,
+    count: 4,
+    maxDays: 30,
+  });
+  const buttons = dates.map((iso) => ({
+    text: formatTelegramDateLabel(iso, tz),
+    callback_data: `date:${iso}`,
+  }));
+  buttons.push({ text: '✍️ Ввести дату', callback_data: 'date:manual' });
+  return layoutDateButtons(buttons);
+}
+
+/** Reschedule date keyboard — same open-date logic, rdate: callbacks. */
+async function getRescheduleDateKeyboard(
+  salonId: string,
+  appointmentId: string,
+  staffId: string,
+  durationMinutes: number
+): Promise<{ text: string; callback_data: string }[][]> {
+  const tz = await getSalonTimezone(salonId);
+  const dates = await findNextAvailableDates({
+    salonId,
+    staffId,
+    durationMinutes,
+    excludeAppointmentId: appointmentId,
+    count: 4,
+    maxDays: 30,
+  });
+  const buttons = dates.map((iso) => ({
+    text: formatTelegramDateLabel(iso, tz),
+    callback_data: `rdate:${appointmentId}:${iso}`,
+  }));
+  buttons.push({ text: '✍️ Ввести дату', callback_data: `rdate_manual:${appointmentId}` });
+  return layoutDateButtons(buttons);
+}
+
+async function sendBookingDatePrompt(
+  chatId: number,
+  message: string,
+  salonId: string,
+  staffId: string,
+  durationMinutes: number,
+  botToken?: string
+): Promise<void> {
+  const keyboard = await getDateKeyboard(salonId, staffId, durationMinutes);
+  const datesOnly = keyboard.flat().filter((b) => b.callback_data.startsWith('date:') && b.callback_data !== 'date:manual');
+  const text =
+    datesOnly.length === 0
+      ? `${message}\n\n${NO_AVAILABLE_DATES_MESSAGE}`
+      : message;
+  await sendTelegramMessageWithKeyboard(chatId, text, keyboard, botToken);
 }
 
 // Форматирует запись для отображения клиенту
@@ -204,24 +324,7 @@ function formatAppointmentForUser(appt: any): string {
   return `📅 ${date} в ${time} — ${service}`;
 }
 
-// Клавиатура выбора даты при переносе (с appointmentId в callback_data)
-function getRescheduleDateKeyboard(appointmentId: string): { text: string; callback_data: string }[][] {
-  const MONTHS = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
-  const buttons: { text: string; callback_data: string }[] = [];
-  for (let i = 0; i < 4; i++) {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const label = i === 0 ? 'Сегодня' : i === 1 ? 'Завтра' : `${d.getDate()} ${MONTHS[d.getMonth()]}`;
-    buttons.push({ text: label, callback_data: `rdate:${appointmentId}:${iso}` });
-  }
-  buttons.push({ text: '✍️ Ввести дату', callback_data: `rdate_manual:${appointmentId}` });
-  const keyboard: { text: string; callback_data: string }[][] = [];
-  for (let i = 0; i < buttons.length; i += 2) {
-    keyboard.push(buttons.slice(i, i + 2));
-  }
-  return keyboard;
-}
+// Клавиатура выбора даты при переносе — see getRescheduleDateKeyboard above (schedule-aware).
 
 function parseAppointmentTime(input: string): string {
   const match = input.match(/(\d{1,2})[:. ]?(\d{2})?/);
@@ -368,7 +471,12 @@ async function generateAIResponse(
           const msg = `Ваша запись:\n${apptText}\n\nВыберите новую дату:`;
           history.push({ role: 'assistant', content: msg });
           chatHistory.set(stateKey, history.slice(-10));
-          await sendTelegramMessageWithKeyboard(chatId, msg, getRescheduleDateKeyboard(appt.id), botToken);
+          const rescheduleStaffId = await getAppointmentStaffId(ctx.salonId, appt.id);
+          const rescheduleDuration = await resolveAppointmentDurationMinutes(ctx.salonId, appt.id);
+          const rescheduleKb = rescheduleStaffId
+            ? await getRescheduleDateKeyboard(ctx.salonId, appt.id, rescheduleStaffId, rescheduleDuration)
+            : [[{ text: '✍️ Ввести дату', callback_data: `rdate_manual:${appt.id}` }]];
+          await sendTelegramMessageWithKeyboard(chatId, msg, rescheduleKb, botToken);
           return null;
         }
       } else {
@@ -386,7 +494,7 @@ async function generateAIResponse(
 
     if (manage.step === 'select_new_date') {
       // Пользователь ввёл дату вручную при переносе
-      const parsedDate = parseAppointmentDate(text);
+      const parsedDate = await parseAppointmentDateForSalon(ctx.salonId, text);
       manageState.set(stateKey, { ...manage, newDate: parsedDate });
       const staffId = await getAppointmentStaffId(ctx.salonId, manage.appointmentId!);
       if (!staffId) {
@@ -394,12 +502,24 @@ async function generateAIResponse(
         return 'Не удалось определить мастера для этой записи. Обратитесь к администратору.';
       }
       // Исключаем саму переносимую запись из занятых слотов мастера
-      const freeSlots = await getAvailableSlots(ctx.salonId, parsedDate, staffId, manage.appointmentId);
+      const rescheduleDuration = await resolveAppointmentDurationMinutes(ctx.salonId, manage.appointmentId!);
+      const freeSlots = await getAvailableSlots(
+        ctx.salonId,
+        parsedDate,
+        staffId,
+        manage.appointmentId,
+        rescheduleDuration
+      );
       if (freeSlots.length === 0) {
         const msg = 'На эту дату нет свободного времени. Выберите другой день:';
         history.push({ role: 'assistant', content: msg });
         chatHistory.set(stateKey, history.slice(-10));
-        await sendTelegramMessageWithKeyboard(chatId, msg, getRescheduleDateKeyboard(manage.appointmentId!), botToken);
+        await sendTelegramMessageWithKeyboard(
+          chatId,
+          msg,
+          await getRescheduleDateKeyboard(ctx.salonId, manage.appointmentId!, staffId, rescheduleDuration),
+          botToken
+        );
         return null;
       }
       const keyboard: { text: string; callback_data: string }[][] = [];
@@ -442,7 +562,8 @@ async function generateAIResponse(
         const datePrompt = 'На какой день вы хотите записаться?';
         history.push({ role: 'assistant', content: datePrompt });
         chatHistory.set(stateKey, history.slice(-10));
-        await sendTelegramMessageWithKeyboard(chatId, datePrompt, getDateKeyboard(), botToken);
+        const duration = await resolveBookingDurationMinutes(ctx.salonId, serviceName);
+        await sendBookingDatePrompt(chatId, datePrompt, ctx.salonId, staffMatches[0].id, duration, botToken);
         return null;
       } else {
         bookingState.set(stateKey, { ...currentState, step: 'staff', service: serviceName });
@@ -469,16 +590,17 @@ async function generateAIResponse(
         return STAFF_UNAVAILABLE_MESSAGE;
       }
       console.log(`[step:date] raw text: "${text}" | bookingState before:`, JSON.stringify(currentState));
-      const parsedDate = parseAppointmentDate(text);
+      const parsedDate = await parseAppointmentDateForSalon(ctx.salonId, text);
       console.log(`[step:date] parsedDate passed to getAvailableSlots: "${parsedDate}"`);
-      const freeSlots = await getAvailableSlots(ctx.salonId, parsedDate, currentState.staffId);
+      const duration = await resolveBookingDurationMinutes(ctx.salonId, currentState.service);
+      const freeSlots = await getAvailableSlots(ctx.salonId, parsedDate, currentState.staffId, undefined, duration);
 
       if (freeSlots.length === 0) {
         bookingState.set(stateKey, { ...currentState, step: 'date', date: '' });
         const noSlotsMsg = `К сожалению, на выбранную дату нет свободного времени. Выберите другой день:`;
         history.push({ role: 'assistant', content: noSlotsMsg });
         chatHistory.set(stateKey, history.slice(-10));
-        await sendTelegramMessageWithKeyboard(chatId, noSlotsMsg, getDateKeyboard(), botToken);
+        await sendBookingDatePrompt(chatId, noSlotsMsg, ctx.salonId, currentState.staffId, duration, botToken);
         return null;
       }
 
@@ -503,31 +625,29 @@ async function generateAIResponse(
       }
       // Проверяем слот СРАЗУ — до того как AI спросит имя
       console.log(`[step:time] raw text: "${text}" | currentState.date: "${currentState.date}"`);
-      const appointmentDate = parseAppointmentDate(currentState.date);
+      const appointmentDate = await parseAppointmentDateForSalon(ctx.salonId, currentState.date);
       const appointmentTime = parseAppointmentTime(text);
       console.log(`[step:time] appointmentDate: "${appointmentDate}" | appointmentTime: "${appointmentTime}"`);
 
-      const { data: existingSlot } = await (supabase as any)
-        .from('appointments')
-        .select('id')
-        .eq('salon_id', ctx.salonId)
-        .eq('date', appointmentDate)
-        .eq('start_time', `${appointmentTime}:00`)
-        .eq('staff_id', currentState.staffId)
-        .in('status', ACTIVE_SLOT_STATUSES)
-        .limit(1)
-        .maybeSingle();
+      // Authoritative duration-aware check (typed time, stale buttons, overlaps).
+      const duration = await resolveBookingDurationMinutes(ctx.salonId, currentState.service);
+      const freeSlots = await getAvailableSlots(
+        ctx.salonId,
+        appointmentDate,
+        currentState.staffId,
+        undefined,
+        duration
+      );
 
-      if (existingSlot) {
-        const freeSlots = await getAvailableSlots(ctx.salonId, appointmentDate, currentState.staffId);
-
+      if (!freeSlots.includes(appointmentTime)) {
         if (freeSlots.length === 0) {
           // На эту дату нет ни одного свободного слота — просим выбрать другой день
           bookingState.set(stateKey, { ...currentState, step: 'date', time: '' });
           const noSlotsMsg = `На эту дату свободного времени нет. Пожалуйста, выберите другой день.`;
           history.push({ role: 'assistant', content: noSlotsMsg });
           chatHistory.set(stateKey, history.slice(-10));
-          return noSlotsMsg;
+          await sendBookingDatePrompt(chatId, noSlotsMsg, ctx.salonId, currentState.staffId, duration, botToken);
+          return null;
         }
 
         // Собираем inline-кнопки: по 3 слота в ряд
@@ -631,27 +751,28 @@ async function generateAIResponse(
         return STAFF_UNAVAILABLE_MESSAGE;
       }
 
-      const appointmentDate = parseAppointmentDate(date);
+      const appointmentDate = await parseAppointmentDateForSalon(ctx.salonId, date);
       const appointmentTime = parseAppointmentTime(time);
       const endTime = computeAppointmentEndTime(appointmentTime, serviceRow.duration);
 
-      const { data: conflictingSlot } = await (supabase as any)
-        .from('appointments')
-        .select('id')
-        .eq('salon_id', ctx.salonId)
-        .eq('date', appointmentDate)
-        .eq('start_time', `${appointmentTime}:00`)
-        .eq('staff_id', staffRow.id)
-        .in('status', ACTIVE_SLOT_STATUSES)
-        .limit(1)
-        .maybeSingle();
-
-      if (conflictingSlot) {
+      // Final race/stale guard: duration-aware membership before INSERT.
+      const duration = serviceRow.duration > 0 ? serviceRow.duration : 60;
+      const freeSlots = await getAvailableSlots(
+        ctx.salonId,
+        appointmentDate,
+        staffRow.id,
+        undefined,
+        duration
+      );
+      if (!freeSlots.includes(appointmentTime)) {
         bookingState.set(stateKey, { ...finalState, step: 'time', time: '' });
-        const freeSlots = await getAvailableSlots(ctx.salonId, appointmentDate, staffRow.id);
         if (freeSlots.length === 0) {
           bookingState.set(stateKey, { ...finalState, step: 'date', date: '', time: '' });
-          return `К сожалению, это время уже занято, и на ${date} у мастера больше нет свободных слотов. Выберите другой день.`;
+          const noSlotsMsg = `К сожалению, это время уже занято, и на ${date} у мастера больше нет свободных слотов. Выберите другой день.`;
+          history.push({ role: 'assistant', content: noSlotsMsg });
+          chatHistory.set(stateKey, history.slice(-10));
+          await sendBookingDatePrompt(chatId, noSlotsMsg, ctx.salonId, staffRow.id, duration, botToken);
+          return null;
         }
         const keyboard: { text: string; callback_data: string }[][] = [];
         for (let i = 0; i < freeSlots.length; i += 3) {
@@ -823,7 +944,8 @@ chatHistory.set(stateKey, history.slice(-10));
       await sendTelegramMessage(chatId, STAFF_UNAVAILABLE_MESSAGE, botToken);
       return null;
     }
-    await sendTelegramMessageWithKeyboard(chatId, answer, getDateKeyboard(), botToken);
+    const duration = await resolveBookingDurationMinutes(ctx.salonId, stateForDate.service);
+    await sendBookingDatePrompt(chatId, answer, ctx.salonId, stateForDate.staffId, duration, botToken);
     return null;
   }
 
@@ -836,15 +958,16 @@ chatHistory.set(stateKey, history.slice(-10));
       return null;
     }
     console.log(`[timeKeyboard] stateForTime.date: "${stateForTime.date}"`);
-    const parsedDate = parseAppointmentDate(stateForTime.date);
+    const parsedDate = await parseAppointmentDateForSalon(ctx.salonId, stateForTime.date);
     console.log(`[timeKeyboard] parsedDate passed to getAvailableSlots: "${parsedDate}"`);
-    const freeSlots = await getAvailableSlots(ctx.salonId, parsedDate, stateForTime.staffId);
+    const duration = await resolveBookingDurationMinutes(ctx.salonId, stateForTime.service);
+    const freeSlots = await getAvailableSlots(ctx.salonId, parsedDate, stateForTime.staffId, undefined, duration);
 
     if (freeSlots.length === 0) {
       // Нет слотов — возвращаем на выбор даты
       bookingState.set(stateKey, { ...stateForTime, step: 'date', date: '' });
       const noSlotsMsg = `К сожалению, на выбранную дату нет свободного времени. Выберите другой день:`;
-      await sendTelegramMessageWithKeyboard(chatId, noSlotsMsg, getDateKeyboard(), botToken);
+      await sendBookingDatePrompt(chatId, noSlotsMsg, ctx.salonId, stateForTime.staffId, duration, botToken);
       return null;
     }
 
@@ -1175,12 +1298,15 @@ async function getAvailableSlots(
   salonId: string,
   date: string,
   staffId: string,
-  excludeAppointmentId?: string
+  excludeAppointmentId?: string,
+  durationMinutes?: number
 ): Promise<string[]> {
-  const allSlots = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
+  const duration =
+    typeof durationMinutes === 'number' && durationMinutes > 0 ? durationMinutes : 60;
 
   console.log(`[slots] date: "${date}"`);
   console.log(`[slots] staffId: "${staffId}"`);
+  console.log(`[slots] durationMinutes: ${duration}`);
   console.log(`[slots] excludeAppointmentId: "${excludeAppointmentId ?? 'none'}"`);
 
   if (!staffId.trim()) {
@@ -1188,25 +1314,13 @@ async function getAvailableSlots(
     return [];
   }
 
-  const baseQ = (supabase as any)
-    .from('appointments')
-    .select('start_time')
-    .eq('salon_id', salonId)
-    .eq('date', date)
-    .eq('staff_id', staffId)
-    .in('status', ACTIVE_SLOT_STATUSES);
-  const { data: booked, error: bookedError } = await (
-    excludeAppointmentId ? baseQ.neq('id', excludeAppointmentId) : baseQ
-  );
-
-  if (bookedError) {
-    console.error('[slots] Supabase error:', JSON.stringify(bookedError));
-  }
-
-  console.log('[slots] booked rows:', JSON.stringify(booked));
-  const bookedTimes = (booked ?? []).map((a: any) => (a.start_time as string).slice(0, 5));
-  console.log('[slots] bookedTimes:', JSON.stringify(bookedTimes));
-  const freeSlots = allSlots.filter(s => !bookedTimes.includes(s));
+  const freeSlots = await computeAvailableSlots({
+    salonId,
+    staffId,
+    date,
+    durationMinutes: duration,
+    excludeAppointmentId,
+  });
   console.log('[slots] freeSlots:', JSON.stringify(freeSlots));
   return freeSlots;
 }
@@ -1319,7 +1433,12 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
             const { data: appt } = await (supabase as any)
               .from('appointments').select('id, date, start_time, notes').eq('id', appointmentId).eq('salon_id', tgSalonId).maybeSingle();
             const apptText = appt ? formatAppointmentForUser(appt) : `Запись ${appointmentId}`;
-            await sendTelegramMessageWithKeyboard(cqChatId, `${apptText}\n\nВыберите новую дату:`, getRescheduleDateKeyboard(appointmentId), botToken);
+            const rescheduleStaffId = await getAppointmentStaffId(ctx.salonId, appointmentId);
+            const rescheduleDuration = await resolveAppointmentDurationMinutes(ctx.salonId, appointmentId);
+            const rescheduleKb = rescheduleStaffId
+              ? await getRescheduleDateKeyboard(ctx.salonId, appointmentId, rescheduleStaffId, rescheduleDuration)
+              : [[{ text: '✍️ Ввести дату', callback_data: `rdate_manual:${appointmentId}` }]];
+            await sendTelegramMessageWithKeyboard(cqChatId, `${apptText}\n\nВыберите новую дату:`, rescheduleKb, botToken);
             return;
           }
 
@@ -1335,7 +1454,7 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
             const lastColon = cqData.lastIndexOf(':');
             const dateStr = cqData.slice(lastColon + 1);           // '2026-06-30'
             const appointmentId = cqData.slice('rdate:'.length, lastColon); // UUID
-            const newDate = parseAppointmentDate(dateStr);
+            const newDate = await parseAppointmentDateForSalon(ctx.salonId, dateStr);
             console.log(`[rdate] appointmentId="${appointmentId}" dateStr="${dateStr}" parsedDate="${newDate}"`);
             const cur = manageState.get(cqStateKey);
             if (cur) manageState.set(cqStateKey, { ...cur, step: 'select_new_time', appointmentId, newDate });
@@ -1345,9 +1464,15 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
               return;
             }
             // Исключаем саму переносимую запись, чтобы её слот не блокировался у этого мастера
-            const freeSlots = await getAvailableSlots(ctx.salonId, newDate, staffId, appointmentId);
+            const rescheduleDuration = await resolveAppointmentDurationMinutes(ctx.salonId, appointmentId);
+            const freeSlots = await getAvailableSlots(ctx.salonId, newDate, staffId, appointmentId, rescheduleDuration);
             if (freeSlots.length === 0) {
-              await sendTelegramMessageWithKeyboard(cqChatId, 'На эту дату нет свободного времени. Выберите другой день:', getRescheduleDateKeyboard(appointmentId), botToken);
+              await sendTelegramMessageWithKeyboard(
+                cqChatId,
+                'На эту дату нет свободного времени. Выберите другой день:',
+                await getRescheduleDateKeyboard(ctx.salonId, appointmentId, staffId, rescheduleDuration),
+                botToken
+              );
             } else {
               const keyboard: { text: string; callback_data: string }[][] = [];
               for (let i = 0; i < freeSlots.length; i += 3) {
@@ -1376,19 +1501,23 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
               await sendTelegramMessage(cqChatId, 'Не удалось определить мастера для этой записи. Обратитесь к администратору.', botToken);
               return;
             }
-            // Проверяем слот мастера (исключаем саму переносимую запись)
-            const { data: existingSlot } = await (supabase as any)
-              .from('appointments').select('id')
-              .eq('salon_id', tgSalonId)
-              .eq('date', newDate).eq('start_time', `${parsedTime}:00`)
-              .eq('staff_id', staffId)
-              .in('status', ACTIVE_SLOT_STATUSES)
-              .neq('id', appointmentId).limit(1).maybeSingle();
-            if (existingSlot) {
-              // Исключаем саму переносимую запись из занятых слотов мастера
-              const freeSlots = await getAvailableSlots(ctx.salonId, newDate, staffId, appointmentId);
+            // Authoritative duration-aware check before UPDATE (exclude current appointment).
+            const rescheduleDuration = await resolveAppointmentDurationMinutes(ctx.salonId, appointmentId);
+            const freeSlots = await getAvailableSlots(
+              ctx.salonId,
+              newDate,
+              staffId,
+              appointmentId,
+              rescheduleDuration
+            );
+            if (!freeSlots.includes(parsedTime)) {
               if (freeSlots.length === 0) {
-                await sendTelegramMessageWithKeyboard(cqChatId, 'Это время занято, и других свободных слотов на эту дату нет. Выберите другой день:', getRescheduleDateKeyboard(appointmentId), botToken);
+                await sendTelegramMessageWithKeyboard(
+                  cqChatId,
+                  'Это время занято, и других свободных слотов на эту дату нет. Выберите другой день:',
+                  await getRescheduleDateKeyboard(ctx.salonId, appointmentId, staffId, rescheduleDuration),
+                  botToken
+                );
               } else {
                 const keyboard: { text: string; callback_data: string }[][] = [];
                 for (let i = 0; i < freeSlots.length; i += 3) {
@@ -1398,13 +1527,7 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
               }
               return;
             }
-            const { data: apptForDuration } = await (supabase as any)
-              .from('appointments')
-              .select('service_id, services(duration)')
-              .eq('id', appointmentId)
-              .eq('salon_id', tgSalonId)
-              .maybeSingle();
-            const duration = apptForDuration?.services?.duration ?? 60;
+            const duration = rescheduleDuration;
             const newEndTime = computeAppointmentEndTime(parsedTime, duration);
             const { error } = await (supabase as any).from('appointments').update({
               date: newDate,

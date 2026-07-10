@@ -1,6 +1,6 @@
 /**
- * Schedule-aware slot engine (Stage J2a).
- * Not wired to Telegram yet — Telegram keeps hardcoded getAvailableSlots.
+ * Schedule-aware slot engine (Stage J2a / J2c).
+ * Telegram booking uses computeAvailableSlots via getAvailableSlots.
  * When no salon_weekly_hours rows exist, falls back to 08:00–18:00.
  */
 
@@ -28,8 +28,32 @@ const FALLBACK_CLOSE = '18:00';
 /** Soft end-of-day for fallback duration fit so duration=60 still allows 18:00. */
 const FALLBACK_DURATION_LIMIT = '19:00';
 
+/**
+ * Project fallback when salon.timezone is missing/invalid.
+ * Matches salons.timezone DB default (Europe/Moscow).
+ */
+export const FALLBACK_TIMEZONE = 'Europe/Moscow';
+
+export const NO_AVAILABLE_DATES_MESSAGE =
+  'К сожалению, в ближайшие 30 дней нет свободного времени для записи. Введите дату вручную или свяжитесь с салоном.';
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}(?::\d{2})?$/;
+
+const MONTHS_RU = [
+  'января',
+  'февраля',
+  'марта',
+  'апреля',
+  'мая',
+  'июня',
+  'июля',
+  'августа',
+  'сентября',
+  'октября',
+  'ноября',
+  'декабря',
+];
 
 export interface ComputeAvailableSlotsParams {
   salonId: string;
@@ -145,9 +169,95 @@ function generateStarts(window: TimeWindow, durationMinutes: number, stepMinutes
   return starts;
 }
 
+export function isValidIanaTimeZone(timeZone: string): boolean {
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function resolveTimezone(raw: string | null | undefined): string {
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  if (trimmed && isValidIanaTimeZone(trimmed)) return trimmed;
+  return FALLBACK_TIMEZONE;
+}
+
+/** Load salon timezone; falls back to Europe/Moscow. */
+export async function getSalonTimezone(salonId: string): Promise<string> {
+  const { data, error } = await supabase
+    .from('salons')
+    .select('timezone')
+    .eq('id', salonId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[scheduleSlots] salon timezone load error:', error.message);
+    return FALLBACK_TIMEZONE;
+  }
+  return resolveTimezone((data as { timezone?: string } | null)?.timezone);
+}
+
+/** YYYY-MM-DD for "now" (or offset days) in the given IANA timezone. */
+export function dateStrInTimezone(timeZone: string, offsetDays = 0): string {
+  const tz = resolveTimezone(timeZone);
+  const now = new Date();
+  const todayYmd = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+  return addDaysToYmd(todayYmd, offsetDays);
+}
+
+export function addDaysToYmd(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+
+/** Current hour*60+minute in salon timezone. */
+export function currentMinutesInTimezone(timeZone: string): number {
+  const tz = resolveTimezone(timeZone);
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+  // en-GB may yield "24" for midnight in some engines — normalize
+  const h = hour === 24 ? 0 : hour;
+  return h * 60 + minute;
+}
+
+export function formatTelegramDateLabel(isoDate: string, timeZone: string): string {
+  const today = dateStrInTimezone(timeZone, 0);
+  const tomorrow = addDaysToYmd(today, 1);
+  if (isoDate === today) return 'Сегодня';
+  if (isoDate === tomorrow) return 'Завтра';
+  const [, m, d] = isoDate.split('-').map(Number);
+  return `${d} ${MONTHS_RU[m - 1]}`;
+}
+
+function filterPastSlotsForToday(
+  slots: string[],
+  date: string,
+  timeZone: string
+): string[] {
+  const today = dateStrInTimezone(timeZone, 0);
+  if (date !== today) return slots;
+  const nowM = currentMinutesInTimezone(timeZone);
+  return slots.filter((start) => timeToMinutes(start) > nowM);
+}
+
 /**
  * Compute free HH:MM starts for a staff member on a date.
  * Safe Tatev fallback: no salon_weekly_hours rows → 08:00–18:00 list.
+ * Past times on "today" are removed using salon timezone.
  */
 export async function computeAvailableSlots(
   params: ComputeAvailableSlotsParams
@@ -167,6 +277,7 @@ export async function computeAvailableSlots(
     return [];
   }
 
+  const timeZone = await getSalonTimezone(salonId);
   const weekday = isoWeekdayFromDate(date);
 
   const { data: salonRows, error: salonErr } = await (supabase as any)
@@ -251,16 +362,13 @@ export async function computeAvailableSlots(
 
   let candidates: string[];
   if (salonUnconfigured && staffUnconfigured && exceptions.length === 0) {
-    // Match current Telegram list; duration>60 may drop late starts that cannot finish by 19:00.
+    // Match legacy Telegram list; duration>60 may drop late starts that cannot finish by 19:00.
     candidates = FALLBACK_SLOT_STARTS.filter((start) => {
       if (durationMinutes <= 60) return true;
       return timeToMinutes(start) + durationMinutes <= timeToMinutes(FALLBACK_DURATION_LIMIT);
     });
   } else if (!working) {
     return [];
-  } else if (salonUnconfigured && staffUnconfigured) {
-    // Exceptions may have applied custom hours; generate from window.
-    candidates = generateStarts(working, durationMinutes);
   } else {
     candidates = generateStarts(working, durationMinutes);
   }
@@ -289,11 +397,55 @@ export async function computeAvailableSlots(
     })
   );
 
-  return candidates.filter((start) => {
+  const free = candidates.filter((start) => {
     const cStart = timeToMinutes(start);
     const cEnd = cStart + durationMinutes;
     return !busy.some((b) => intervalsOverlap(cStart, cEnd, b.start, b.end));
   });
+
+  return filterPastSlotsForToday(free, date, timeZone);
+}
+
+/**
+ * Next open dates (with at least one free slot) from today in salon TZ.
+ * Searches at most maxDays calendar days; returns up to count dates.
+ */
+export async function findNextAvailableDates(params: {
+  salonId: string;
+  staffId: string;
+  durationMinutes: number;
+  excludeAppointmentId?: string;
+  count?: number;
+  maxDays?: number;
+}): Promise<string[]> {
+  const {
+    salonId,
+    staffId,
+    durationMinutes,
+    excludeAppointmentId,
+    count = 4,
+    maxDays = 30,
+  } = params;
+
+  if (!staffId.trim()) return [];
+
+  const timeZone = await getSalonTimezone(salonId);
+  const today = dateStrInTimezone(timeZone, 0);
+  const found: string[] = [];
+
+  for (let i = 0; i < maxDays && found.length < count; i++) {
+    const date = addDaysToYmd(today, i);
+    const slots = await computeAvailableSlots({
+      salonId,
+      staffId,
+      date,
+      durationMinutes,
+      excludeAppointmentId,
+    });
+    if (slots.length > 0) found.push(date);
+  }
+
+  return found;
 }
 
 /** Shared HH:MM validation for schedule API. */
