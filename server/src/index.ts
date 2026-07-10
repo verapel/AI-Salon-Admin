@@ -680,10 +680,11 @@ async function generateAIResponse(
             freeSlots.slice(i, i + 3).map(slot => ({ text: slot, callback_data: `time:${slot}` }))
           );
         }
-        const busyMsg = `К сожалению, это время уже занято. Доступное время на ${currentState.date}:`;
-        history.push({ role: 'assistant', content: busyMsg });
+        const invalidTimeMsg =
+          'Пожалуйста, выберите время кнопкой или введите его в формате ЧЧ:ММ, например 12:00.';
+        history.push({ role: 'assistant', content: invalidTimeMsg });
         chatHistory.set(stateKey, history.slice(-10));
-        await sendTelegramMessageWithKeyboard(chatId, busyMsg, keyboard, botToken);
+        await sendTelegramMessageWithKeyboard(chatId, invalidTimeMsg, keyboard, botToken);
         return null;
       }
 
@@ -1315,6 +1316,37 @@ async function sendTelegramMessageWithKeyboard(
   }
 }
 
+/** Remove inline keyboard from a prior message. Failures must not block booking. */
+async function clearInlineKeyboard(
+  chatId: number,
+  messageId: number | undefined,
+  botToken?: string
+): Promise<void> {
+  const token = botToken?.trim() || process.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token || messageId == null || !Number.isFinite(messageId)) return;
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: { inline_keyboard: [] },
+      }),
+    });
+    const data = (await response.json()) as { ok?: boolean; description?: string };
+    if (!data.ok) {
+      console.warn(
+        '[telegram/clearKeyboard] failed:',
+        data.description ?? `HTTP ${response.status}`
+      );
+    }
+  } catch (err) {
+    console.warn('[telegram/clearKeyboard] error:', err);
+  }
+}
+
 async function answerCallbackQuery(callbackQueryId: string, botToken?: string) {
   const token = botToken?.trim() || process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) return;
@@ -1324,6 +1356,64 @@ async function answerCallbackQuery(callbackQueryId: string, botToken?: string) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ callback_query_id: callbackQueryId })
   });
+}
+
+/** Short guidance when user taps a stale booking keyboard button. Does not mutate FSM. */
+function wrongStepCallbackMessage(
+  expectedStep: 'service' | 'staff' | 'date' | 'time',
+  currentStep: string | undefined
+): string {
+  if (!currentStep) {
+    return 'Сессия записи не найдена. Отправьте /start, чтобы начать заново.';
+  }
+  if (expectedStep === 'service') {
+    return 'Эта кнопка услуги уже неактуальна. Отправьте /start или используйте кнопки в последнем сообщении.';
+  }
+  if (expectedStep === 'staff') {
+    return 'Эта кнопка мастера уже неактуальна. Используйте кнопки в последнем сообщении или отправьте /start.';
+  }
+  if (expectedStep === 'date' && currentStep === 'time') {
+    return 'Дата уже выбрана. Выберите время в последнем сообщении.';
+  }
+  if (expectedStep === 'time' && currentStep === 'date') {
+    return 'Сначала выберите дату в последнем сообщении.';
+  }
+  if (expectedStep === 'time' && (currentStep === 'name' || currentStep === 'phone')) {
+    return 'Эта кнопка времени уже неактуальна. Продолжите ввод или отправьте /start.';
+  }
+  if (expectedStep === 'date' && (currentStep === 'name' || currentStep === 'phone')) {
+    return 'Эта кнопка даты уже неактуальна. Продолжите ввод или отправьте /start.';
+  }
+  return 'Эта кнопка уже неактуальна. Используйте последнее сообщение бота или отправьте /start.';
+}
+
+/** Clear temporary Telegram FSM for this salon+chat. Does not touch DB appointments. */
+function clearTemporaryTelegramSession(stateKey: string): void {
+  bookingState.delete(stateKey);
+  chatHistory.delete(stateKey);
+  manageState.delete(stateKey);
+  birthdayState.delete(stateKey);
+}
+
+async function beginServiceSelection(
+  ctx: TelegramSalonContext,
+  chatId: number,
+  botToken?: string
+): Promise<void> {
+  const stateKey = getTelegramStateKey(ctx.salonId, chatId);
+  bookingState.set(stateKey, {
+    step: 'service',
+    service: '',
+    staffId: '',
+    date: '',
+    time: '',
+    name: '',
+    phone: '',
+  });
+  const prompt = 'Здравствуйте! На какую услугу хотите записаться?';
+  chatHistory.set(stateKey, [{ role: 'assistant', content: prompt }]);
+  const serviceKeyboard = await buildServiceKeyboard(ctx.salonId);
+  await sendTelegramMessageWithKeyboard(chatId, prompt, serviceKeyboard, botToken);
 }
 
 async function getAppointmentStaffId(salonId: string, appointmentId: string): Promise<string | null> {
@@ -1643,8 +1733,16 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
                     ? 'time'
                     : 'staff';
             if (!booking || booking.step !== expectedStep) {
+              await sendTelegramMessage(
+                cqChatId,
+                wrongStepCallbackMessage(expectedStep, booking?.step),
+                botToken
+              );
               return;
             }
+
+            // Disable the used keyboard so stale taps stop looking like "first tap failed".
+            await clearInlineKeyboard(cqChatId, cq.message?.message_id, botToken);
 
             let value: string;
             if (cqData.startsWith('service_id:')) {
@@ -1680,9 +1778,13 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
 
         if (!text || !chatId) return;
 
-        // /start → candidate only (never admin_chat_id); then continue normal flow
+        // /start → clear unfinished temporary FSM, then service selection (no DB writes beyond admin candidate)
         if (isTelegramStartCommand(text)) {
           await captureAdminChatCandidate(ctx, chatId);
+          const startKey = getTelegramStateKey(ctx.salonId, chatId);
+          clearTemporaryTelegramSession(startKey);
+          await beginServiceSelection(ctx, chatId, botToken);
+          return;
         }
 
         const answer = await generateAIResponse(ctx, chatId, text);
