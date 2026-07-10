@@ -508,6 +508,48 @@ export interface Database {
         };
         Relationships: [];
       };
+      birthday_owner_notifications: {
+        Row: {
+          id: string;
+          salon_id: string;
+          client_id: string;
+          occurrence_year: number;
+          notify_offset_days: number;
+          status: 'pending' | 'processing' | 'sent' | 'failed';
+          sent_at: string | null;
+          last_error: string | null;
+          attempt_count: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          client_id: string;
+          occurrence_year: number;
+          notify_offset_days?: number;
+          status?: 'pending' | 'processing' | 'sent' | 'failed';
+          sent_at?: string | null;
+          last_error?: string | null;
+          attempt_count?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          client_id?: string;
+          occurrence_year?: number;
+          notify_offset_days?: number;
+          status?: 'pending' | 'processing' | 'sent' | 'failed';
+          sent_at?: string | null;
+          last_error?: string | null;
+          attempt_count?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
