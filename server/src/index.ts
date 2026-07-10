@@ -586,6 +586,12 @@ async function generateAIResponse(
         const datePrompt = 'На какой день вы хотите записаться?';
         history.push({ role: 'assistant', content: datePrompt });
         chatHistory.set(stateKey, history.slice(-10));
+        // Immediate feedback before slow findNextAvailableDates scan (avoids "dead first tap").
+        try {
+          await sendTelegramMessage(chatId, 'Подбираю доступные даты…', botToken);
+        } catch (err) {
+          console.warn('[telegram] date-loading feedback failed:', err);
+        }
         const duration = await resolveBookingDurationMinutes(ctx.salonId, serviceName);
         await sendBookingDatePrompt(chatId, datePrompt, ctx.salonId, staffMatches[0].id, duration, botToken);
         return null;
