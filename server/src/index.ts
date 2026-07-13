@@ -19,7 +19,13 @@ import scheduleRouter from './routes/schedule.js';
 import developerRouter from './routes/developer.js';
 import authRouter from './routes/auth.js';
 import internalRouter from './routes/internal.js';
-import { requireDeveloperAuth, requireSalonAuth } from './middleware/auth.js';
+import staffPortalRouter from './routes/staffPortal.js';
+import {
+  requireDeveloperAuth,
+  requireSalonAuth,
+  requireSalonCabinetAccess,
+  requireStaffPortalAccess,
+} from './middleware/auth.js';
 import { supabase, checkSupabaseConnection } from './lib/supabase.js';
 import { loadTelegramTokenFromDb, saveTelegramTokenToDb } from './lib/telegramToken.js';
 import { registerTelegramPollingRestarter } from './lib/telegramPollingControl.js';
@@ -1141,12 +1147,13 @@ const noopAuth: RequestHandler = (_req, _res, next) => next();
 const salonAuth = API_AUTH_REQUIRED ? requireSalonAuth : noopAuth;
 const developerAuth = API_AUTH_REQUIRED ? requireDeveloperAuth : noopAuth;
 
-app.use('/api/clients', salonAuth, clientsRouter);
-app.use('/api/services', salonAuth, servicesRouter);
-app.use('/api/staff', salonAuth, staffRouter);
-app.use('/api/appointments', salonAuth, appointmentsRouter);
-app.use('/api/stats', salonAuth, statsRouter);
-app.use('/api/schedule', salonAuth, scheduleRouter);
+app.use('/api/clients', salonAuth, requireSalonCabinetAccess, clientsRouter);
+app.use('/api/services', salonAuth, requireSalonCabinetAccess, servicesRouter);
+app.use('/api/staff', salonAuth, requireSalonCabinetAccess, staffRouter);
+app.use('/api/appointments', salonAuth, requireSalonCabinetAccess, appointmentsRouter);
+app.use('/api/stats', salonAuth, requireSalonCabinetAccess, statsRouter);
+app.use('/api/schedule', salonAuth, requireSalonCabinetAccess, scheduleRouter);
+app.use('/api/staff-portal', salonAuth, requireStaffPortalAccess, staffPortalRouter);
 app.use('/api/developer', developerAuth, developerRouter);
 
 function resolveClientDist(): string | null {

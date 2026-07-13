@@ -155,3 +155,62 @@ export function requireSalonWriteAccess(req: Request, res: Response, next: NextF
 
   res.status(403).json({ error: 'Write access required' });
 }
+
+/**
+ * Owner/admin salon cabinet gate.
+ * Assumes requireSalonAuth already ran when salon routers are auth-mounted.
+ * Denies staff_readonly so they cannot use normal salon APIs.
+ */
+export function requireSalonCabinetAccess(req: Request, res: Response, next: NextFunction) {
+  const role = req.auth?.role;
+
+  if (role === 'owner' || role === 'admin') {
+    next();
+    return;
+  }
+
+  res.status(403).json({ error: 'Salon cabinet access required' });
+}
+
+/**
+ * Staff portal gate for staff_readonly with a linked active staff row.
+ * Assumes requireSalonAuth already ran.
+ * Role and staffId come only from req.auth (membership DB).
+ * Verifies staff belongs to the same salon and is active.
+ */
+export async function requireStaffPortalAccess(req: Request, res: Response, next: NextFunction) {
+  try {
+    const auth = req.auth;
+    const salonId = auth?.salonId;
+    const staffId = auth?.staffId;
+
+    if (!auth || auth.role !== 'staff_readonly' || !salonId || !staffId) {
+      res.status(403).json({ error: 'Staff portal access required' });
+      return;
+    }
+
+    const { data: staff, error } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('id', staffId)
+      .eq('salon_id', salonId)
+      .eq('active', true)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[auth] requireStaffPortalAccess error:', error.message);
+      res.status(500).json({ error: 'Auth failed' });
+      return;
+    }
+
+    if (!staff) {
+      res.status(403).json({ error: 'Staff portal access required' });
+      return;
+    }
+
+    next();
+  } catch (err) {
+    console.error('[auth] requireStaffPortalAccess error:', err);
+    res.status(500).json({ error: 'Auth failed' });
+  }
+}
