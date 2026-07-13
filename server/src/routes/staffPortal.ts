@@ -1,7 +1,13 @@
 import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
 import { formatTimeValue } from '../lib/mappers.js';
-import { isValidIsoDate } from '../lib/scheduleSlots.js';
+import {
+  dateStrInTimezone,
+  getSalonTimezone,
+  isValidHhMm,
+  isValidIsoDate,
+  timeOrderOk,
+} from '../lib/scheduleSlots.js';
 
 const router = Router();
 
@@ -13,8 +19,69 @@ const APPOINTMENT_STATUSES = new Set([
   'no-show',
 ]);
 
+const STAFF_EXCEPTION_KINDS = new Set(['closed', 'vacation', 'custom_hours'] as const);
+const NOTE_MAX_LENGTH = 500;
+
 type ScheduleKind = 'closed' | 'vacation' | 'holiday' | 'custom_hours';
 type ScheduleScope = 'salon' | 'staff';
+type StaffExceptionKind = 'closed' | 'vacation' | 'custom_hours';
+
+interface HoursInput {
+  weekday: number;
+  isClosed: boolean;
+  openTime: string | null;
+  closeTime: string | null;
+}
+
+/**
+ * Same semantics as owner schedule.parseHoursArray:
+ * upsert whatever weekdays are provided (not forced to 7).
+ * Closed days coerce times to null (no silent open defaults).
+ */
+function parseHoursArray(raw: unknown): { ok: true; hours: HoursInput[] } | { ok: false; error: string } {
+  if (!Array.isArray(raw)) return { ok: false, error: 'hours must be an array' };
+
+  const hours: HoursInput[] = [];
+  const seen = new Set<number>();
+
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') {
+      return { ok: false, error: 'each hours entry must be an object' };
+    }
+    const entry = item as Record<string, unknown>;
+    const weekday = entry.weekday;
+    if (typeof weekday !== 'number' || !Number.isInteger(weekday) || weekday < 1 || weekday > 7) {
+      return { ok: false, error: 'weekday must be an integer 1–7 (ISO Monday–Sunday)' };
+    }
+    if (seen.has(weekday)) {
+      return { ok: false, error: `duplicate weekday ${weekday}` };
+    }
+    seen.add(weekday);
+
+    const isClosed = Boolean(entry.isClosed);
+    if (isClosed) {
+      hours.push({
+        weekday,
+        isClosed: true,
+        openTime: null,
+        closeTime: null,
+      });
+      continue;
+    }
+
+    const openTime = entry.openTime;
+    const closeTime = entry.closeTime;
+    if (!isValidHhMm(openTime) || !isValidHhMm(closeTime)) {
+      return { ok: false, error: 'openTime and closeTime are required as HH:MM when not closed' };
+    }
+    if (!timeOrderOk(openTime, closeTime)) {
+      return { ok: false, error: 'closeTime must be after openTime' };
+    }
+    hours.push({ weekday, isClosed: false, openTime, closeTime });
+  }
+
+  return { ok: true, hours };
+}
 
 interface PortalWeeklyHours {
   id: string;
@@ -269,6 +336,161 @@ router.get('/schedule', async (req, res) => {
     staffWeekly: (staffRes.data ?? []).map(mapStaffWeekly),
     exceptions: (exceptionsRes.data ?? []).map(mapException),
   });
+});
+
+/** PUT /api/staff-portal/schedule/weekly — own staff_weekly_hours only */
+router.put('/schedule/weekly', async (req, res) => {
+  const salonId = req.auth!.salonId;
+  const staffId = req.auth!.staffId;
+  if (!salonId || !staffId) {
+    return res.status(403).json({ error: 'Staff portal access required' });
+  }
+
+  const parsed = parseHoursArray((req.body as { hours?: unknown })?.hours);
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+
+  const now = new Date().toISOString();
+  const rows = parsed.hours.map((h) => ({
+    salon_id: salonId,
+    staff_id: staffId,
+    weekday: h.weekday,
+    is_closed: h.isClosed,
+    open_time: h.openTime,
+    close_time: h.closeTime,
+    updated_at: now,
+  }));
+
+  const { data, error } = await (supabase as any)
+    .from('staff_weekly_hours')
+    .upsert(rows, { onConflict: 'staff_id,weekday' })
+    .select('*')
+    .order('weekday');
+
+  if (error) {
+    console.error('[staffPortal] PUT schedule/weekly error:', error.message);
+    return res.status(500).json({ error: 'Failed to save weekly schedule' });
+  }
+
+  res.json({
+    staffWeekly: (data ?? []).map(mapStaffWeekly),
+  });
+});
+
+/** POST /api/staff-portal/schedule/exceptions — own staff-scoped exception only */
+router.post('/schedule/exceptions', async (req, res) => {
+  const salonId = req.auth!.salonId;
+  const staffId = req.auth!.staffId;
+  if (!salonId || !staffId) {
+    return res.status(403).json({ error: 'Staff portal access required' });
+  }
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const kind = body.kind;
+  const startDate = body.startDate;
+  const endDate = body.endDate;
+
+  if (typeof kind !== 'string' || !STAFF_EXCEPTION_KINDS.has(kind as StaffExceptionKind)) {
+    return res.status(400).json({
+      error: "kind must be 'closed', 'vacation', or 'custom_hours'",
+    });
+  }
+  if (!isValidIsoDate(startDate) || !isValidIsoDate(endDate)) {
+    return res.status(400).json({ error: 'startDate and endDate must be YYYY-MM-DD' });
+  }
+  if (endDate < startDate) {
+    return res.status(400).json({ error: 'endDate must be >= startDate' });
+  }
+
+  const timeZone = await getSalonTimezone(salonId);
+  const todayLocal = dateStrInTimezone(timeZone);
+  if (startDate < todayLocal) {
+    return res.status(400).json({ error: 'startDate cannot be before today' });
+  }
+
+  let openTime: string | null = null;
+  let closeTime: string | null = null;
+  if (kind === 'custom_hours') {
+    if (!isValidHhMm(body.openTime) || !isValidHhMm(body.closeTime)) {
+      return res.status(400).json({
+        error: 'custom_hours requires openTime and closeTime as HH:MM',
+      });
+    }
+    if (!timeOrderOk(body.openTime, body.closeTime)) {
+      return res.status(400).json({ error: 'closeTime must be after openTime' });
+    }
+    openTime = body.openTime;
+    closeTime = body.closeTime;
+  } else if (body.openTime != null || body.closeTime != null) {
+    return res.status(400).json({
+      error: 'closed and vacation exceptions must not include openTime or closeTime',
+    });
+  }
+
+  let note: string | null = null;
+  if (body.note !== undefined && body.note !== null) {
+    if (typeof body.note !== 'string') {
+      return res.status(400).json({ error: 'note must be a string' });
+    }
+    const trimmed = body.note.trim();
+    if (trimmed.length > NOTE_MAX_LENGTH) {
+      return res.status(400).json({ error: `note must be at most ${NOTE_MAX_LENGTH} characters` });
+    }
+    note = trimmed.length > 0 ? trimmed : null;
+  }
+
+  // Force scope/salon/staff from auth — never from body.
+  const { data, error } = await (supabase as any)
+    .from('schedule_exceptions')
+    .insert({
+      salon_id: salonId,
+      scope: 'staff',
+      staff_id: staffId,
+      kind,
+      start_date: startDate,
+      end_date: endDate,
+      open_time: openTime,
+      close_time: closeTime,
+      note,
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('[staffPortal] POST schedule/exceptions error:', error.message);
+    return res.status(500).json({ error: 'Failed to create exception' });
+  }
+
+  res.status(201).json({ exception: mapException(data) });
+});
+
+/** DELETE /api/staff-portal/schedule/exceptions/:id — own staff exception only */
+router.delete('/schedule/exceptions/:id', async (req, res) => {
+  const salonId = req.auth!.salonId;
+  const staffId = req.auth!.staffId;
+  if (!salonId || !staffId) {
+    return res.status(403).json({ error: 'Staff portal access required' });
+  }
+
+  const id = (req.params.id as string)?.trim();
+  if (!id) return res.status(400).json({ error: 'id is required' });
+
+  const { data, error } = await (supabase as any)
+    .from('schedule_exceptions')
+    .delete()
+    .eq('id', id)
+    .eq('salon_id', salonId)
+    .eq('staff_id', staffId)
+    .eq('scope', 'staff')
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    console.error('[staffPortal] DELETE schedule/exceptions error:', error.message);
+    return res.status(500).json({ error: 'Failed to delete exception' });
+  }
+  if (!data) return res.status(404).json({ error: 'Exception not found' });
+
+  res.json({ ok: true });
 });
 
 export default router;
