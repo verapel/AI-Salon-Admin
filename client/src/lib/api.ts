@@ -75,6 +75,24 @@ export const api = {
       }),
     delete: (id: string) => request<import('@/types').Staff>(`/staff/${id}`, { method: 'DELETE' }),
   },
+  staffAccess: {
+    list: () =>
+      request<{ items: import('@/types').StaffAccessDto[] }>('/staff/access'),
+    invite: (staffId: string, email: string) =>
+      request<import('@/types').StaffAccessInviteResponse>(`/staff/${staffId}/access/invite`, {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      }),
+    resend: (staffId: string) =>
+      request<import('@/types').StaffAccessResendResponse>(`/staff/${staffId}/access/resend`, {
+        method: 'POST',
+      }),
+    setActive: (staffId: string, active: boolean) =>
+      request<import('@/types').StaffAccessPatchResponse>(`/staff/${staffId}/access`, {
+        method: 'PATCH',
+        body: JSON.stringify({ active }),
+      }),
+  },
   appointments: {
     getAll: (params?: Record<string, string>) => {
       const query = params ? '?' + new URLSearchParams(params).toString() : '';

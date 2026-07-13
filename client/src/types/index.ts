@@ -312,3 +312,35 @@ export interface StaffPortalSchedule {
   staffWeekly: WeeklyHoursRow[];
   exceptions: ScheduleException[];
 }
+
+/** Owner Staff Access — portal membership status (no Auth UUIDs). */
+export type StaffAccessStatus = 'none' | 'active' | 'disabled';
+
+export interface StaffAccessDto {
+  staffId: string;
+  status: StaffAccessStatus;
+  email: string | null;
+  active: boolean;
+  canInvite: boolean;
+  canResend: boolean;
+  canDisable: boolean;
+  canEnable: boolean;
+}
+
+export interface StaffAccessInviteResponse {
+  ok: true;
+  invitationSent: boolean;
+  existingUserLinked: boolean;
+  access: StaffAccessDto;
+}
+
+export interface StaffAccessResendResponse {
+  ok: true;
+  invitationSent: boolean;
+  access: StaffAccessDto;
+}
+
+export interface StaffAccessPatchResponse {
+  ok: true;
+  access: StaffAccessDto;
+}

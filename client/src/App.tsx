@@ -12,6 +12,8 @@ import Schedule from '@/pages/Schedule';
 import Bookings from '@/pages/Bookings';
 import Statistics from '@/pages/Statistics';
 import Reminders from '@/pages/Reminders';
+import StaffAccess from '@/pages/StaffAccess';
+import SetPassword from '@/pages/SetPassword';
 import Login from '@/pages/Login';
 import DeveloperHome from '@/pages/developer/DeveloperHome';
 import DeveloperSalons from '@/pages/developer/DeveloperSalons';
@@ -22,6 +24,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/set-password" element={<SetPassword />} />
 
       {/* Staff portal OR owner staff management (role-split) */}
       <Route path="/staff/*" element={<StaffSectionGate />} />
@@ -37,6 +40,7 @@ export default function App() {
           <Route path="/bookings" element={<Bookings />} />
           <Route path="/statistics" element={<Statistics />} />
           <Route path="/reminders" element={<Reminders />} />
+          <Route path="/staff-access" element={<StaffAccess />} />
         </Route>
       </Route>
 
