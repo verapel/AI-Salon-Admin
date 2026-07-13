@@ -230,5 +230,22 @@ export const api = {
         `/staff-portal/schedule${qs ? `?${qs}` : ''}`
       );
     },
+    putWeekly: (hours: import('@/types').WeeklyHoursInput[]) =>
+      request<import('@/types').StaffPortalWeeklySaveResponse>('/staff-portal/schedule/weekly', {
+        method: 'PUT',
+        body: JSON.stringify({ hours }),
+      }),
+    createException: (data: import('@/types').StaffPortalCreateExceptionInput) =>
+      request<import('@/types').StaffPortalExceptionCreateResponse>(
+        '/staff-portal/schedule/exceptions',
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }
+      ),
+    deleteException: (id: string) =>
+      request<{ ok: true }>(`/staff-portal/schedule/exceptions/${id}`, {
+        method: 'DELETE',
+      }),
   },
 };

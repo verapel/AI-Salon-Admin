@@ -313,6 +313,24 @@ export interface StaffPortalSchedule {
   exceptions: ScheduleException[];
 }
 
+/** Staff portal self-schedule write — identity from auth only (no salonId/staffId). */
+export interface StaffPortalCreateExceptionInput {
+  kind: Extract<ScheduleExceptionKind, 'closed' | 'vacation' | 'custom_hours'>;
+  startDate: string;
+  endDate: string;
+  openTime?: string | null;
+  closeTime?: string | null;
+  note?: string | null;
+}
+
+export interface StaffPortalWeeklySaveResponse {
+  staffWeekly: WeeklyHoursRow[];
+}
+
+export interface StaffPortalExceptionCreateResponse {
+  exception: ScheduleException;
+}
+
 /** Owner Staff Access — portal membership status (no Auth UUIDs). */
 export type StaffAccessStatus = 'none' | 'active' | 'disabled';
 

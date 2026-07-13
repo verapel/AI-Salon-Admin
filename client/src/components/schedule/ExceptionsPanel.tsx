@@ -23,10 +23,16 @@ interface ExceptionsPanelProps {
   kindOptions: ExceptionKindOption[];
   scope: 'salon' | 'staff';
   staffId?: string;
+  /** When true, identity comes from auth — staffId not required in the form. */
+  authScoped?: boolean;
+  /** Defaults to allowing delete for every row. */
+  canDelete?: (ex: ScheduleException) => boolean;
   onCreate: (input: CreateScheduleExceptionInput) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   busy?: boolean;
 }
+
+const NOTE_MAX_LENGTH = 500;
 
 const KIND_LABEL: Record<ExceptionKindOption, TranslationKey> = {
   holiday: 'schedule.kind.holiday',
@@ -40,6 +46,7 @@ const VALIDATION_KEY: Record<string, TranslationKey> = {
   endBeforeStart: 'schedule.error.endBeforeStart',
   missingTimes: 'schedule.error.missingTimes',
   closeAfterOpen: 'schedule.error.closeAfterOpen',
+  noteTooLong: 'schedule.error.noteTooLong',
 };
 
 export default function ExceptionsPanel({
@@ -47,6 +54,8 @@ export default function ExceptionsPanel({
   kindOptions,
   scope,
   staffId,
+  authScoped = false,
+  canDelete,
   onCreate,
   onDelete,
   busy,
@@ -81,7 +90,12 @@ export default function ExceptionsPanel({
       setError(t(VALIDATION_KEY[validation] ?? 'schedule.error.generic'));
       return;
     }
-    if (scope === 'staff' && !staffId) {
+    const trimmedNote = note.trim();
+    if (trimmedNote.length > NOTE_MAX_LENGTH) {
+      setError(t('schedule.error.noteTooLong'));
+      return;
+    }
+    if (scope === 'staff' && !staffId && !authScoped) {
       setError(t('schedule.error.generic'));
       return;
     }
@@ -91,13 +105,13 @@ export default function ExceptionsPanel({
     try {
       await onCreate({
         scope,
-        staffId: scope === 'staff' ? staffId : null,
+        staffId: scope === 'staff' && !authScoped ? staffId : null,
         kind,
         startDate,
         endDate,
         openTime: kind === 'custom_hours' ? openTime : null,
         closeTime: kind === 'custom_hours' ? closeTime : null,
-        note: note.trim() || null,
+        note: trimmedNote || null,
       });
       resetForm();
     } catch (err) {
@@ -149,15 +163,17 @@ export default function ExceptionsPanel({
                   <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{ex.note}</p>
                 )}
               </div>
-              <button
-                type="button"
-                className="btn-ghost shrink-0 p-2 text-red-500"
-                disabled={deletingId === ex.id || busy}
-                onClick={() => handleDelete(ex.id)}
-                aria-label={t('schedule.deleteException')}
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              {(canDelete ? canDelete(ex) : true) ? (
+                <button
+                  type="button"
+                  className="btn-ghost shrink-0 p-2 text-red-500"
+                  disabled={deletingId === ex.id || busy}
+                  onClick={() => handleDelete(ex.id)}
+                  aria-label={t('schedule.deleteException')}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -237,6 +253,7 @@ export default function ExceptionsPanel({
           <input
             className="input-field"
             value={note}
+            maxLength={NOTE_MAX_LENGTH}
             disabled={submitting || busy}
             onChange={(e) => setNote(e.target.value)}
             placeholder={t('schedule.notePlaceholder')}
