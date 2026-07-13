@@ -35,6 +35,7 @@ export const api = {
         platformRole: 'developer' | null;
         salonId: string | null;
         role: 'owner' | 'admin' | 'staff_readonly' | null;
+        staffId: string | null;
       }>('/auth/me'),
   },
   clients: {

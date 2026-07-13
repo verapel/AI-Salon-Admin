@@ -9,6 +9,7 @@ export interface AuthMeResponse {
   platformRole: PlatformUserRole | null;
   salonId: string | null;
   role: SalonMemberRole | null;
+  staffId: string | null;
 }
 
 export function toAuthMeResponse(auth: RequestAuth): AuthMeResponse {
@@ -19,6 +20,7 @@ export function toAuthMeResponse(auth: RequestAuth): AuthMeResponse {
     platformRole: auth.platformRole ?? null,
     salonId: auth.salonId ?? null,
     role: auth.role ?? null,
+    staffId: auth.staffId ?? null,
   };
 }
 
@@ -41,7 +43,7 @@ export async function populateAuthFromDb(auth: RequestAuth): Promise<void> {
 
   const { data: memberships, error: membershipError } = await supabase
     .from('salon_members')
-    .select('salon_id, role')
+    .select('salon_id, role, staff_id')
     .eq('user_id', auth.userId)
     .eq('active', true);
 
@@ -53,6 +55,12 @@ export async function populateAuthFromDb(auth: RequestAuth): Promise<void> {
     const membership = memberships[0];
     auth.salonId = membership.salon_id;
     auth.role = membership.role as SalonMemberRole;
+    // Trusted membership only — never from body/query/path.
+    // Same-salon (membership.salon_id === staff.salon_id) is not DB-enforced yet;
+    // Staff-2b / provisioning must validate before setting staff_id.
+    if (membership.staff_id) {
+      auth.staffId = membership.staff_id;
+    }
   }
 }
 

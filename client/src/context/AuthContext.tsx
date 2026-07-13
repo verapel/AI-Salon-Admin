@@ -18,6 +18,7 @@ export interface AuthInfo {
   platformRole: 'developer' | null;
   salonId: string | null;
   role: 'owner' | 'admin' | 'staff_readonly' | null;
+  staffId: string | null;
 }
 
 interface AuthContextType {

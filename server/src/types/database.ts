@@ -354,6 +354,7 @@ export interface Database {
           role: SalonMemberRole;
           active: boolean;
           created_at: string;
+          staff_id: string | null;
         };
         Insert: {
           id?: string;
@@ -362,6 +363,7 @@ export interface Database {
           role: SalonMemberRole;
           active?: boolean;
           created_at?: string;
+          staff_id?: string | null;
         };
         Update: {
           id?: string;
@@ -370,6 +372,7 @@ export interface Database {
           role?: SalonMemberRole;
           active?: boolean;
           created_at?: string;
+          staff_id?: string | null;
         };
         Relationships: [];
       };
