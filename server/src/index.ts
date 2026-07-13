@@ -1047,7 +1047,9 @@ app.get('/api/health', async (_req, res) => {
     database: dbConnected ? 'connected' : 'disconnected',
   });
 });
-app.get('/api/telegram/status', async (_req, res) => {
+// Security-2a: legacy Telegram HTTP endpoints require developer auth.
+// Prefer authenticated developer routes under /api/developer/integrations/telegram/*.
+app.get('/api/telegram/status', requireDeveloperAuth, async (_req, res) => {
   let token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 
   if (!token) {
@@ -1088,10 +1090,8 @@ app.get('/api/telegram/status', async (_req, res) => {
   }
 });
 
-// POST /api/integrations/telegram/connect
-// Принимает { token }, проверяет через getMe, перезапускает polling.
-// Токен хранится только в process.env (runtime, до перезапуска сервера).
-app.post('/api/integrations/telegram/connect', async (req, res) => {
+// Legacy connect — developer auth only. Prefer POST /api/developer/integrations/telegram/connect.
+app.post('/api/integrations/telegram/connect', requireDeveloperAuth, async (req, res) => {
   const { token } = req.body as { token?: string };
 
   if (!token || typeof token !== 'string' || token.trim().length < 10) {
@@ -1382,22 +1382,11 @@ async function getAvailableSlots(
   console.log('[slots] freeSlots:', JSON.stringify(freeSlots));
   return freeSlots;
 }
-app.get('/api/telegram/test', async (_req, res) => {
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-
-  if (!chatId) {
-    return res.status(400).json({
-      error: 'Chat ID not configured'
-    });
-  }
-
-  await sendTelegramMessage(
-    Number(chatId),
-    '🎉 AI Admin подключен к Telegram!'
-  );
-
-  res.json({
-    success: true
+// Legacy global env-chat test — closed. Use developer per-salon test-admin-notification.
+app.get('/api/telegram/test', requireDeveloperAuth, (_req, res) => {
+  return res.status(410).json({
+    error:
+      'Legacy Telegram test endpoint is retired. Use POST /api/developer/integrations/telegram/:salonId/test-admin-notification',
   });
 });
 let telegramOffset = 0;
