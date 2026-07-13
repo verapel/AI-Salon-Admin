@@ -191,4 +191,26 @@ export const api = {
       ),
     getHealth: () => request<import('@/types').DeveloperHealth>('/developer/health'),
   },
+  staffPortal: {
+    getMe: () => request<import('@/types').StaffPortalMe>('/staff-portal/me'),
+    getAppointments: (params?: { from?: string; to?: string; status?: string }) => {
+      const q = new URLSearchParams();
+      if (params?.from) q.set('from', params.from);
+      if (params?.to) q.set('to', params.to);
+      if (params?.status) q.set('status', params.status);
+      const qs = q.toString();
+      return request<import('@/types').StaffPortalAppointment[]>(
+        `/staff-portal/appointments${qs ? `?${qs}` : ''}`
+      );
+    },
+    getSchedule: (params?: { from?: string; to?: string }) => {
+      const q = new URLSearchParams();
+      if (params?.from) q.set('from', params.from);
+      if (params?.to) q.set('to', params.to);
+      const qs = q.toString();
+      return request<import('@/types').StaffPortalSchedule>(
+        `/staff-portal/schedule${qs ? `?${qs}` : ''}`
+      );
+    },
+  },
 };

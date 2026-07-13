@@ -284,3 +284,31 @@ export interface CreateScheduleExceptionInput {
   closeTime?: string | null;
   note?: string | null;
 }
+
+/** Staff portal — matches GET /api/staff-portal/* (no salonId/staffId client params). */
+export interface StaffPortalMe {
+  userId: string;
+  email: string;
+  salonId: string;
+  role: 'staff_readonly';
+  staffId: string;
+  staffName: string;
+}
+
+export interface StaffPortalAppointment {
+  id: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  status: Appointment['status'];
+  serviceName: string;
+  clientName: string;
+  clientPhone: string;
+  notes: string;
+}
+
+export interface StaffPortalSchedule {
+  salonWeekly: WeeklyHoursRow[];
+  staffWeekly: WeeklyHoursRow[];
+  exceptions: ScheduleException[];
+}

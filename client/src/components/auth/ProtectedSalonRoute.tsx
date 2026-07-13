@@ -2,8 +2,9 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 
+/** Owner/admin salon cabinet only — staff_readonly is redirected to /staff. */
 export default function ProtectedSalonRoute() {
-  const { loading, session, hasSalonAccess, isDeveloper } = useAuth();
+  const { loading, session, authInfo, isDeveloper } = useAuth();
   const location = useLocation();
   const { t } = useLanguage();
 
@@ -19,12 +20,19 @@ export default function ProtectedSalonRoute() {
     return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   }
 
-  if (!hasSalonAccess) {
-    if (isDeveloper) {
-      return <Navigate to="/developer" replace />;
-    }
-    return <Navigate to="/login" replace />;
+  const role = authInfo?.role;
+
+  if (role === 'staff_readonly') {
+    return <Navigate to="/staff" replace />;
   }
 
-  return <Outlet />;
+  if (role === 'owner' || role === 'admin') {
+    return <Outlet />;
+  }
+
+  if (isDeveloper) {
+    return <Navigate to="/developer" replace />;
+  }
+
+  return <Navigate to="/login" replace />;
 }

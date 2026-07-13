@@ -3,11 +3,11 @@ import Layout from '@/components/layout/Layout';
 import DeveloperLayout from '@/layouts/DeveloperLayout';
 import ProtectedSalonRoute from '@/components/auth/ProtectedSalonRoute';
 import ProtectedDeveloperRoute from '@/components/auth/ProtectedDeveloperRoute';
+import StaffSectionGate from '@/components/auth/StaffSectionGate';
 import Dashboard from '@/pages/Dashboard';
 import Calendar from '@/pages/Calendar';
 import Clients from '@/pages/Clients';
 import Services from '@/pages/Services';
-import Staff from '@/pages/Staff';
 import Schedule from '@/pages/Schedule';
 import Bookings from '@/pages/Bookings';
 import Statistics from '@/pages/Statistics';
@@ -23,14 +23,16 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
 
-      {/* Salon cabinet */}
+      {/* Staff portal OR owner staff management (role-split) */}
+      <Route path="/staff/*" element={<StaffSectionGate />} />
+
+      {/* Salon cabinet — owner/admin only */}
       <Route element={<ProtectedSalonRoute />}>
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/calendar" element={<Calendar />} />
           <Route path="/clients" element={<Clients />} />
           <Route path="/services" element={<Services />} />
-          <Route path="/staff" element={<Staff />} />
           <Route path="/schedule" element={<Schedule />} />
           <Route path="/bookings" element={<Bookings />} />
           <Route path="/statistics" element={<Statistics />} />

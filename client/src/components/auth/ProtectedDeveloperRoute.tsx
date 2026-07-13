@@ -3,7 +3,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 
 export default function ProtectedDeveloperRoute() {
-  const { loading, session, isDeveloper, hasSalonAccess } = useAuth();
+  const { loading, session, isDeveloper, authInfo } = useAuth();
   const location = useLocation();
   const { t } = useLanguage();
 
@@ -20,7 +20,10 @@ export default function ProtectedDeveloperRoute() {
   }
 
   if (!isDeveloper) {
-    if (hasSalonAccess) {
+    if (authInfo?.role === 'staff_readonly') {
+      return <Navigate to="/staff" replace />;
+    }
+    if (authInfo?.role === 'owner' || authInfo?.role === 'admin') {
       return <Navigate to="/" replace />;
     }
     return <Navigate to="/login" replace />;

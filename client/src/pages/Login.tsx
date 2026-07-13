@@ -1,20 +1,21 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth, type AuthInfo } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { isSupabaseConfigured, SUPABASE_CONFIG_ERROR } from '@/lib/supabase';
 
-function resolveRedirectPath(isDeveloper: boolean, hasSalonAccess: boolean): string | null {
-  if (isDeveloper) return '/developer';
-  if (hasSalonAccess) return '/';
+function resolveRedirectPath(info: Pick<AuthInfo, 'isDeveloper' | 'role' | 'staffId' | 'salonId'>): string | null {
+  if (info.isDeveloper) return '/developer';
+  if (info.role === 'staff_readonly') return '/staff';
+  if ((info.role === 'owner' || info.role === 'admin') && info.salonId) return '/';
   return null;
 }
 
 export default function Login() {
   const { t } = useLanguage();
   const navigate = useNavigate();
-  const { loading, session, authInfo, isDeveloper, hasSalonAccess, signIn } = useAuth();
+  const { loading, session, authInfo, signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -22,9 +23,9 @@ export default function Login() {
 
   useEffect(() => {
     if (loading || !session || !authInfo) return;
-    const path = resolveRedirectPath(isDeveloper, hasSalonAccess);
+    const path = resolveRedirectPath(authInfo);
     if (path) navigate(path, { replace: true });
-  }, [loading, session, authInfo, isDeveloper, hasSalonAccess, navigate]);
+  }, [loading, session, authInfo, navigate]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -34,7 +35,7 @@ export default function Login() {
 
     try {
       const info = await signIn(email.trim(), password);
-      const path = resolveRedirectPath(info.isDeveloper, Boolean(info.salonId && info.role));
+      const path = resolveRedirectPath(info);
       if (!path) {
         setError(t('auth.login.noAccess'));
         return;
@@ -57,7 +58,7 @@ export default function Login() {
   }
 
   if (session && authInfo) {
-    const path = resolveRedirectPath(isDeveloper, hasSalonAccess);
+    const path = resolveRedirectPath(authInfo);
     if (path) return <Navigate to={path} replace />;
   }
 
