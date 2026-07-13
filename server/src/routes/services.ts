@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
 import { mapService } from '../lib/mappers.js';
 import { getSalonId } from '../lib/salonContext.js';
+import { requireSalonWriteAccess } from '../middleware/auth.js';
 import type { Database } from '../types/database.js';
 
 const router = Router();
@@ -31,7 +32,7 @@ router.get('/:id', async (req, res) => {
   res.json(mapService(data));
 });
 
-router.post('/', async (req, res) => {
+router.post('/', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
   const { name, description, duration, price, category } = req.body;
   if (!name || !duration || price === undefined) {
@@ -56,8 +57,9 @@ router.post('/', async (req, res) => {
   res.status(201).json(mapService(data));
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
+  const id = req.params.id as string;
   const { name, description, duration, price, category, active } = req.body;
 
   const updates: Database['public']['Tables']['services']['Update'] = {};
@@ -71,7 +73,7 @@ router.put('/:id', async (req, res) => {
   const { data, error } = await supabase
     .from('services')
     .update(updates)
-    .eq('id', req.params.id)
+    .eq('id', id)
     .eq('salon_id', salonId)
     .select('*')
     .single();
@@ -80,12 +82,13 @@ router.put('/:id', async (req, res) => {
   res.json(mapService(data));
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
+  const id = req.params.id as string;
   const { data, error } = await supabase
     .from('services')
     .update({ active: false })
-    .eq('id', req.params.id)
+    .eq('id', id)
     .eq('salon_id', salonId)
     .select('*')
     .single();

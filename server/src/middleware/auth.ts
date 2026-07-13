@@ -130,3 +130,20 @@ export async function requireDeveloperAuth(req: Request, res: Response, next: Ne
     res.status(500).json({ error: 'Auth failed' });
   }
 }
+
+/**
+ * Salon write gate for owner/admin.
+ * Assumes requireSalonAuth already ran (when salon routers are auth-mounted).
+ * Role is taken only from req.auth (membership DB), never from the request body.
+ * Fail closed: missing auth/role or non-write roles → 403.
+ */
+export function requireSalonWriteAccess(req: Request, res: Response, next: NextFunction) {
+  const role = req.auth?.role;
+
+  if (role === 'owner' || role === 'admin') {
+    next();
+    return;
+  }
+
+  res.status(403).json({ error: 'Write access required' });
+}

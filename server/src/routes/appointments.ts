@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
 import { computeEndTime, mapEnrichedAppointment } from '../lib/mappers.js';
 import { getSalonId } from '../lib/salonContext.js';
+import { requireSalonWriteAccess } from '../middleware/auth.js';
 import type { Appointment } from '../types.js';
 import type { Database } from '../types/database.js';
 
@@ -60,7 +61,7 @@ router.get('/:id', async (req, res) => {
   res.json(mapEnrichedAppointment(data));
 });
 
-router.post('/', async (req, res) => {
+router.post('/', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
   const { clientId, staffId, serviceId, date, startTime, notes } = req.body;
   if (!clientId || !staffId || !serviceId || !date || !startTime) {
@@ -127,8 +128,9 @@ router.post('/', async (req, res) => {
   res.status(201).json(mapEnrichedAppointment(data));
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
+  const id = req.params.id as string;
   const { status, notes, clientId, staffId, serviceId, date, startTime } = req.body;
 
   if (clientId !== undefined && !(await isInSalon('clients', clientId, salonId))) {
@@ -154,7 +156,7 @@ router.put('/:id', async (req, res) => {
     const { data: existing } = await supabase
       .from('appointments')
       .select('service_id, start_time')
-      .eq('id', req.params.id)
+      .eq('id', id)
       .eq('salon_id', salonId)
       .single();
 
@@ -178,7 +180,7 @@ router.put('/:id', async (req, res) => {
   const { data: updated, error } = await supabase
     .from('appointments')
     .update(updates)
-    .eq('id', req.params.id)
+    .eq('id', id)
     .eq('salon_id', salonId)
     .select('client_id, date, status')
     .single();
@@ -189,7 +191,7 @@ router.put('/:id', async (req, res) => {
     const { data: apptForReminder } = await supabase
       .from('appointments')
       .select('date, start_time')
-      .eq('id', req.params.id)
+      .eq('id', id)
       .eq('salon_id', salonId)
       .single();
 
@@ -202,7 +204,7 @@ router.put('/:id', async (req, res) => {
           scheduled_for: `${reminderDate}T08:00:00`,
           message: `Reminder: Your appointment on ${reminderDate} at ${reminderTime}`,
         })
-        .eq('appointment_id', req.params.id)
+        .eq('appointment_id', id)
         .eq('salon_id', salonId)
         .eq('status', 'pending');
     }
@@ -231,7 +233,7 @@ router.put('/:id', async (req, res) => {
   const { data, error: fetchError } = await supabase
     .from('appointments')
     .select(APPOINTMENT_SELECT)
-    .eq('id', req.params.id)
+    .eq('id', id)
     .eq('salon_id', salonId)
     .single();
 
@@ -239,12 +241,13 @@ router.put('/:id', async (req, res) => {
   res.json(mapEnrichedAppointment(data));
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
+  const id = req.params.id as string;
   const { data, error } = await supabase
     .from('appointments')
     .update({ status: 'cancelled' })
-    .eq('id', req.params.id)
+    .eq('id', id)
     .eq('salon_id', salonId)
     .select('id')
     .single();
@@ -254,14 +257,14 @@ router.delete('/:id', async (req, res) => {
   await supabase
     .from('reminders')
     .update({ status: 'failed', message: 'Cancelled — appointment was cancelled' })
-    .eq('appointment_id', req.params.id)
+    .eq('appointment_id', id)
     .eq('salon_id', salonId)
     .eq('status', 'pending');
 
   const { data: enriched, error: fetchError } = await supabase
     .from('appointments')
     .select(APPOINTMENT_SELECT)
-    .eq('id', req.params.id)
+    .eq('id', id)
     .eq('salon_id', salonId)
     .single();
 

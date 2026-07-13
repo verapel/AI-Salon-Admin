@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
 import { mapClient } from '../lib/mappers.js';
 import { getSalonId } from '../lib/salonContext.js';
+import { requireSalonWriteAccess } from '../middleware/auth.js';
 import type { Database } from '../types/database.js';
 
 const router = Router();
@@ -31,7 +32,7 @@ router.get('/:id', async (req, res) => {
   res.json(mapClient(data));
 });
 
-router.post('/', async (req, res) => {
+router.post('/', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
   const { name, email, phone, notes, birthday } = req.body;
   if (!name || !email) return res.status(400).json({ error: 'Name and email are required' });
@@ -55,8 +56,9 @@ router.post('/', async (req, res) => {
   res.status(201).json(mapClient(data));
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
+  const id = req.params.id as string;
   const { name, email, phone, notes, totalVisits, lastVisit, birthday } = req.body;
 
   const updates: Database['public']['Tables']['clients']['Update'] = {};
@@ -71,7 +73,7 @@ router.put('/:id', async (req, res) => {
   const { data, error } = await supabase
     .from('clients')
     .update(updates)
-    .eq('id', req.params.id)
+    .eq('id', id)
     .eq('salon_id', salonId)
     .select('*')
     .single();
@@ -80,8 +82,9 @@ router.put('/:id', async (req, res) => {
   res.json(mapClient(data));
 });
 
-router.post('/:id/block', async (req, res) => {
+router.post('/:id/block', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
+  const id = req.params.id as string;
   const { blockedReason } = req.body ?? {};
   const reason =
     typeof blockedReason === 'string' && blockedReason.trim() ? blockedReason.trim() : null;
@@ -93,7 +96,7 @@ router.post('/:id/block', async (req, res) => {
       blocked_at: new Date().toISOString(),
       blocked_reason: reason,
     })
-    .eq('id', req.params.id)
+    .eq('id', id)
     .eq('salon_id', salonId)
     .select('*')
     .single();
@@ -102,8 +105,9 @@ router.post('/:id/block', async (req, res) => {
   res.json(mapClient(data));
 });
 
-router.post('/:id/unblock', async (req, res) => {
+router.post('/:id/unblock', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
+  const id = req.params.id as string;
   const { data, error } = await supabase
     .from('clients')
     .update({
@@ -111,7 +115,7 @@ router.post('/:id/unblock', async (req, res) => {
       blocked_at: null,
       blocked_reason: null,
     })
-    .eq('id', req.params.id)
+    .eq('id', id)
     .eq('salon_id', salonId)
     .select('*')
     .single();
@@ -120,12 +124,13 @@ router.post('/:id/unblock', async (req, res) => {
   res.json(mapClient(data));
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
+  const id = req.params.id as string;
   const { data, error } = await supabase
     .from('clients')
     .delete()
-    .eq('id', req.params.id)
+    .eq('id', id)
     .eq('salon_id', salonId)
     .select('id')
     .maybeSingle();

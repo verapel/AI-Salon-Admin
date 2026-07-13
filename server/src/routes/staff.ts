@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
 import { mapStaff, initialsAvatar } from '../lib/mappers.js';
 import { getSalonId } from '../lib/salonContext.js';
+import { requireSalonWriteAccess } from '../middleware/auth.js';
 import type { Database } from '../types/database.js';
 
 const router = Router();
@@ -65,7 +66,7 @@ router.get('/:id', async (req, res) => {
   res.json(mapStaff(data, serviceIdsByStaff.get(data.id) ?? []));
 });
 
-router.post('/', async (req, res) => {
+router.post('/', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
   const { name, email, phone, role, specialties } = req.body;
   if (!name || !email) return res.status(400).json({ error: 'Name and email are required' });
@@ -89,9 +90,9 @@ router.post('/', async (req, res) => {
   res.status(201).json(mapStaff(data, []));
 });
 
-router.put('/:id/services', async (req, res) => {
+router.put('/:id/services', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
-  const staffId = req.params.id?.trim();
+  const staffId = (req.params.id as string)?.trim();
   if (!staffId) return res.status(400).json({ error: 'staff id is required' });
 
   const body = req.body as { serviceIds?: unknown };
@@ -163,8 +164,9 @@ router.put('/:id/services', async (req, res) => {
   });
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
+  const id = req.params.id as string;
   const { name, email, phone, role, specialties, active } = req.body;
 
   const updates: Database['public']['Tables']['staff']['Update'] = {};
@@ -181,7 +183,7 @@ router.put('/:id', async (req, res) => {
   const { data, error } = await supabase
     .from('staff')
     .update(updates)
-    .eq('id', req.params.id)
+    .eq('id', id)
     .eq('salon_id', salonId)
     .select('*')
     .single();
@@ -192,12 +194,13 @@ router.put('/:id', async (req, res) => {
   res.json(mapStaff(data, serviceIdsByStaff.get(data.id) ?? []));
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
+  const id = req.params.id as string;
   const { data, error } = await supabase
     .from('staff')
     .update({ active: false })
-    .eq('id', req.params.id)
+    .eq('id', id)
     .eq('salon_id', salonId)
     .select('*')
     .single();

@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js';
 import { getSalonId } from '../lib/salonContext.js';
 import { formatTimeValue } from '../lib/mappers.js';
 import { isValidHhMm, isValidIsoDate, timeOrderOk } from '../lib/scheduleSlots.js';
+import { requireSalonWriteAccess } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -208,7 +209,7 @@ router.get('/weekly', async (req, res) => {
 });
 
 /** PUT /api/schedule/salon-weekly */
-router.put('/salon-weekly', async (req, res) => {
+router.put('/salon-weekly', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
   const parsed = parseHoursArray((req.body as { hours?: unknown })?.hours);
   if (!parsed.ok) return res.status(400).json({ error: parsed.error });
@@ -234,9 +235,9 @@ router.put('/salon-weekly', async (req, res) => {
 });
 
 /** PUT /api/schedule/staff/:staffId/weekly */
-router.put('/staff/:staffId/weekly', async (req, res) => {
+router.put('/staff/:staffId/weekly', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
-  const staffId = req.params.staffId?.trim();
+  const staffId = (req.params.staffId as string)?.trim();
   if (!staffId) return res.status(400).json({ error: 'staffId is required' });
 
   const staffCheck = await assertStaffInSalon(salonId, staffId);
@@ -302,7 +303,7 @@ router.get('/exceptions', async (req, res) => {
 });
 
 /** POST /api/schedule/exceptions */
-router.post('/exceptions', async (req, res) => {
+router.post('/exceptions', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
   const body = req.body as Record<string, unknown>;
 
@@ -375,9 +376,9 @@ router.post('/exceptions', async (req, res) => {
 });
 
 /** DELETE /api/schedule/exceptions/:id */
-router.delete('/exceptions/:id', async (req, res) => {
+router.delete('/exceptions/:id', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
-  const id = req.params.id?.trim();
+  const id = (req.params.id as string)?.trim();
   if (!id) return res.status(400).json({ error: 'id is required' });
 
   const { data, error } = await (supabase as any)
