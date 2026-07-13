@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import WeeklyHoursEditor from '@/components/schedule/WeeklyHoursEditor';
 import ExceptionsPanel from '@/components/schedule/ExceptionsPanel';
 import { api } from '@/lib/api';
@@ -26,6 +26,26 @@ const HOURS_VALIDATION_KEY: Record<string, TranslationKey> = {
 
 const TOAST_MS = 3500;
 
+/** Stable snapshot for dirty comparison (matches PUT body shape). */
+function daysSnapshot(days: DayHoursEdit[]): string {
+  return JSON.stringify(dayEditsToPayload(days));
+}
+
+/**
+ * Map GET schedule into editor days.
+ * staffWeekly: [] → inherit salon (or legacy fallback if salon also empty).
+ * Does not invent open days for missing weekdays when configured rows exist.
+ */
+function scheduleToEditorDays(schedule: StaffPortalSchedule): DayHoursEdit[] {
+  if (schedule.staffWeekly.length > 0) {
+    return rowsToDayEdits(schedule.staffWeekly);
+  }
+  if (schedule.salonWeekly.length > 0) {
+    return rowsToDayEdits(schedule.salonWeekly);
+  }
+  return emptyWeekOpen();
+}
+
 function weekdayLabel(weekday: number, t: (k: TranslationKey) => string): string {
   if (weekday >= 1 && weekday <= 7) {
     return t(`schedule.weekday.${weekday}` as TranslationKey);
@@ -48,6 +68,7 @@ export default function StaffSchedule() {
   const { t } = useLanguage();
   const [data, setData] = useState<StaffPortalSchedule | null>(null);
   const [days, setDays] = useState<DayHoursEdit[]>(emptyWeekOpen);
+  const [baselineSnapshot, setBaselineSnapshot] = useState(() => daysSnapshot(emptyWeekOpen()));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [savingHours, setSavingHours] = useState(false);
@@ -69,8 +90,10 @@ export default function StaffSchedule() {
   }, []);
 
   const applySchedule = useCallback((schedule: StaffPortalSchedule) => {
+    const nextDays = scheduleToEditorDays(schedule);
     setData(schedule);
-    setDays(rowsToDayEdits(schedule.staffWeekly));
+    setDays(nextDays);
+    setBaselineSnapshot(daysSnapshot(nextDays));
   }, []);
 
   const load = useCallback(async () => {
@@ -94,8 +117,16 @@ export default function StaffSchedule() {
     void load();
   }, [load]);
 
+  const isInherited = (data?.staffWeekly.length ?? 0) === 0;
+  const usesSystemFallback =
+    isInherited && (data?.salonWeekly.length ?? 0) === 0;
+  const isDirty = useMemo(
+    () => daysSnapshot(days) !== baselineSnapshot,
+    [days, baselineSnapshot]
+  );
+
   const saveHours = async () => {
-    if (savingHours) return;
+    if (savingHours || !isDirty) return;
     const validation = validateWeeklyHours(days);
     if (validation) {
       setHoursError(t(HOURS_VALIDATION_KEY[validation] ?? 'schedule.error.generic'));
@@ -210,6 +241,31 @@ export default function StaffSchedule() {
             {t('staffPortal.schedule.myHoursHint')}
           </p>
         </div>
+
+        {isInherited && !usesSystemFallback ? (
+          <div
+            className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm text-sky-900 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-100"
+            role="status"
+          >
+            <p className="font-medium">{t('staffPortal.schedule.inheritedBadge')}</p>
+            <p className="mt-1 text-xs text-sky-800 dark:text-sky-200/90">
+              {t('staffPortal.schedule.inheritedHint')}
+            </p>
+          </div>
+        ) : null}
+
+        {usesSystemFallback ? (
+          <div
+            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100"
+            role="status"
+          >
+            <p className="font-medium">{t('staffPortal.schedule.fallbackBadge')}</p>
+            <p className="mt-1 text-xs text-amber-800 dark:text-amber-200/90">
+              {t('staffPortal.schedule.fallbackHint')}
+            </p>
+          </div>
+        ) : null}
+
         <WeeklyHoursEditor days={days} onChange={setDays} disabled={busy} />
         {hoursError ? (
           <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
@@ -219,7 +275,7 @@ export default function StaffSchedule() {
         <button
           type="button"
           className="btn-primary w-full sm:w-auto"
-          disabled={busy}
+          disabled={busy || !isDirty}
           onClick={() => void saveHours()}
         >
           {savingHours ? t('common.saving') : t('schedule.saveHours')}

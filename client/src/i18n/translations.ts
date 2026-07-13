@@ -611,6 +611,12 @@ const en = {
   'staffPortal.schedule.subtitle': 'Working hours and days off',
   'staffPortal.schedule.myHours': 'My working hours',
   'staffPortal.schedule.myHoursHint': 'Set your weekly days and hours. All seven days are saved together.',
+  'staffPortal.schedule.inheritedBadge': 'Using salon schedule',
+  'staffPortal.schedule.inheritedHint':
+    'You currently follow the salon schedule. Personal hours are created only after you save changes.',
+  'staffPortal.schedule.fallbackBadge': 'System fallback hours',
+  'staffPortal.schedule.fallbackHint':
+    'No salon weekly schedule is configured. These hours are a temporary system default, not a saved personal schedule.',
   'staffPortal.schedule.myExceptions': 'My exceptions',
   'staffPortal.schedule.myExceptionsHint': 'Days off, vacation, or temporary hours for yourself only.',
   'staffPortal.schedule.salonHours': 'Salon hours',
@@ -1228,6 +1234,12 @@ const ru: Record<TranslationKey, string> = {
   'staffPortal.schedule.subtitle': 'Рабочие часы и выходные',
   'staffPortal.schedule.myHours': 'Мои рабочие часы',
   'staffPortal.schedule.myHoursHint': 'Задайте дни и часы на неделю. Все семь дней сохраняются вместе.',
+  'staffPortal.schedule.inheritedBadge': 'Используется расписание салона',
+  'staffPortal.schedule.inheritedHint':
+    'Сейчас вы работаете по расписанию салона. Личные часы появятся только после сохранения изменений.',
+  'staffPortal.schedule.fallbackBadge': 'Системные часы по умолчанию',
+  'staffPortal.schedule.fallbackHint':
+    'Расписание салона не задано. Показаны временные системные часы, а не сохранённое личное расписание.',
   'staffPortal.schedule.myExceptions': 'Мои исключения',
   'staffPortal.schedule.myExceptionsHint': 'Выходные, отпуск или временный график только для вас.',
   'staffPortal.schedule.salonHours': 'Часы салона',
@@ -1843,6 +1855,12 @@ const hy: Record<TranslationKey, string> = {
   'staffPortal.schedule.subtitle': 'Աշխատանքային ժամեր և հանգստյան օրեր',
   'staffPortal.schedule.myHours': 'Իմ աշխատանքային ժամերը',
   'staffPortal.schedule.myHoursHint': 'Սահմանեք շաբաթվա օրերն ու ժամերը։ Բոլոր յոթ օրերը պահպանվում են միասին։',
+  'staffPortal.schedule.inheritedBadge': 'Օգտագործվում է սրահի գրաֆիկը',
+  'staffPortal.schedule.inheritedHint':
+    'Դուք այժմ աշխատում եք սրահի գրաֆիկով։ Անձնական ժամերը կստեղծվեն միայն փոփոխությունները պահպանելուց հետո։',
+  'staffPortal.schedule.fallbackBadge': 'Համակարգային լռելյայն ժամեր',
+  'staffPortal.schedule.fallbackHint':
+    'Սրահի շաբաթական գրաֆիկ սահմանված չէ։ Ցուցադրվում են ժամանակավոր համակարգային ժամեր, ոչ թե պահպանված անձնական գրաֆիկ։',
   'staffPortal.schedule.myExceptions': 'Իմ բացառությունները',
   'staffPortal.schedule.myExceptionsHint': 'Հանգստյան օրեր, արձակուրդ կամ ժամանակավոր գրաֆիկ միայն ձեզ համար։',
   'staffPortal.schedule.salonHours': 'Սրահի ժամեր',
