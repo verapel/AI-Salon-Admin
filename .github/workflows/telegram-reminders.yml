@@ -1,0 +1,35 @@
+name: Telegram Appointment Reminders
+
+# R1D first-ship: manual only. Cron (*/5) is deferred to R1E after deploy + dry-run.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-reminders
+  cancel-in-progress: false
+
+jobs:
+  send-reminders:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify BIRTHDAY_CRON_SECRET is configured
+        env:
+          BIRTHDAY_CRON_SECRET: ${{ secrets.BIRTHDAY_CRON_SECRET }}
+        run: |
+          if [ -z "${BIRTHDAY_CRON_SECRET}" ]; then
+            echo "BIRTHDAY_CRON_SECRET is not configured"
+            exit 1
+          fi
+
+      - name: Call telegram reminders endpoint
+        env:
+          BIRTHDAY_CRON_SECRET: ${{ secrets.BIRTHDAY_CRON_SECRET }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "x-cron-secret: ${BIRTHDAY_CRON_SECRET}" \
+            "https://ai-salon-admin.onrender.com/api/internal/telegram-reminders"
