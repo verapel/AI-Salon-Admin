@@ -135,6 +135,7 @@ export interface Database {
           blocked_at: string | null;
           blocked_reason: string | null;
           birthday: string | null;
+          telegram_chat_id: number | null;
           salon_id: string | null;
         };
         Insert: {
@@ -150,6 +151,7 @@ export interface Database {
           blocked_at?: string | null;
           blocked_reason?: string | null;
           birthday?: string | null;
+          telegram_chat_id?: number | null;
           salon_id?: string | null;
         };
         Update: {
@@ -165,6 +167,7 @@ export interface Database {
           blocked_at?: string | null;
           blocked_reason?: string | null;
           birthday?: string | null;
+          telegram_chat_id?: number | null;
           salon_id?: string | null;
         };
         Relationships: [];
@@ -317,32 +320,47 @@ export interface Database {
         Row: {
           id: string;
           appointment_id: string;
-          type: 'email' | 'sms';
+          type: 'email' | 'sms' | 'telegram';
           scheduled_for: string;
-          status: 'pending' | 'sent' | 'failed';
+          status: 'pending' | 'sent' | 'failed' | 'skipped';
           message: string;
           created_at: string;
           salon_id: string | null;
+          sent_at: string | null;
+          last_error: string | null;
+          claimed_at: string | null;
+          claim_token: string | null;
+          attempt_count: number;
         };
         Insert: {
           id?: string;
           appointment_id: string;
-          type?: 'email' | 'sms';
+          type?: 'email' | 'sms' | 'telegram';
           scheduled_for: string;
-          status?: 'pending' | 'sent' | 'failed';
+          status?: 'pending' | 'sent' | 'failed' | 'skipped';
           message?: string;
           created_at?: string;
           salon_id?: string | null;
+          sent_at?: string | null;
+          last_error?: string | null;
+          claimed_at?: string | null;
+          claim_token?: string | null;
+          attempt_count?: number;
         };
         Update: {
           id?: string;
           appointment_id?: string;
-          type?: 'email' | 'sms';
+          type?: 'email' | 'sms' | 'telegram';
           scheduled_for?: string;
-          status?: 'pending' | 'sent' | 'failed';
+          status?: 'pending' | 'sent' | 'failed' | 'skipped';
           message?: string;
           created_at?: string;
           salon_id?: string | null;
+          sent_at?: string | null;
+          last_error?: string | null;
+          claimed_at?: string | null;
+          claim_token?: string | null;
+          attempt_count?: number;
         };
         Relationships: [];
       };

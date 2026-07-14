@@ -13,7 +13,7 @@ const LOCALE: Record<LangCode, string> = {
   hy: 'hy-AM',
 };
 
-type StatusFilter = 'all' | Reminder['status'];
+type StatusFilter = 'all' | 'pending' | 'sent' | 'failed';
 
 const FILTERS: StatusFilter[] = ['all', 'pending', 'sent', 'failed'];
 
@@ -27,10 +27,12 @@ const FILTER_KEYS: Record<StatusFilter, TranslationKey> = {
 const formatTime24 = (time: string) => time.slice(0, 5);
 
 function statusLabel(status: Reminder['status'], t: (key: TranslationKey) => string) {
+  if (status === 'skipped') return t('reminders.status.skipped');
   return t(`reminders.status.${status}` as TranslationKey);
 }
 
 function typeLabel(type: Reminder['type'], t: (key: TranslationKey) => string) {
+  if (type === 'telegram') return t('reminders.typeTelegram');
   return type === 'email' ? t('reminders.typeEmail') : t('reminders.typeSms');
 }
 

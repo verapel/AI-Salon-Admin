@@ -59,9 +59,9 @@ export interface Appointment {
 export interface Reminder {
   id: string;
   appointmentId: string;
-  type: 'email' | 'sms';
+  type: 'email' | 'sms' | 'telegram';
   scheduledFor: string;
-  status: 'pending' | 'sent' | 'failed';
+  status: 'pending' | 'sent' | 'failed' | 'skipped';
   message: string;
   clientName?: string;
   appointmentDate?: string;
