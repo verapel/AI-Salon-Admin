@@ -3,6 +3,8 @@ name: Telegram Appointment Reminders
 # R1D first-ship: manual only. Cron (*/5) is deferred to R1E after deploy + dry-run.
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
 
 permissions:
   contents: read
