@@ -3,6 +3,10 @@ import { supabase } from '../lib/supabase.js';
 import { computeEndTime, mapEnrichedAppointment } from '../lib/mappers.js';
 import { getSalonId } from '../lib/salonContext.js';
 import { requireSalonWriteAccess } from '../middleware/auth.js';
+import {
+  skipPendingRemindersForAppointment,
+  syncAppointmentReminder,
+} from '../lib/appointmentReminders.js';
 import type { Appointment } from '../types.js';
 import type { Database } from '../types/database.js';
 
@@ -108,13 +112,11 @@ router.post('/', requireSalonWriteAccess, async (req, res) => {
 
   if (aptError || !appointment) return res.status(500).json({ error: aptError?.message });
 
-  await supabase.from('reminders').insert({
-    appointment_id: appointment.id,
-    type: 'email',
-    scheduled_for: `${date}T08:00:00`,
-    status: 'pending',
-    message: `Reminder: Your appointment on ${date} at ${startTime}`,
-    salon_id: salonId,
+  await syncAppointmentReminder({
+    salonId,
+    appointmentId: appointment.id,
+    appointmentDate: date,
+    startTime,
   });
 
   const { data, error } = await supabase
@@ -196,18 +198,17 @@ router.put('/:id', requireSalonWriteAccess, async (req, res) => {
       .single();
 
     if (apptForReminder) {
-      const reminderDate = apptForReminder.date;
-      const reminderTime = apptForReminder.start_time?.slice(0, 5) ?? '';
-      await supabase
-        .from('reminders')
-        .update({
-          scheduled_for: `${reminderDate}T08:00:00`,
-          message: `Reminder: Your appointment on ${reminderDate} at ${reminderTime}`,
-        })
-        .eq('appointment_id', id)
-        .eq('salon_id', salonId)
-        .eq('status', 'pending');
+      await syncAppointmentReminder({
+        salonId,
+        appointmentId: id,
+        appointmentDate: apptForReminder.date,
+        startTime: apptForReminder.start_time,
+      });
     }
+  }
+
+  if (status === 'cancelled') {
+    await skipPendingRemindersForAppointment({ salonId, appointmentId: id });
   }
 
   if (status === 'completed') {
@@ -254,12 +255,7 @@ router.delete('/:id', requireSalonWriteAccess, async (req, res) => {
 
   if (error || !data) return res.status(404).json({ error: 'Appointment not found' });
 
-  await supabase
-    .from('reminders')
-    .update({ status: 'failed', message: 'Cancelled — appointment was cancelled' })
-    .eq('appointment_id', id)
-    .eq('salon_id', salonId)
-    .eq('status', 'pending');
+  await skipPendingRemindersForAppointment({ salonId, appointmentId: id });
 
   const { data: enriched, error: fetchError } = await supabase
     .from('appointments')

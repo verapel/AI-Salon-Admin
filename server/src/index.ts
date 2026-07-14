@@ -65,6 +65,11 @@ import {
   getSalonTimezone,
   NO_AVAILABLE_DATES_MESSAGE,
 } from './lib/scheduleSlots.js';
+import {
+  persistClientTelegramChatId,
+  skipPendingRemindersForAppointment,
+  syncAppointmentReminder,
+} from './lib/appointmentReminders.js';
 
 const app = express();
 
@@ -786,7 +791,16 @@ async function generateAIResponse(
         clientId = existingClient.id;
       } else {
         const { data: newClient, error: insertClientError } = await (supabase as any)
-          .from("clients").insert({ salon_id: ctx.salonId, name, phone, email: "" }).select("id").single();
+          .from("clients")
+          .insert({
+            salon_id: ctx.salonId,
+            name,
+            phone,
+            email: "",
+            telegram_chat_id: chatId,
+          })
+          .select("id")
+          .single();
         if (insertClientError || !newClient) {
           console.error("Client insert error:", insertClientError);
           bookingState.delete(stateKey); chatHistory.delete(stateKey);
@@ -795,6 +809,13 @@ async function generateAIResponse(
         clientId = newClient.id;
         isNewClient = true;
       }
+
+      // Durable Telegram recipient for future 24h reminders (never null).
+      await persistClientTelegramChatId({
+        salonId: ctx.salonId,
+        clientId,
+        chatId,
+      });
 
       // 3. Получить услугу и мастера из каталога салона
       const serviceRow = await resolveServiceByName(ctx.salonId, service);
@@ -871,13 +892,11 @@ async function generateAIResponse(
         return "Не удалось создать запись. Попробуйте ещё раз или обратитесь к администратору.";
       }
 
-      await (supabase as any).from('reminders').insert({
-        salon_id: ctx.salonId,
-        appointment_id: appointment.id,
-        type: 'email',
-        scheduled_for: `${appointmentDate}T08:00:00`,
-        status: 'pending',
-        message: `Reminder: Your appointment on ${appointmentDate} at ${appointmentTime}`,
+      await syncAppointmentReminder({
+        salonId: ctx.salonId,
+        appointmentId: appointment.id,
+        appointmentDate,
+        startTime: appointmentTime,
       });
 
       // 6. Подтверждение клиенту (живым текстом, без служебных данных)
@@ -1446,12 +1465,10 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
             if (error) {
               await sendTelegramMessage(cqChatId, 'Не удалось отменить запись. Попробуйте ещё раз.', botToken);
             } else {
-              await (supabase as any)
-                .from('reminders')
-                .update({ status: 'failed', message: 'Cancelled — appointment was cancelled' })
-                .eq('salon_id', tgSalonId)
-                .eq('appointment_id', appointmentId)
-                .eq('status', 'pending');
+              await skipPendingRemindersForAppointment({
+                salonId: tgSalonId,
+                appointmentId,
+              });
               manageState.delete(cqStateKey);
               await sendTelegramMessage(cqChatId, 'Запись отменена. Будем рады видеть вас снова! 🌸', botToken);
               const info = apptInfo ? formatAppointmentForUser(apptInfo) : `ID: ${appointmentId}`;
@@ -1592,15 +1609,12 @@ async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Pr
             if (error) {
               await sendTelegramMessage(cqChatId, 'Не удалось перенести запись. Попробуйте ещё раз.', botToken);
             } else {
-              await (supabase as any)
-                .from('reminders')
-                .update({
-                  scheduled_for: `${newDate}T08:00:00`,
-                  message: `Reminder: Your appointment on ${newDate} at ${newTime}`,
-                })
-                .eq('salon_id', tgSalonId)
-                .eq('appointment_id', appointmentId)
-                .eq('status', 'pending');
+              await syncAppointmentReminder({
+                salonId: tgSalonId,
+                appointmentId,
+                appointmentDate: newDate,
+                startTime: parsedTime,
+              });
               manageState.delete(cqStateKey);
               const formattedDate = formatDateForUser(newDate);
               await sendTelegramMessage(cqChatId, `Готово! Запись перенесена на ${formattedDate} в ${newTime} ✨`, botToken);
