@@ -36,6 +36,9 @@ export interface Staff {
   serviceIds?: string[];
 }
 
+/** Origin of an appointment. API falls back to 'owner' when DB value is null. */
+export type AppointmentSource = 'telegram' | 'owner' | 'apple';
+
 export interface Appointment {
   id: string;
   clientId: string;
@@ -48,6 +51,7 @@ export interface Appointment {
   notes: string;
   reminderSent: boolean;
   createdAt: string;
+  source: AppointmentSource;
   clientName?: string;
   clientBirthday?: string | null;
   staffName?: string;

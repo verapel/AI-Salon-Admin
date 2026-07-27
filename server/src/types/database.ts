@@ -25,6 +25,19 @@ export type SalonMemberRole = 'owner' | 'admin' | 'staff_readonly';
 
 export type PlatformUserRole = 'developer';
 
+/** Origin of an appointment row. NULL in DB = legacy/unknown. */
+export type AppointmentSource = 'telegram' | 'owner' | 'apple';
+
+export type CalendarProvider = 'apple' | 'google';
+
+export type CalendarConnectionStatus =
+  | 'disconnected'
+  | 'connected'
+  | 'error'
+  | 'disabled';
+
+export type CalendarImportIssueStatus = 'open' | 'resolved' | 'dismissed';
+
 export interface Database {
   public: {
     Tables: {
@@ -285,6 +298,7 @@ export interface Database {
           reminder_sent: boolean;
           created_at: string;
           salon_id: string | null;
+          source: AppointmentSource | null;
         };
         Insert: {
           id?: string;
@@ -299,6 +313,7 @@ export interface Database {
           reminder_sent?: boolean;
           created_at?: string;
           salon_id?: string | null;
+          source?: AppointmentSource | null;
         };
         Update: {
           id?: string;
@@ -313,6 +328,223 @@ export interface Database {
           reminder_sent?: boolean;
           created_at?: string;
           salon_id?: string | null;
+          source?: AppointmentSource | null;
+        };
+        Relationships: [];
+      };
+      calendar_connections: {
+        Row: {
+          id: string;
+          salon_id: string;
+          provider: CalendarProvider;
+          account_email: string | null;
+          credential_ciphertext: string | null;
+          credential_iv: string | null;
+          credential_auth_tag: string | null;
+          selected_calendar_id: string | null;
+          selected_calendar_url: string | null;
+          selected_calendar_name: string | null;
+          provider_config: Json;
+          status: CalendarConnectionStatus;
+          import_enabled: boolean;
+          last_sync_at: string | null;
+          last_sync_started_at: string | null;
+          sync_lock_token: string | null;
+          last_error: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          provider: CalendarProvider;
+          account_email?: string | null;
+          credential_ciphertext?: string | null;
+          credential_iv?: string | null;
+          credential_auth_tag?: string | null;
+          selected_calendar_id?: string | null;
+          selected_calendar_url?: string | null;
+          selected_calendar_name?: string | null;
+          provider_config?: Json;
+          status?: CalendarConnectionStatus;
+          import_enabled?: boolean;
+          last_sync_at?: string | null;
+          last_sync_started_at?: string | null;
+          sync_lock_token?: string | null;
+          last_error?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          provider?: CalendarProvider;
+          account_email?: string | null;
+          credential_ciphertext?: string | null;
+          credential_iv?: string | null;
+          credential_auth_tag?: string | null;
+          selected_calendar_id?: string | null;
+          selected_calendar_url?: string | null;
+          selected_calendar_name?: string | null;
+          provider_config?: Json;
+          status?: CalendarConnectionStatus;
+          import_enabled?: boolean;
+          last_sync_at?: string | null;
+          last_sync_started_at?: string | null;
+          sync_lock_token?: string | null;
+          last_error?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      appointment_external_links: {
+        Row: {
+          id: string;
+          salon_id: string;
+          appointment_id: string;
+          calendar_connection_id: string;
+          provider: CalendarProvider;
+          external_calendar_id: string | null;
+          external_uid: string;
+          recurrence_id: string;
+          external_etag: string | null;
+          external_sequence: number | null;
+          external_last_modified: string | null;
+          last_seen_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          appointment_id: string;
+          calendar_connection_id: string;
+          provider: CalendarProvider;
+          external_calendar_id?: string | null;
+          external_uid: string;
+          recurrence_id?: string;
+          external_etag?: string | null;
+          external_sequence?: number | null;
+          external_last_modified?: string | null;
+          last_seen_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          appointment_id?: string;
+          calendar_connection_id?: string;
+          provider?: CalendarProvider;
+          external_calendar_id?: string | null;
+          external_uid?: string;
+          recurrence_id?: string;
+          external_etag?: string | null;
+          external_sequence?: number | null;
+          external_last_modified?: string | null;
+          last_seen_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      calendar_mapping_rules: {
+        Row: {
+          id: string;
+          salon_id: string;
+          calendar_connection_id: string | null;
+          keyword: string;
+          normalized_keyword: string;
+          staff_id: string | null;
+          service_id: string | null;
+          default_duration_minutes: number | null;
+          active: boolean;
+          priority: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          calendar_connection_id?: string | null;
+          keyword: string;
+          normalized_keyword: string;
+          staff_id?: string | null;
+          service_id?: string | null;
+          default_duration_minutes?: number | null;
+          active?: boolean;
+          priority?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          calendar_connection_id?: string | null;
+          keyword?: string;
+          normalized_keyword?: string;
+          staff_id?: string | null;
+          service_id?: string | null;
+          default_duration_minutes?: number | null;
+          active?: boolean;
+          priority?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      calendar_import_issues: {
+        Row: {
+          id: string;
+          salon_id: string;
+          calendar_connection_id: string;
+          external_uid: string;
+          recurrence_id: string;
+          external_etag: string | null;
+          raw_event: Json;
+          parsed_event: Json;
+          reason_code: string;
+          reason_message: string | null;
+          status: CalendarImportIssueStatus;
+          resolved_appointment_id: string | null;
+          resolved_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          calendar_connection_id: string;
+          external_uid: string;
+          recurrence_id?: string;
+          external_etag?: string | null;
+          raw_event?: Json;
+          parsed_event?: Json;
+          reason_code: string;
+          reason_message?: string | null;
+          status?: CalendarImportIssueStatus;
+          resolved_appointment_id?: string | null;
+          resolved_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          calendar_connection_id?: string;
+          external_uid?: string;
+          recurrence_id?: string;
+          external_etag?: string | null;
+          raw_event?: Json;
+          parsed_event?: Json;
+          reason_code?: string;
+          reason_message?: string | null;
+          status?: CalendarImportIssueStatus;
+          resolved_appointment_id?: string | null;
+          resolved_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
         };
         Relationships: [];
       };

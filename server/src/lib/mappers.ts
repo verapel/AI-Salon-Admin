@@ -99,6 +99,7 @@ export function mapAppointment(row: {
   notes: string;
   reminder_sent: boolean;
   created_at: string;
+  source?: Appointment['source'] | null;
 }): Appointment {
   return {
     id: row.id,
@@ -112,6 +113,8 @@ export function mapAppointment(row: {
     notes: row.notes,
     reminderSent: row.reminder_sent,
     createdAt: row.created_at,
+    // Legacy/null rows and pre-migration responses fall back to owner.
+    source: row.source ?? 'owner',
   };
 }
 
@@ -127,6 +130,7 @@ type AppointmentJoinRow = {
   notes: string;
   reminder_sent: boolean;
   created_at: string;
+  source?: Appointment['source'] | null;
   clients: { name: string; birthday: string | null } | null;
   staff: { name: string } | null;
   services: { name: string; price: number; duration: number } | null;
