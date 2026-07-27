@@ -49,6 +49,7 @@ Use nginx/Caddy as reverse proxy with HTTPS. Set `PORT=3001` and proxy `/` to th
 | `TELEGRAM_CHAT_ID` | Recommended | Admin notifications |
 | `APP_URL` | Recommended | Public URL |
 | `TELEGRAM_BOT_TOKEN` | Optional | Or connect via Integrations UI |
+| `CALENDAR_CREDENTIALS_ENCRYPTION_KEY` | Optional until Apple connect | Base64 32-byte AES-256-GCM key; encrypt/decrypt fail closed if missing |
 
 ## Post-deploy verification
 

@@ -113,3 +113,40 @@ export interface ScheduleWeeklyResponse {
   salon: WeeklyHoursRow[];
   staff: Record<string, WeeklyHoursRow[]>;
 }
+
+/** Safe calendar connection metadata for owner APIs (no credential material). */
+export type CalendarConnectionStatus =
+  | 'disconnected'
+  | 'connected'
+  | 'error'
+  | 'disabled';
+
+export type CalendarProvider = 'apple' | 'google';
+
+export interface CalendarConnectionPublic {
+  id: string;
+  provider: CalendarProvider;
+  accountEmail: string | null;
+  selectedCalendarId: string | null;
+  selectedCalendarName: string | null;
+  selectedCalendarUrl: string | null;
+  status: CalendarConnectionStatus;
+  importEnabled: boolean;
+  lastSyncAt: string | null;
+  lastSyncStartedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** True when encrypted credential material is stored (not CalDAV-verified). */
+  isCredentialStored: boolean;
+  /**
+   * True when credentials are stored but Apple/CalDAV has not been verified yet.
+   * APPLE-A3B does not verify with Apple.
+   */
+  verificationPending: boolean;
+}
+
+export interface AppleCalendarConnectRequest {
+  accountEmail: string;
+  appSpecificPassword: string;
+}

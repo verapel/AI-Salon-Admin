@@ -20,6 +20,7 @@ import developerRouter from './routes/developer.js';
 import authRouter from './routes/auth.js';
 import internalRouter from './routes/internal.js';
 import staffPortalRouter from './routes/staffPortal.js';
+import calendarConnectionsRouter from './routes/calendarConnections.js';
 import {
   requireDeveloperAuth,
   requireSalonAuth,
@@ -1172,6 +1173,7 @@ app.use('/api/staff', salonAuth, requireSalonCabinetAccess, staffRouter);
 app.use('/api/appointments', salonAuth, requireSalonCabinetAccess, appointmentsRouter);
 app.use('/api/stats', salonAuth, requireSalonCabinetAccess, statsRouter);
 app.use('/api/schedule', salonAuth, requireSalonCabinetAccess, scheduleRouter);
+app.use('/api/calendar', salonAuth, requireSalonCabinetAccess, calendarConnectionsRouter);
 app.use('/api/staff-portal', salonAuth, requireStaffPortalAccess, staffPortalRouter);
 app.use('/api/developer', developerAuth, developerRouter);
 
