@@ -38,6 +38,22 @@ export type CalendarConnectionStatus =
 
 export type CalendarImportIssueStatus = 'open' | 'resolved' | 'dismissed';
 
+/** Meta WhatsApp Cloud API architecture marker. */
+export type WhatsAppCloudProvider = 'meta_cloud';
+
+/** Channel identity providers for client_channel_identities. */
+export type ClientChannelProvider = 'telegram' | 'whatsapp';
+
+/** Providers for channel_event_receipts / channel_conversations (WA-1: WhatsApp only). */
+export type ChannelMessagingProvider = 'whatsapp';
+
+export type ChannelEventProcessingStatus =
+  | 'received'
+  | 'processing'
+  | 'processed'
+  | 'failed'
+  | 'ignored';
+
 export interface Database {
   public: {
     Tables: {
@@ -798,6 +814,252 @@ export interface Database {
           sent_at?: string | null;
           last_error?: string | null;
           attempt_count?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      whatsapp_business_connections: {
+        Row: {
+          id: string;
+          salon_id: string;
+          integration_id: string;
+          provider: WhatsAppCloudProvider;
+          business_account_id: string | null;
+          phone_number_id: string | null;
+          display_phone_number: string | null;
+          verified_name: string | null;
+          access_token_ciphertext: string | null;
+          access_token_iv: string | null;
+          access_token_auth_tag: string | null;
+          app_secret_ciphertext: string | null;
+          app_secret_iv: string | null;
+          app_secret_auth_tag: string | null;
+          verify_token_ciphertext: string | null;
+          verify_token_iv: string | null;
+          verify_token_auth_tag: string | null;
+          token_expires_at: string | null;
+          last_webhook_at: string | null;
+          last_inbound_at: string | null;
+          last_outbound_at: string | null;
+          quality_rating: string | null;
+          messaging_limit_tier: string | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          integration_id: string;
+          provider?: WhatsAppCloudProvider;
+          business_account_id?: string | null;
+          phone_number_id?: string | null;
+          display_phone_number?: string | null;
+          verified_name?: string | null;
+          access_token_ciphertext?: string | null;
+          access_token_iv?: string | null;
+          access_token_auth_tag?: string | null;
+          app_secret_ciphertext?: string | null;
+          app_secret_iv?: string | null;
+          app_secret_auth_tag?: string | null;
+          verify_token_ciphertext?: string | null;
+          verify_token_iv?: string | null;
+          verify_token_auth_tag?: string | null;
+          token_expires_at?: string | null;
+          last_webhook_at?: string | null;
+          last_inbound_at?: string | null;
+          last_outbound_at?: string | null;
+          quality_rating?: string | null;
+          messaging_limit_tier?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          integration_id?: string;
+          provider?: WhatsAppCloudProvider;
+          business_account_id?: string | null;
+          phone_number_id?: string | null;
+          display_phone_number?: string | null;
+          verified_name?: string | null;
+          access_token_ciphertext?: string | null;
+          access_token_iv?: string | null;
+          access_token_auth_tag?: string | null;
+          app_secret_ciphertext?: string | null;
+          app_secret_iv?: string | null;
+          app_secret_auth_tag?: string | null;
+          verify_token_ciphertext?: string | null;
+          verify_token_iv?: string | null;
+          verify_token_auth_tag?: string | null;
+          token_expires_at?: string | null;
+          last_webhook_at?: string | null;
+          last_inbound_at?: string | null;
+          last_outbound_at?: string | null;
+          quality_rating?: string | null;
+          messaging_limit_tier?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      client_channel_identities: {
+        Row: {
+          id: string;
+          salon_id: string;
+          client_id: string;
+          provider: ClientChannelProvider;
+          external_user_id: string;
+          normalized_address: string | null;
+          display_address: string | null;
+          opt_in_at: string | null;
+          opt_out_at: string | null;
+          last_interaction_at: string | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          client_id: string;
+          provider: ClientChannelProvider;
+          external_user_id: string;
+          normalized_address?: string | null;
+          display_address?: string | null;
+          opt_in_at?: string | null;
+          opt_out_at?: string | null;
+          last_interaction_at?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          client_id?: string;
+          provider?: ClientChannelProvider;
+          external_user_id?: string;
+          normalized_address?: string | null;
+          display_address?: string | null;
+          opt_in_at?: string | null;
+          opt_out_at?: string | null;
+          last_interaction_at?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      channel_event_receipts: {
+        Row: {
+          id: string;
+          salon_id: string;
+          provider: ChannelMessagingProvider;
+          external_event_id: string;
+          external_message_id: string | null;
+          event_type: string | null;
+          payload_hash: string | null;
+          processing_status: ChannelEventProcessingStatus;
+          received_at: string;
+          processed_at: string | null;
+          last_error: string | null;
+          attempt_count: number;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          provider: ChannelMessagingProvider;
+          external_event_id: string;
+          external_message_id?: string | null;
+          event_type?: string | null;
+          payload_hash?: string | null;
+          processing_status?: ChannelEventProcessingStatus;
+          received_at?: string;
+          processed_at?: string | null;
+          last_error?: string | null;
+          attempt_count?: number;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          provider?: ChannelMessagingProvider;
+          external_event_id?: string;
+          external_message_id?: string | null;
+          event_type?: string | null;
+          payload_hash?: string | null;
+          processing_status?: ChannelEventProcessingStatus;
+          received_at?: string;
+          processed_at?: string | null;
+          last_error?: string | null;
+          attempt_count?: number;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      channel_conversations: {
+        Row: {
+          id: string;
+          salon_id: string;
+          provider: ChannelMessagingProvider;
+          external_user_id: string;
+          client_id: string | null;
+          current_flow: string | null;
+          current_step: string | null;
+          state: Json;
+          last_inbound_message_id: string | null;
+          last_outbound_message_id: string | null;
+          last_interaction_at: string | null;
+          expires_at: string | null;
+          locked_at: string | null;
+          lock_token: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          provider: ChannelMessagingProvider;
+          external_user_id: string;
+          client_id?: string | null;
+          current_flow?: string | null;
+          current_step?: string | null;
+          state?: Json;
+          last_inbound_message_id?: string | null;
+          last_outbound_message_id?: string | null;
+          last_interaction_at?: string | null;
+          expires_at?: string | null;
+          locked_at?: string | null;
+          lock_token?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          provider?: ChannelMessagingProvider;
+          external_user_id?: string;
+          client_id?: string | null;
+          current_flow?: string | null;
+          current_step?: string | null;
+          state?: Json;
+          last_inbound_message_id?: string | null;
+          last_outbound_message_id?: string | null;
+          last_interaction_at?: string | null;
+          expires_at?: string | null;
+          locked_at?: string | null;
+          lock_token?: string | null;
           created_at?: string;
           updated_at?: string;
         };

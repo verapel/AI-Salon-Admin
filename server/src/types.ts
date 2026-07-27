@@ -150,3 +150,96 @@ export interface AppleCalendarConnectRequest {
   accountEmail: string;
   appSpecificPassword: string;
 }
+
+/** Meta WhatsApp Cloud API architecture marker for whatsapp_business_connections.provider. */
+export type WhatsAppCloudProvider = 'meta_cloud';
+
+/** Channel identity providers for client_channel_identities. */
+export type ClientChannelProvider = 'telegram' | 'whatsapp';
+
+/** Providers that may write channel_event_receipts / channel_conversations (WA-1: WhatsApp only). */
+export type ChannelMessagingProvider = 'whatsapp';
+
+export type ChannelEventProcessingStatus =
+  | 'received'
+  | 'processing'
+  | 'processed'
+  | 'failed'
+  | 'ignored';
+
+/**
+ * Safe WhatsApp Business connection metadata for future owner/developer APIs.
+ * Never includes access_token / app_secret / verify_token ciphertext, iv, or auth_tag.
+ */
+export interface WhatsAppBusinessConnectionPublic {
+  id: string;
+  salonId: string;
+  integrationId: string;
+  provider: WhatsAppCloudProvider;
+  businessAccountId: string | null;
+  phoneNumberId: string | null;
+  displayPhoneNumber: string | null;
+  verifiedName: string | null;
+  tokenExpiresAt: string | null;
+  lastWebhookAt: string | null;
+  lastInboundAt: string | null;
+  lastOutboundAt: string | null;
+  qualityRating: string | null;
+  messagingLimitTier: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** True when encrypted access-token material is stored (WA-2+). */
+  isAccessTokenStored: boolean;
+  /** True when encrypted app-secret material is stored (WA-2+). */
+  isAppSecretStored: boolean;
+  /** True when encrypted verify-token material is stored (WA-2+). */
+  isVerifyTokenStored: boolean;
+}
+
+export interface ClientChannelIdentity {
+  id: string;
+  salonId: string;
+  clientId: string;
+  provider: ClientChannelProvider;
+  externalUserId: string;
+  normalizedAddress: string | null;
+  displayAddress: string | null;
+  optInAt: string | null;
+  optOutAt: string | null;
+  lastInteractionAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChannelEventReceipt {
+  id: string;
+  salonId: string;
+  provider: ChannelMessagingProvider;
+  externalEventId: string;
+  externalMessageId: string | null;
+  eventType: string | null;
+  payloadHash: string | null;
+  processingStatus: ChannelEventProcessingStatus;
+  receivedAt: string;
+  processedAt: string | null;
+  lastError: string | null;
+  attemptCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChannelConversation {
+  id: string;
+  salonId: string;
+  provider: ChannelMessagingProvider;
+  externalUserId: string;
+  clientId: string | null;
+  currentFlow: string | null;
+  currentStep: string | null;
+  lastInboundMessageId: string | null;
+  lastOutboundMessageId: string | null;
+  lastInteractionAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
