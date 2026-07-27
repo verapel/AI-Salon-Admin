@@ -71,6 +71,7 @@ export function mapStaff(
     specialties: string[];
     avatar: string;
     active: boolean;
+    is_primary?: boolean | null;
   },
   serviceIds: string[] = []
 ): Staff {
@@ -83,6 +84,7 @@ export function mapStaff(
     specialties: row.specialties ?? [],
     avatar: row.avatar,
     active: row.active,
+    isPrimary: Boolean(row.is_primary),
     serviceIds,
   };
 }

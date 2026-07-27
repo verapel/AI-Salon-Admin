@@ -21,6 +21,13 @@ import {
   resendInviteEmail,
   setMembershipActive,
 } from '../lib/staffAccess.js';
+import {
+  buildStaffDeletePreview,
+  callHardDeleteStaffRpc,
+  countStaffAppointments,
+  evaluateStaffDeleteProtection,
+  loadStaffInSalon,
+} from '../lib/staffHardDelete.js';
 
 const router = Router();
 
@@ -493,6 +500,131 @@ router.delete('/:id', requireSalonWriteAccess, async (req, res) => {
 
   const serviceIdsByStaff = await loadServiceIdsByStaff(salonId, [data.id]);
   res.json(mapStaff(data, serviceIdsByStaff.get(data.id) ?? []));
+});
+
+/** Read-only preview for permanent staff deletion (owner/admin). */
+router.get('/:id/delete-preview', requireSalonWriteAccess, async (req, res) => {
+  const salonId = getSalonId(req);
+  const id = (req.params.id as string)?.trim();
+  if (!id) {
+    return res.status(400).json({ error: 'staff id is required', code: 'BAD_REQUEST' });
+  }
+
+  try {
+    const auth = req.auth;
+    if (!auth) {
+      return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    }
+
+    const preview = await buildStaffDeletePreview(salonId, id, auth);
+    if (!preview) {
+      return res.status(404).json({ error: 'Staff member not found', code: 'STAFF_NOT_FOUND' });
+    }
+
+    return res.json(preview);
+  } catch (err) {
+    console.error('[staff] delete-preview error:', err instanceof Error ? err.message : err);
+    return res.status(500).json({ error: 'Could not load delete preview', code: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * Permanent staff deletion (owner/admin). Soft-delete remains DELETE /:id.
+ * Requires confirm=true. When appointments exist, deleteAppointments must be true.
+ */
+router.delete('/:id/permanent', requireSalonWriteAccess, async (req, res) => {
+  const salonId = getSalonId(req);
+  const id = (req.params.id as string)?.trim();
+  if (!id) {
+    return res.status(400).json({ error: 'staff id is required', code: 'BAD_REQUEST' });
+  }
+
+  const confirm = req.body?.confirm === true;
+  const deleteAppointments = req.body?.deleteAppointments === true;
+
+  if (!confirm) {
+    return res.status(400).json({
+      error: 'confirm must be true',
+      code: 'CONFIRM_REQUIRED',
+    });
+  }
+
+  try {
+    const auth = req.auth;
+    if (!auth) {
+      return res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+    }
+
+    const staff = await loadStaffInSalon(salonId, id);
+    if (!staff) {
+      return res.status(404).json({ error: 'Staff member not found', code: 'STAFF_NOT_FOUND' });
+    }
+
+    const protection = await evaluateStaffDeleteProtection({
+      salonId,
+      staffId: id,
+      staffEmail: staff.email,
+      isPrimary: staff.is_primary,
+      auth,
+    });
+
+    if (protection.protected) {
+      if (protection.protectedReason === 'PRIMARY_STAFF') {
+        return res.status(409).json({
+          code: 'PRIMARY_STAFF_CANNOT_DELETE',
+          message: 'Primary staff member cannot be permanently deleted',
+          error: 'Primary staff member cannot be permanently deleted',
+          protectedReason: protection.protectedReason,
+        });
+      }
+      return res.status(409).json({
+        error: 'Protected staff member cannot be permanently deleted',
+        code: 'PROTECTED_STAFF_MEMBER',
+        protectedReason: protection.protectedReason,
+      });
+    }
+
+    const counts = await countStaffAppointments(salonId, id);
+    if (counts.totalAppointments > 0 && !deleteAppointments) {
+      return res.status(409).json({
+        error: 'Staff member has appointments',
+        code: 'STAFF_HAS_APPOINTMENTS',
+        totalAppointments: counts.totalAppointments,
+        activeAppointments: counts.activeAppointments,
+      });
+    }
+
+    const result = await callHardDeleteStaffRpc({
+      salonId,
+      staffId: id,
+      deleteAppointments,
+    });
+
+    return res.json(result);
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === 'PRIMARY_STAFF_CANNOT_DELETE') {
+      return res.status(409).json({
+        code: 'PRIMARY_STAFF_CANNOT_DELETE',
+        message: 'Primary staff member cannot be permanently deleted',
+        error: 'Primary staff member cannot be permanently deleted',
+      });
+    }
+    if (code === 'STAFF_NOT_FOUND') {
+      return res.status(404).json({ error: 'Staff member not found', code: 'STAFF_NOT_FOUND' });
+    }
+    if (code === 'STAFF_HAS_APPOINTMENTS') {
+      return res.status(409).json({
+        error: 'Staff member has appointments',
+        code: 'STAFF_HAS_APPOINTMENTS',
+        totalAppointments: (err as { totalAppointments?: number }).totalAppointments ?? 0,
+        activeAppointments: (err as { activeAppointments?: number }).activeAppointments ?? 0,
+      });
+    }
+
+    console.error('[staff] permanent delete error:', err instanceof Error ? err.message : err);
+    return res.status(500).json({ error: 'Could not permanently delete staff', code: 'INTERNAL_ERROR' });
+  }
 });
 
 export default router;

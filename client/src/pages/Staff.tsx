@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, Mail, Phone, Users, Clock } from 'lucide-react';
+import { Plus, Pencil, Trash2, UserMinus, Mail, Phone, Users, Clock } from 'lucide-react';
 import SearchInput from '@/components/ui/SearchInput';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
 import StaffScheduleModal from '@/components/schedule/StaffScheduleModal';
+import PermanentDeleteStaffModal from '@/components/staff/PermanentDeleteStaffModal';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import type { Service, Staff as StaffType } from '@/types';
@@ -31,6 +32,8 @@ export default function Staff() {
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [formError, setFormError] = useState('');
   const [scheduleStaff, setScheduleStaff] = useState<StaffType | null>(null);
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<StaffType | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   const loadStaff = () => {
     api.staff
@@ -136,7 +139,7 @@ export default function Staff() {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDeactivate = async (id: string) => {
     if (!confirm(t('staff.deactivateConfirm'))) return;
     if (actionBusy) return;
     setActionBusy(id);
@@ -160,6 +163,15 @@ export default function Staff() {
 
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-clip space-y-4 animate-fade-in">
+      {toast ? (
+        <div
+          className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-900 dark:bg-green-950/40 dark:text-green-200"
+          role="status"
+        >
+          {toast}
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="w-full min-w-0 max-w-full sm:max-w-xs">
           <SearchInput
@@ -210,6 +222,13 @@ export default function Staff() {
                       <p className="truncate text-sm text-brand-600 dark:text-brand-400">
                         {member.role}
                       </p>
+                      {member.isPrimary ? (
+                        <p className="mt-1">
+                          <span className="inline-flex rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-950/40 dark:text-brand-300">
+                            {t('staff.primaryStaff')}
+                          </span>
+                        </p>
+                      ) : null}
                     </div>
                     <div className="flex shrink-0 gap-1.5 transition-opacity sm:gap-1 sm:opacity-0 sm:group-hover:opacity-100">
                       <button
@@ -230,13 +249,25 @@ export default function Staff() {
                         <Pencil className="h-4 w-4" />
                       </button>
                       <button
-                        onClick={() => handleDelete(member.id)}
+                        onClick={() => handleDeactivate(member.id)}
                         disabled={actionBusy === member.id}
-                        className="btn-ghost min-h-[44px] min-w-[44px] p-2 text-red-500 sm:min-h-0 sm:min-w-0 sm:p-1.5"
-                        aria-label={t('staff.deleteAria')}
+                        className="btn-ghost min-h-[44px] min-w-[44px] p-2 text-amber-600 sm:min-h-0 sm:min-w-0 sm:p-1.5"
+                        aria-label={t('staff.deactivateAria')}
+                        title={t('staff.deactivateStaff')}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <UserMinus className="h-4 w-4" />
                       </button>
+                      {!member.isPrimary ? (
+                        <button
+                          onClick={() => setPermanentDeleteTarget(member)}
+                          disabled={actionBusy === member.id}
+                          className="btn-ghost min-h-[44px] min-w-[44px] p-2 text-red-500 sm:min-h-0 sm:min-w-0 sm:p-1.5"
+                          aria-label={t('staff.permanentDeleteAria')}
+                          title={t('staff.permanentDelete')}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      ) : null}
                     </div>
                   </div>
 
@@ -292,6 +323,18 @@ export default function Staff() {
         open={!!scheduleStaff}
         staff={scheduleStaff}
         onClose={() => setScheduleStaff(null)}
+      />
+
+      <PermanentDeleteStaffModal
+        open={!!permanentDeleteTarget}
+        staffId={permanentDeleteTarget?.id ?? null}
+        staffNameHint={permanentDeleteTarget?.name}
+        onClose={() => setPermanentDeleteTarget(null)}
+        onDeleted={() => {
+          setToast(t('staff.deletionSuccess'));
+          window.setTimeout(() => setToast(null), 3200);
+          loadStaff();
+        }}
       />
 
       <Modal

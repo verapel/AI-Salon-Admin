@@ -12,6 +12,7 @@ export interface StaffAccessItem {
   specialties: string[];
   staffEmail: string;
   staffActive: boolean;
+  isPrimary: boolean;
   status: StaffAccessStatus;
   email: string | null;
   active: boolean;
@@ -51,6 +52,7 @@ function mergeRow(member: Staff, access: StaffAccessDto | undefined): StaffAcces
     specialties: member.specialties ?? [],
     staffEmail: member.email,
     staffActive: member.active,
+    isPrimary: Boolean(member.isPrimary),
     status: dto.status,
     email: dto.email,
     active: dto.active,

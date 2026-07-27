@@ -247,6 +247,7 @@ export interface Database {
           specialties: string[];
           avatar: string;
           active: boolean;
+          is_primary: boolean;
           created_at: string;
           salon_id: string | null;
         };
@@ -259,6 +260,7 @@ export interface Database {
           specialties?: string[];
           avatar?: string;
           active?: boolean;
+          is_primary?: boolean;
           created_at?: string;
           salon_id?: string | null;
         };
@@ -271,6 +273,7 @@ export interface Database {
           specialties?: string[];
           avatar?: string;
           active?: boolean;
+          is_primary?: boolean;
           created_at?: string;
           salon_id?: string | null;
         };

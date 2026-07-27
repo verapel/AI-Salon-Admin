@@ -1,10 +1,13 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { KeyRound, ShieldOff, UserPlus, Users } from 'lucide-react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { KeyRound, ShieldOff, Trash2, UserMinus, UserPlus, Users } from 'lucide-react';
 import EmptyState from '@/components/ui/EmptyState';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import Modal from '@/components/ui/Modal';
 import SearchInput from '@/components/ui/SearchInput';
+import PermanentDeleteStaffModal from '@/components/staff/PermanentDeleteStaffModal';
+import { useAuth } from '@/context/AuthContext';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
+import { api } from '@/lib/api';
 import {
   inviteStaff,
   listStaffAccess,
@@ -33,10 +36,14 @@ function applyAccessUpdate(items: StaffAccessItem[], next: StaffAccessItem['staf
 
 export default function StaffAccess() {
   const { t } = useLanguage();
+  const { authInfo } = useAuth();
+  const canManageEmployment = authInfo?.role === 'owner' || authInfo?.role === 'admin';
+
   const [items, setItems] = useState<StaffAccessItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState('');
+  const [showInactive, setShowInactive] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -45,6 +52,7 @@ export default function StaffAccess() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteError, setInviteError] = useState('');
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<StaffAccessItem | null>(null);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -148,17 +156,41 @@ export default function StaffAccess() {
     }
   };
 
-  const query = search.trim().toLowerCase();
-  const filtered = query
-    ? items.filter(
-        (row) =>
-          row.name.toLowerCase().includes(query) ||
-          row.specialty.toLowerCase().includes(query) ||
-          row.staffEmail.toLowerCase().includes(query) ||
-          (row.email || '').toLowerCase().includes(query) ||
-          row.specialties.some((s) => s.toLowerCase().includes(query))
-      )
-    : items;
+  const handleDeactivateEmployment = async (row: StaffAccessItem) => {
+    if (!confirm(t('staff.deactivateConfirm'))) return;
+    setBusyId(row.staffId);
+    setActionError(null);
+    try {
+      await api.staff.delete(row.staffId);
+      setItems((prev) =>
+        applyAccessUpdate(prev, row.staffId, {
+          staffActive: false,
+          canInvite: false,
+        })
+      );
+      showToast(t('staffAccess.toast.deactivate'));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t('staffAccess.error.action'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const visibleItems = useMemo(() => {
+    const base = showInactive ? items : items.filter((row) => row.staffActive);
+    const query = search.trim().toLowerCase();
+    if (!query) return base;
+    return base.filter(
+      (row) =>
+        row.name.toLowerCase().includes(query) ||
+        row.specialty.toLowerCase().includes(query) ||
+        row.staffEmail.toLowerCase().includes(query) ||
+        (row.email || '').toLowerCase().includes(query) ||
+        row.specialties.some((s) => s.toLowerCase().includes(query))
+    );
+  }, [items, search, showInactive]);
+
+  const activeCount = items.filter((row) => row.staffActive).length;
 
   if (loading) return <LoadingSpinner />;
 
@@ -190,25 +222,44 @@ export default function StaffAccess() {
         </div>
       ) : null}
 
-      <div className="w-full min-w-0 max-w-full sm:max-w-xs">
-        <SearchInput
-          value={search}
-          onChange={setSearch}
-          placeholder={t('staffAccess.searchPlaceholder')}
-        />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="w-full min-w-0 max-w-full sm:max-w-xs">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder={t('staffAccess.searchPlaceholder')}
+          />
+        </div>
+        <button
+          type="button"
+          className="btn-secondary w-full text-sm sm:w-auto"
+          onClick={() => setShowInactive((prev) => !prev)}
+        >
+          {showInactive ? t('staff.hideInactiveStaff') : t('staff.showInactiveStaff')}
+        </button>
       </div>
 
-      {filtered.length === 0 ? (
+      {visibleItems.length === 0 ? (
         <EmptyState
           icon={<Users className="h-8 w-8 text-gray-400" />}
-          title={items.length === 0 ? t('staffAccess.empty') : t('staffAccess.noResults')}
+          title={
+            activeCount === 0 && !showInactive
+              ? t('staffAccess.empty')
+              : items.length === 0
+                ? t('staffAccess.empty')
+                : t('staffAccess.noResults')
+          }
           description={
-            items.length === 0 ? t('staffAccess.emptyDesc') : t('staffAccess.noResultsDesc')
+            activeCount === 0 && !showInactive
+              ? t('staffAccess.emptyDesc')
+              : items.length === 0
+                ? t('staffAccess.emptyDesc')
+                : t('staffAccess.noResultsDesc')
           }
         />
       ) : (
         <div className="grid w-full min-w-0 max-w-full gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((row) => {
+          {visibleItems.map((row) => {
             const busy = busyId === row.staffId;
             return (
               <div
@@ -232,6 +283,13 @@ export default function StaffAccess() {
                         <p className="truncate text-sm text-brand-600 dark:text-brand-400">
                           {row.specialty || '—'}
                         </p>
+                        {row.isPrimary ? (
+                          <p className="mt-1">
+                            <span className="inline-flex rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-950/40 dark:text-brand-300">
+                              {t('staff.primaryStaff')}
+                            </span>
+                          </p>
+                        ) : null}
                         {row.email ? (
                           <p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
                             {row.email}
@@ -250,70 +308,122 @@ export default function StaffAccess() {
                       </span>
                     </div>
 
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {row.canInvite ? (
-                        <button
-                          type="button"
-                          className="btn-primary text-xs"
-                          disabled={busy}
-                          onClick={() => openInvite(row)}
-                        >
-                          <UserPlus className="h-3.5 w-3.5" />
-                          {t('staffAccess.action.invite')}
-                        </button>
-                      ) : null}
+                    <div className="mt-4 space-y-3">
+                      <div>
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          {t('staffAccess.section.portal')}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {row.canInvite ? (
+                            <button
+                              type="button"
+                              className="btn-primary text-xs"
+                              disabled={busy}
+                              onClick={() => openInvite(row)}
+                            >
+                              <UserPlus className="h-3.5 w-3.5" />
+                              {t('staffAccess.action.invite')}
+                            </button>
+                          ) : null}
 
-                      {row.canResend ? (
-                        <button
-                          type="button"
-                          className="btn-secondary text-xs"
-                          disabled={busy}
-                          onClick={() =>
-                            void runMutation(
-                              row.staffId,
-                              () => resendStaffInvite(row.staffId),
-                              'staffAccess.toast.resend'
-                            )
-                          }
-                        >
-                          {t('staffAccess.action.resend')}
-                        </button>
-                      ) : null}
+                          {row.canResend ? (
+                            <button
+                              type="button"
+                              className="btn-secondary text-xs"
+                              disabled={busy}
+                              onClick={() =>
+                                void runMutation(
+                                  row.staffId,
+                                  () => resendStaffInvite(row.staffId),
+                                  'staffAccess.toast.resend'
+                                )
+                              }
+                            >
+                              {t('staffAccess.action.resend')}
+                            </button>
+                          ) : null}
 
-                      {row.canDisable ? (
-                        <button
-                          type="button"
-                          className="btn-secondary text-xs text-red-600 dark:text-red-400"
-                          disabled={busy}
-                          onClick={() =>
-                            void runMutation(
-                              row.staffId,
-                              () => setStaffAccessActive(row.staffId, false),
-                              'staffAccess.toast.disable'
-                            )
-                          }
-                        >
-                          <ShieldOff className="h-3.5 w-3.5" />
-                          {t('staffAccess.action.disable')}
-                        </button>
-                      ) : null}
+                          {row.canDisable ? (
+                            <button
+                              type="button"
+                              className="btn-secondary text-xs text-red-600 dark:text-red-400"
+                              disabled={busy}
+                              onClick={() =>
+                                void runMutation(
+                                  row.staffId,
+                                  () => setStaffAccessActive(row.staffId, false),
+                                  'staffAccess.toast.disable'
+                                )
+                              }
+                            >
+                              <ShieldOff className="h-3.5 w-3.5" />
+                              {t('staffAccess.action.disable')}
+                            </button>
+                          ) : null}
 
-                      {row.canEnable ? (
-                        <button
-                          type="button"
-                          className="btn-primary text-xs"
-                          disabled={busy}
-                          onClick={() =>
-                            void runMutation(
-                              row.staffId,
-                              () => setStaffAccessActive(row.staffId, true),
-                              'staffAccess.toast.enable'
-                            )
-                          }
-                        >
-                          <KeyRound className="h-3.5 w-3.5" />
-                          {t('staffAccess.action.enable')}
-                        </button>
+                          {row.canEnable ? (
+                            <button
+                              type="button"
+                              className="btn-primary text-xs"
+                              disabled={busy}
+                              onClick={() =>
+                                void runMutation(
+                                  row.staffId,
+                                  () => setStaffAccessActive(row.staffId, true),
+                                  'staffAccess.toast.enable'
+                                )
+                              }
+                            >
+                              <KeyRound className="h-3.5 w-3.5" />
+                              {t('staffAccess.action.enable')}
+                            </button>
+                          ) : null}
+
+                          {!row.canInvite &&
+                          !row.canResend &&
+                          !row.canDisable &&
+                          !row.canEnable ? (
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {t(STATUS_LABEL[row.status])}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {canManageEmployment ? (
+                        <div>
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            {t('staffAccess.section.employment')}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {row.staffActive ? (
+                              <button
+                                type="button"
+                                className="btn-secondary text-xs"
+                                disabled={busy}
+                                onClick={() => void handleDeactivateEmployment(row)}
+                              >
+                                <UserMinus className="h-3.5 w-3.5" />
+                                {t('staff.deactivateStaff')}
+                              </button>
+                            ) : null}
+                            {row.isPrimary ? (
+                              <p className="text-xs text-amber-800 dark:text-amber-200">
+                                {t('staff.assignAnotherPrimaryFirst')}
+                              </p>
+                            ) : (
+                              <button
+                                type="button"
+                                className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-950/50"
+                                disabled={busy}
+                                onClick={() => setPermanentDeleteTarget(row)}
+                              >
+                                <Trash2 className="mr-1 inline h-3.5 w-3.5" />
+                                {t('staff.permanentDelete')}
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       ) : null}
                     </div>
                   </div>
@@ -370,6 +480,17 @@ export default function StaffAccess() {
           </form>
         ) : null}
       </Modal>
+
+      <PermanentDeleteStaffModal
+        open={!!permanentDeleteTarget}
+        staffId={permanentDeleteTarget?.staffId ?? null}
+        staffNameHint={permanentDeleteTarget?.name}
+        onClose={() => setPermanentDeleteTarget(null)}
+        onDeleted={({ deletedStaffId }) => {
+          setItems((prev) => prev.filter((row) => row.staffId !== deletedStaffId));
+          showToast(t('staff.deletionSuccess'));
+        }}
+      />
     </div>
   );
 }

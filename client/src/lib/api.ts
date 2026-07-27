@@ -6,6 +6,25 @@ export function setAccessToken(token: string | null) {
   accessToken = token;
 }
 
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  details: Record<string, unknown>;
+
+  constructor(
+    message: string,
+    status: number,
+    code?: string,
+    details: Record<string, unknown> = {}
+  ) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -18,8 +37,16 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     headers,
   });
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(error.error || 'Request failed');
+    const body = (await res.json().catch(() => ({ error: 'Request failed' }))) as Record<
+      string,
+      unknown
+    >;
+    const message =
+      (typeof body.error === 'string' && body.error) ||
+      (typeof body.message === 'string' && body.message) ||
+      'Request failed';
+    const code = typeof body.code === 'string' ? body.code : undefined;
+    throw new ApiError(message, res.status, code, body);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -73,7 +100,18 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify({ serviceIds }),
       }),
+    /** Soft-deactivate (active=false). */
     delete: (id: string) => request<import('@/types').Staff>(`/staff/${id}`, { method: 'DELETE' }),
+    getDeletePreview: (id: string) =>
+      request<import('@/types').StaffDeletePreview>(`/staff/${id}/delete-preview`),
+    permanentDelete: (
+      id: string,
+      body: import('@/types').StaffPermanentDeleteRequest
+    ) =>
+      request<import('@/types').StaffPermanentDeleteResult>(`/staff/${id}/permanent`, {
+        method: 'DELETE',
+        body: JSON.stringify(body),
+      }),
   },
   staffAccess: {
     list: () =>

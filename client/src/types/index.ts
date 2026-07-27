@@ -32,6 +32,8 @@ export interface Staff {
   specialties: string[];
   avatar: string;
   active: boolean;
+  /** Salon primary master; at most one per salon. */
+  isPrimary?: boolean;
   /** Assigned service IDs from staff_services (empty if none). */
   serviceIds?: string[];
 }
@@ -409,3 +411,48 @@ export interface StaffAccessPatchResponse {
   ok: true;
   access: StaffAccessDto;
 }
+
+export type StaffDeleteProtectedReason =
+  | 'PRIMARY_STAFF'
+  | 'self_membership'
+  | 'owner_or_admin_membership'
+  | 'authenticated_user_email'
+  | null;
+
+export interface StaffDeletePreview {
+  staff: {
+    id: string;
+    name: string;
+    active: boolean;
+    isPrimary: boolean;
+  };
+  totalAppointments: number;
+  activeAppointments: number;
+  hasPortalMembership: boolean;
+  protected: boolean;
+  protectedReason: StaffDeleteProtectedReason;
+}
+
+export interface StaffPermanentDeleteRequest {
+  confirm: true;
+  deleteAppointments: boolean;
+}
+
+export interface StaffPermanentDeleteResult {
+  success: true;
+  deletedStaffId: string;
+  deletedAppointments: number;
+  affectedMemberships: number;
+  affectedMappingRules: number;
+}
+
+export type StaffApiErrorCode =
+  | 'STAFF_NOT_FOUND'
+  | 'STAFF_HAS_APPOINTMENTS'
+  | 'PROTECTED_STAFF_MEMBER'
+  | 'PRIMARY_STAFF_CANNOT_DELETE'
+  | 'CONFIRM_REQUIRED'
+  | 'BAD_REQUEST'
+  | 'UNAUTHORIZED'
+  | 'INTERNAL_ERROR'
+  | string;

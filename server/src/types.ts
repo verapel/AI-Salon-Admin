@@ -32,6 +32,8 @@ export interface Staff {
   specialties: string[];
   avatar: string;
   active: boolean;
+  /** Salon primary master; at most one per salon. */
+  isPrimary: boolean;
   /** Assigned service IDs from staff_services (empty if none). */
   serviceIds?: string[];
 }
