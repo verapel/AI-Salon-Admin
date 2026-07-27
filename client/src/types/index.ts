@@ -271,6 +271,49 @@ export interface ScheduleWeeklyResponse {
   staff: Record<string, WeeklyHoursRow[]>;
 }
 
+/** Safe Apple/calendar connection metadata from owner APIs (no credential material). */
+export type CalendarConnectionStatus =
+  | 'disconnected'
+  | 'connected'
+  | 'error'
+  | 'disabled';
+
+export type CalendarProvider = 'apple' | 'google';
+
+export interface CalendarConnectionPublic {
+  id: string;
+  provider: CalendarProvider;
+  accountEmail: string | null;
+  selectedCalendarId: string | null;
+  selectedCalendarName: string | null;
+  selectedCalendarUrl: string | null;
+  status: CalendarConnectionStatus;
+  importEnabled: boolean;
+  lastSyncAt: string | null;
+  lastSyncStartedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  isCredentialStored: boolean;
+  verificationPending: boolean;
+}
+
+/** Transient connect request only — never store or echo the password. */
+export interface AppleCalendarConnectRequest {
+  accountEmail: string;
+  appSpecificPassword: string;
+}
+
+export interface CalendarConnectionsResponse {
+  connection: CalendarConnectionPublic | null;
+}
+
+export interface AppleCalendarConnectResponse {
+  connection: CalendarConnectionPublic;
+  verificationPending: boolean;
+  message: string;
+}
+
 export interface WeeklyHoursInput {
   weekday: number;
   isClosed: boolean;

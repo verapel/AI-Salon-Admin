@@ -10,6 +10,7 @@ import {
   CalendarPlus,
   BarChart3,
   Bell,
+  Plug,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -27,6 +28,7 @@ const navItems: { to: string; icon: typeof LayoutDashboard; labelKey: Translatio
   { to: '/bookings', icon: CalendarPlus, labelKey: 'nav.bookings' },
   { to: '/statistics', icon: BarChart3, labelKey: 'nav.statistics' },
   { to: '/reminders', icon: Bell, labelKey: 'nav.reminders' },
+  { to: '/integrations', icon: Plug, labelKey: 'nav.integrations' },
 ];
 
 interface SidebarProps {

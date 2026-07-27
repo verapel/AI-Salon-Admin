@@ -13,6 +13,7 @@ import Bookings from '@/pages/Bookings';
 import Statistics from '@/pages/Statistics';
 import Reminders from '@/pages/Reminders';
 import StaffAccess from '@/pages/StaffAccess';
+import SalonIntegrations from '@/pages/SalonIntegrations';
 import SetPassword from '@/pages/SetPassword';
 import Login from '@/pages/Login';
 import DeveloperHome from '@/pages/developer/DeveloperHome';
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="/statistics" element={<Statistics />} />
           <Route path="/reminders" element={<Reminders />} />
           <Route path="/staff-access" element={<StaffAccess />} />
+          <Route path="/integrations" element={<SalonIntegrations />} />
         </Route>
       </Route>
 

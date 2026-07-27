@@ -142,6 +142,20 @@ export const api = {
     deleteException: (id: string) =>
       request<void>(`/schedule/exceptions/${id}`, { method: 'DELETE' }),
   },
+  calendar: {
+    getConnections: () =>
+      request<import('@/types').CalendarConnectionsResponse>('/calendar/connections'),
+    connectApple: (body: import('@/types').AppleCalendarConnectRequest) =>
+      request<import('@/types').AppleCalendarConnectResponse>('/calendar/apple/connect', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    disconnectApple: () =>
+      request<{ connection: import('@/types').CalendarConnectionPublic | null }>(
+        '/calendar/apple',
+        { method: 'DELETE' }
+      ),
+  },
   developer: {
     getSalons: () => request<import('@/types').DeveloperSalon[]>('/developer/salons'),
     createSalon: (body: {
