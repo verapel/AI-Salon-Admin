@@ -1,0 +1,566 @@
+/**
+ * Public Meta WhatsApp Cloud webhook foundation (WA-3B).
+ * GET verification + POST HMAC + receipt dedupe only.
+ * No messaging, FSM, clients, appointments, or Meta API calls.
+ */
+
+import { Router, type Request, type Response } from 'express';
+import express from 'express';
+import { supabase } from '../lib/supabase.js';
+import {
+  decryptWhatsAppCredential,
+  isWhatsAppCredentialCryptoError,
+} from '../lib/whatsappCredentialsCrypto.js';
+import {
+  timingSafeEqualUtf8,
+  verifyWhatsAppHubSignature,
+} from '../lib/whatsappWebhookSignature.js';
+import {
+  classifyWhatsAppWebhookPayload,
+  sha256Hex,
+  type ClassifiedWhatsAppWebhookEvent,
+} from '../lib/whatsappWebhookEvents.js';
+import {
+  claimWhatsAppEventReceipt,
+  finalizeWhatsAppEventReceipt,
+  markWhatsAppEventReceiptFailed,
+  RECEIPT_PROCESSING_STALE_MS,
+} from '../lib/whatsappWebhookReceipts.js';
+
+const router = Router();
+const WHATSAPP_PROVIDER = 'whatsapp' as const;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type ConnectionRow = {
+  id: string;
+  salon_id: string;
+  integration_id: string;
+  phone_number_id: string | null;
+  webhook_key: string;
+  app_secret_ciphertext: string | null;
+  app_secret_iv: string | null;
+  app_secret_auth_tag: string | null;
+  verify_token_ciphertext: string | null;
+  verify_token_iv: string | null;
+  verify_token_auth_tag: string | null;
+};
+
+type IntegrationRow = {
+  id: string;
+  salon_id: string;
+  provider: string;
+  status: string;
+};
+
+type RoutedConnection = {
+  connection: ConnectionRow;
+  integration: IntegrationRow;
+};
+
+function isUuid(value: string): boolean {
+  return UUID_RE.test(value);
+}
+
+function isTriplePresent(
+  ciphertext: string | null,
+  iv: string | null,
+  authTag: string | null
+): boolean {
+  return (
+    typeof ciphertext === 'string' &&
+    ciphertext.trim().length > 0 &&
+    typeof iv === 'string' &&
+    iv.trim().length > 0 &&
+    typeof authTag === 'string' &&
+    authTag.trim().length > 0
+  );
+}
+
+function queryStringParam(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0].trim();
+  return '';
+}
+
+async function loadRoutedConnection(webhookKey: string): Promise<RoutedConnection | null> {
+  const { data: connection, error: connectionError } = await (supabase as any)
+    .from('whatsapp_business_connections')
+    .select(
+      `
+      id,
+      salon_id,
+      integration_id,
+      phone_number_id,
+      webhook_key,
+      app_secret_ciphertext,
+      app_secret_iv,
+      app_secret_auth_tag,
+      verify_token_ciphertext,
+      verify_token_iv,
+      verify_token_auth_tag
+    `
+    )
+    .eq('webhook_key', webhookKey)
+    .maybeSingle();
+
+  if (connectionError) {
+    throw new Error(connectionError.message);
+  }
+  if (!connection) return null;
+
+  const conn = connection as ConnectionRow;
+
+  const { data: integration, error: integrationError } = await (supabase as any)
+    .from('salon_integrations')
+    .select('id, salon_id, provider, status')
+    .eq('id', conn.integration_id)
+    .eq('salon_id', conn.salon_id)
+    .eq('provider', WHATSAPP_PROVIDER)
+    .maybeSingle();
+
+  if (integrationError) {
+    throw new Error(integrationError.message);
+  }
+  if (!integration) return null;
+
+  const integ = integration as IntegrationRow;
+  if (integ.salon_id !== conn.salon_id || integ.id !== conn.integration_id) {
+    return null;
+  }
+
+  return { connection: conn, integration: integ };
+}
+
+function isConnected(integration: IntegrationRow): boolean {
+  return integration.status === 'connected';
+}
+
+async function touchWebhookTimestamps(params: {
+  connectionId: string;
+  salonId: string;
+  inbound: boolean;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const patch: Record<string, string> = {
+    last_webhook_at: now,
+    updated_at: now,
+  };
+  if (params.inbound) {
+    patch.last_inbound_at = now;
+  }
+
+  const { error } = await (supabase as any)
+    .from('whatsapp_business_connections')
+    .update(patch)
+    .eq('id', params.connectionId)
+    .eq('salon_id', params.salonId);
+
+  if (error) {
+    // Non-blocking: receipt correctness preferred over cosmetic timestamps.
+    console.error('[whatsapp/webhook] timestamp update failed', {
+      provider: WHATSAPP_PROVIDER,
+      salonId: params.salonId,
+      operation: 'touch_webhook_timestamps',
+    });
+  }
+}
+
+/**
+ * Claim → finalize receipt for one classified event.
+ *
+ * Transitions:
+ *   NEW → processing → processed|ignored
+ *   received|failed → processing → processed|ignored
+ *   stale processing → processing → processed|ignored
+ *   processed|ignored → terminal duplicate
+ *   fresh processing → in_flight (HTTP 500 so Meta retries; stale reclaim after threshold)
+ *   finalize failure → failed (or stuck processing if mark-failed fails) → HTTP 500
+ */
+type ReceiptOutcome =
+  | 'processed'
+  | 'ignored'
+  | 'duplicate'
+  | 'in_flight'
+  | 'failed_transient';
+
+async function claimAndFinalizeReceipt(params: {
+  salonId: string;
+  event: ClassifiedWhatsAppWebhookEvent;
+  payloadHash: string | null;
+  finalStatus: 'processed' | 'ignored';
+}): Promise<ReceiptOutcome> {
+  const claim = await claimWhatsAppEventReceipt(supabase as any, {
+    salonId: params.salonId,
+    externalEventId: params.event.externalEventId,
+    externalMessageId: params.event.externalMessageId,
+    eventType: params.event.eventType,
+    payloadHash: params.payloadHash,
+    metadata: params.event.receiptMetadata,
+  });
+
+  if (claim.kind === 'duplicate_terminal') {
+    return 'duplicate';
+  }
+
+  if (claim.kind === 'in_flight') {
+    // Another delivery holds a fresh processing claim. Do not return terminal 200:
+    // if that worker dies without finalizing, Meta must keep retrying until stale reclaim.
+    console.log('[whatsapp/webhook] receipt in-flight', {
+      provider: WHATSAPP_PROVIDER,
+      salonId: params.salonId,
+      operation: 'receipt_in_flight',
+      externalEventId: params.event.externalEventId,
+      staleMs: RECEIPT_PROCESSING_STALE_MS,
+    });
+    return 'in_flight';
+  }
+
+  if (claim.kind === 'cross_salon_conflict') {
+    console.error('[whatsapp/webhook] receipt cross-salon conflict', {
+      provider: WHATSAPP_PROVIDER,
+      salonId: params.salonId,
+      operation: 'receipt_cross_salon_conflict',
+      externalEventId: params.event.externalEventId,
+    });
+    return 'failed_transient';
+  }
+
+  if (claim.kind === 'failed_transient') {
+    console.error('[whatsapp/webhook] receipt claim failed', {
+      provider: WHATSAPP_PROVIDER,
+      salonId: params.salonId,
+      operation: 'receipt_claim',
+      externalEventId: params.event.externalEventId,
+      code: claim.code,
+    });
+    return 'failed_transient';
+  }
+
+  const receiptId = claim.receiptId;
+
+  const finalized = await finalizeWhatsAppEventReceipt(supabase as any, {
+    salonId: params.salonId,
+    receiptId,
+    finalStatus: params.finalStatus,
+  });
+
+  if (!finalized.ok) {
+    console.error('[whatsapp/webhook] receipt finalize failed', {
+      provider: WHATSAPP_PROVIDER,
+      salonId: params.salonId,
+      operation: 'receipt_finalize',
+      externalEventId: params.event.externalEventId,
+      code: finalized.code,
+    });
+
+    const markedFailed = await markWhatsAppEventReceiptFailed(supabase as any, {
+      salonId: params.salonId,
+      receiptId,
+      errorCode: finalized.code,
+    });
+
+    if (!markedFailed) {
+      console.error('[whatsapp/webhook] receipt mark-failed failed', {
+        provider: WHATSAPP_PROVIDER,
+        salonId: params.salonId,
+        operation: 'receipt_mark_failed',
+        externalEventId: params.event.externalEventId,
+      });
+    }
+
+    return 'failed_transient';
+  }
+
+  return finalized.status === 'ignored' ? 'ignored' : 'processed';
+}
+
+/**
+ * GET /api/webhooks/whatsapp/:webhookKey
+ * Meta hub.verify_token challenge.
+ */
+router.get('/:webhookKey', async (req: Request, res: Response) => {
+  const webhookKey =
+    typeof req.params.webhookKey === 'string' ? req.params.webhookKey.trim() : '';
+
+  if (!webhookKey || !isUuid(webhookKey)) {
+    return res.status(403).send('Forbidden');
+  }
+
+  const mode = queryStringParam(req.query['hub.mode']);
+  const verifyToken = queryStringParam(req.query['hub.verify_token']);
+  const challenge = queryStringParam(req.query['hub.challenge']);
+
+  if (mode !== 'subscribe' || !verifyToken || !challenge) {
+    return res.status(403).send('Forbidden');
+  }
+
+  try {
+    const routed = await loadRoutedConnection(webhookKey);
+    if (!routed) {
+      return res.status(403).send('Forbidden');
+    }
+
+    const { connection, integration } = routed;
+    if (!isConnected(integration)) {
+      console.error('[whatsapp/webhook] GET rejected: disconnected', {
+        provider: WHATSAPP_PROVIDER,
+        salonId: connection.salon_id,
+        operation: 'get_verify_disconnected',
+      });
+      return res.status(403).send('Forbidden');
+    }
+
+    if (
+      !isTriplePresent(
+        connection.verify_token_ciphertext,
+        connection.verify_token_iv,
+        connection.verify_token_auth_tag
+      )
+    ) {
+      console.error('[whatsapp/webhook] GET rejected: missing verify credentials', {
+        provider: WHATSAPP_PROVIDER,
+        salonId: connection.salon_id,
+        operation: 'get_verify_missing_credentials',
+      });
+      return res.status(403).send('Forbidden');
+    }
+
+    let storedToken: string;
+    try {
+      storedToken = decryptWhatsAppCredential({
+        ciphertext: connection.verify_token_ciphertext!,
+        iv: connection.verify_token_iv!,
+        authTag: connection.verify_token_auth_tag!,
+      });
+    } catch (err) {
+      console.error('[whatsapp/webhook] GET decrypt verify token failed', {
+        provider: WHATSAPP_PROVIDER,
+        salonId: connection.salon_id,
+        operation: 'get_verify_decrypt',
+        cryptoError: isWhatsAppCredentialCryptoError(err),
+      });
+      return res.status(403).send('Forbidden');
+    }
+
+    if (!timingSafeEqualUtf8(verifyToken, storedToken)) {
+      console.error('[whatsapp/webhook] GET verify token mismatch', {
+        provider: WHATSAPP_PROVIDER,
+        salonId: connection.salon_id,
+        operation: 'get_verify_mismatch',
+      });
+      return res.status(403).send('Forbidden');
+    }
+
+    res.status(200).type('text/plain').send(challenge);
+  } catch (err) {
+    console.error('[whatsapp/webhook] GET unexpected failure', {
+      provider: WHATSAPP_PROVIDER,
+      operation: 'get_verify',
+    });
+    return res.status(403).send('Forbidden');
+  }
+});
+
+/**
+ * POST /api/webhooks/whatsapp/:webhookKey
+ * Raw-body HMAC, classify events, idempotent receipts. No messaging/FSM.
+ */
+router.post(
+  '/:webhookKey',
+  express.raw({ type: 'application/json', limit: '1mb' }),
+  async (req: Request, res: Response) => {
+    const webhookKey =
+      typeof req.params.webhookKey === 'string' ? req.params.webhookKey.trim() : '';
+
+    if (!webhookKey || !isUuid(webhookKey)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    let routed: RoutedConnection | null;
+    try {
+      routed = await loadRoutedConnection(webhookKey);
+    } catch {
+      console.error('[whatsapp/webhook] POST connection load failed', {
+        provider: WHATSAPP_PROVIDER,
+        operation: 'post_load_connection',
+      });
+      return res.status(500).json({ error: 'Temporary failure' });
+    }
+
+    if (!routed) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const { connection, integration } = routed;
+    const salonId = connection.salon_id;
+
+    if (!isConnected(integration)) {
+      console.error('[whatsapp/webhook] POST rejected: disconnected', {
+        provider: WHATSAPP_PROVIDER,
+        salonId,
+        operation: 'post_disconnected',
+      });
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    if (!asNonEmptyPhone(connection.phone_number_id)) {
+      console.error('[whatsapp/webhook] POST rejected: missing phone_number_id', {
+        provider: WHATSAPP_PROVIDER,
+        salonId,
+        operation: 'post_missing_phone',
+      });
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    if (
+      !isTriplePresent(
+        connection.app_secret_ciphertext,
+        connection.app_secret_iv,
+        connection.app_secret_auth_tag
+      )
+    ) {
+      console.error('[whatsapp/webhook] POST rejected: missing app secret', {
+        provider: WHATSAPP_PROVIDER,
+        salonId,
+        operation: 'post_missing_app_secret',
+      });
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const rawBody = Buffer.isBuffer(req.body) ? req.body : null;
+    if (!rawBody) {
+      console.error('[whatsapp/webhook] POST rejected: raw body unavailable', {
+        provider: WHATSAPP_PROVIDER,
+        salonId,
+        operation: 'post_raw_body_missing',
+      });
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    let appSecret: string;
+    try {
+      appSecret = decryptWhatsAppCredential({
+        ciphertext: connection.app_secret_ciphertext!,
+        iv: connection.app_secret_iv!,
+        authTag: connection.app_secret_auth_tag!,
+      });
+    } catch (err) {
+      console.error('[whatsapp/webhook] POST decrypt app secret failed', {
+        provider: WHATSAPP_PROVIDER,
+        salonId,
+        operation: 'post_decrypt_app_secret',
+        cryptoError: isWhatsAppCredentialCryptoError(err),
+      });
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const signatureHeader =
+      typeof req.headers['x-hub-signature-256'] === 'string'
+        ? req.headers['x-hub-signature-256']
+        : undefined;
+
+    const signatureOk = verifyWhatsAppHubSignature({
+      appSecret,
+      rawBody,
+      signatureHeader,
+    });
+
+    if (!signatureOk) {
+      console.error('[whatsapp/webhook] POST signature rejected', {
+        provider: WHATSAPP_PROVIDER,
+        salonId,
+        operation: 'post_signature_reject',
+      });
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(rawBody.toString('utf8'));
+    } catch {
+      console.error('[whatsapp/webhook] POST malformed JSON after valid signature', {
+        provider: WHATSAPP_PROVIDER,
+        salonId,
+        operation: 'post_malformed_json',
+      });
+      // Permanently invalid after auth — avoid Meta retry storms.
+      return res.status(200).json({ ok: true, ignored: true });
+    }
+
+    const events = classifyWhatsAppWebhookPayload(payload);
+    const expectedPhone = connection.phone_number_id!.trim();
+    let sawInbound = false;
+    let transientFailure = false;
+
+    for (const event of events) {
+      if (!event.phoneNumberId || event.phoneNumberId !== expectedPhone) {
+        console.error('[whatsapp/webhook] phone mismatch ignored', {
+          provider: WHATSAPP_PROVIDER,
+          salonId,
+          operation: 'post_phone_mismatch',
+          externalEventId: event.externalEventId,
+          eventCategory: event.category,
+        });
+        continue;
+      }
+
+      const finalStatus = event.category === 'unsupported' ? 'ignored' : 'processed';
+      const outcome = await claimAndFinalizeReceipt({
+        salonId,
+        event,
+        payloadHash: sha256Hex(event.externalEventId),
+        finalStatus,
+      });
+
+      if (outcome === 'failed_transient' || outcome === 'in_flight') {
+        // in_flight → 500 so Meta retries; stale reclaim after RECEIPT_PROCESSING_STALE_MS.
+        transientFailure = true;
+        continue;
+      }
+
+      if (outcome === 'duplicate') {
+        console.log('[whatsapp/webhook] duplicate event', {
+          provider: WHATSAPP_PROVIDER,
+          salonId,
+          operation: 'post_duplicate',
+          externalEventId: event.externalEventId,
+          eventCategory: event.category,
+        });
+        continue;
+      }
+
+      console.log('[whatsapp/webhook] event handled', {
+        provider: WHATSAPP_PROVIDER,
+        salonId,
+        operation: 'post_event',
+        externalEventId: event.externalEventId,
+        eventCategory: event.category,
+        result: outcome,
+      });
+
+      if (event.isInboundMessage && outcome === 'processed') {
+        sawInbound = true;
+      }
+    }
+
+    if (transientFailure) {
+      return res.status(500).json({ error: 'Temporary failure' });
+    }
+
+    // Timestamp update is best-effort after safe receipt handling.
+    await touchWebhookTimestamps({
+      connectionId: connection.id,
+      salonId,
+      inbound: sawInbound,
+    });
+
+    return res.status(200).json({ ok: true });
+  }
+);
+
+function asNonEmptyPhone(value: string | null): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+export default router;

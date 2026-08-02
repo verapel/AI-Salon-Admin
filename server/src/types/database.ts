@@ -832,6 +832,7 @@ export interface Database {
           phone_number_id: string | null;
           display_phone_number: string | null;
           verified_name: string | null;
+          webhook_key: string;
           access_token_ciphertext: string | null;
           access_token_iv: string | null;
           access_token_auth_tag: string | null;
@@ -860,6 +861,7 @@ export interface Database {
           phone_number_id?: string | null;
           display_phone_number?: string | null;
           verified_name?: string | null;
+          webhook_key?: string;
           access_token_ciphertext?: string | null;
           access_token_iv?: string | null;
           access_token_auth_tag?: string | null;
@@ -888,6 +890,7 @@ export interface Database {
           phone_number_id?: string | null;
           display_phone_number?: string | null;
           verified_name?: string | null;
+          webhook_key?: string;
           access_token_ciphertext?: string | null;
           access_token_iv?: string | null;
           access_token_auth_tag?: string | null;
