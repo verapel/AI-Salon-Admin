@@ -1,17 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLanguage } from '@/context/LanguageContext';
 import ConnectSalonTelegramModal from '@/components/developer/ConnectSalonTelegramModal';
+import DeleteSalonModal from '@/components/developer/DeleteSalonModal';
 import IntegrationStatusBadge from '@/components/developer/IntegrationStatusBadge';
 import IntegrationHealthBadge from '@/components/developer/IntegrationHealthBadge';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { api } from '@/lib/api';
-import type { DeveloperSalonDetail, TelegramAdminChatCandidateResponse } from '@/types';
+import type {
+  DeveloperSalonDetail,
+  SalonPermanentDeleteResponse,
+  TelegramAdminChatCandidateResponse,
+} from '@/types';
 
 interface SalonDetailModalProps {
   salonId: string | null;
   isOpen: boolean;
   onClose: () => void;
   onUpdated: () => void;
+  onDeleted?: (result: SalonPermanentDeleteResponse) => void;
 }
 
 const ADMIN_CHAT_ID_REGEX = /^-?\d+$/;
@@ -36,14 +42,19 @@ function formatDateTime(iso: string | null): string {
   });
 }
 
+const PILOT_SALON_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0001';
+const DEFAULT_SALON_SLUG = 'default';
+
 export default function SalonDetailModal({
   salonId,
   isOpen,
   onClose,
   onUpdated,
+  onDeleted,
 }: SalonDetailModalProps) {
   const { t } = useLanguage();
   const [detail, setDetail] = useState<DeveloperSalonDetail | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -623,24 +634,42 @@ export default function SalonDetailModal({
           ) : null}
         </div>
 
-        <div className="flex flex-col gap-2 border-t border-slate-700 px-6 py-4 sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-full rounded-lg border border-slate-600 bg-slate-800 px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:bg-slate-700 sm:w-auto"
-          >
-            {t('developer.salons.close')}
-          </button>
-          {detail && !loadError && (
+        <div className="flex flex-col gap-2 border-t border-slate-700 px-6 py-4">
+          {detail && !loadError ? (
+            <div className="mb-1 rounded-lg border border-slate-700 bg-slate-800/40 px-4 py-3">
+              {detail.id === PILOT_SALON_ID || detail.slug === DEFAULT_SALON_SLUG ? (
+                <p className="text-sm text-amber-300">{t('developer.salons.protectedSalonHint')}</p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setDeleteOpen(true)}
+                  disabled={saving || loading}
+                  className="w-full rounded-lg border border-red-800 bg-red-950/40 px-4 py-2.5 text-sm font-medium text-red-300 transition-colors hover:bg-red-950/70 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                >
+                  {t('developer.salons.deleteSalon')}
+                </button>
+              )}
+            </div>
+          ) : null}
+          <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
             <button
-              type="submit"
-              form="salon-detail-form"
-              disabled={saving || loading}
-              className="w-full min-h-[40px] rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+              type="button"
+              onClick={onClose}
+              className="w-full rounded-lg border border-slate-600 bg-slate-800 px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:bg-slate-700 sm:w-auto"
             >
-              {saving ? t('developer.salons.saving') : t('developer.salons.save')}
+              {t('developer.salons.close')}
             </button>
-          )}
+            {detail && !loadError && (
+              <button
+                type="submit"
+                form="salon-detail-form"
+                disabled={saving || loading}
+                className="w-full min-h-[40px] rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+              >
+                {saving ? t('developer.salons.saving') : t('developer.salons.save')}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -653,6 +682,17 @@ export default function SalonDetailModal({
           onConnected={handleTelegramConnected}
         />
       )}
+
+      <DeleteSalonModal
+        open={deleteOpen}
+        salonId={salonId}
+        onClose={() => setDeleteOpen(false)}
+        onDeleted={(result) => {
+          setDeleteOpen(false);
+          onDeleted?.(result);
+          onClose();
+        }}
+      />
     </div>
   );
 }

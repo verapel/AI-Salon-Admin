@@ -5,6 +5,13 @@ import { supabase, checkSupabaseConnection } from '../lib/supabase.js';
 import { loadTelegramTokenFromDb } from '../lib/telegramToken.js';
 import { restartTelegramPolling } from '../lib/telegramPollingControl.js';
 import whatsappIntegrationsRouter from './whatsappIntegrations.js';
+import { telegramBotManager } from '../lib/telegramBotManager.js';
+import {
+  buildSalonDeletePreview,
+  callHardDeleteSalonRpc,
+  evaluateSalonDeleteProtection,
+  isSalonUuid,
+} from '../lib/salonDelete.js';
 import type {
   IntegrationHealth,
   IntegrationStatus,
@@ -500,6 +507,124 @@ router.get('/salons/:id', async (req, res) => {
     owner,
     telegram: mapTelegramSummary((integrationRes.data as IntegrationRow | null) ?? null, row.slug),
   });
+});
+
+/**
+ * GET /api/developer/salons/:salonId/delete-preview
+ * Safe counts + protection flags. No secrets.
+ */
+router.get('/salons/:salonId/delete-preview', async (req, res) => {
+  const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
+  if (!salonId || !isSalonUuid(salonId)) {
+    return res.status(400).json({ error: 'Valid salon id is required', code: 'BAD_REQUEST' });
+  }
+
+  try {
+    const preview = await buildSalonDeletePreview(salonId);
+    if (!preview) {
+      return res.status(404).json({ error: 'Salon not found', code: 'SALON_NOT_FOUND' });
+    }
+    return res.json(preview);
+  } catch (err) {
+    console.error(
+      '[developer] delete-preview error:',
+      err instanceof Error ? err.message : err
+    );
+    return res
+      .status(500)
+      .json({ error: 'Could not load delete preview', code: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * DELETE /api/developer/salons/:salonId/permanent
+ * Atomic hard delete via hard_delete_salon RPC. Auth users are not deleted.
+ */
+router.delete('/salons/:salonId/permanent', async (req, res) => {
+  const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
+  if (!salonId || !isSalonUuid(salonId)) {
+    return res.status(400).json({ error: 'Valid salon id is required', code: 'BAD_REQUEST' });
+  }
+
+  if (req.body?.confirm !== true) {
+    return res.status(400).json({
+      error: 'confirm must be true',
+      code: 'CONFIRM_REQUIRED',
+    });
+  }
+
+  try {
+    const { data: salon, error: salonError } = await (supabase as any)
+      .from('salons')
+      .select('id, slug, deletion_protected')
+      .eq('id', salonId)
+      .maybeSingle();
+
+    if (salonError) {
+      console.error('[developer] permanent delete load error:', salonError.message);
+      return res.status(500).json({ error: 'Could not delete salon', code: 'INTERNAL_ERROR' });
+    }
+    if (!salon) {
+      return res.status(404).json({ error: 'Salon not found', code: 'SALON_NOT_FOUND' });
+    }
+
+    const protection = evaluateSalonDeleteProtection({
+      salonId: salon.id as string,
+      slug: salon.slug as string,
+      deletionProtected: Boolean(salon.deletion_protected),
+    });
+
+    if (protection.protected) {
+      return res.status(409).json({
+        error: 'Protected salon cannot be permanently deleted',
+        code: 'SALON_PROTECTED',
+        protectedReason: protection.protectedReason,
+      });
+    }
+
+    // DB deletion is authoritative: RPC first. Only stop in-memory poller after success.
+    // Failed RPC must leave the poller running for the still-existing salon.
+    const result = await callHardDeleteSalonRpc(salonId);
+
+    if (!result.deleted) {
+      return res.status(500).json({
+        error: 'Could not delete salon',
+        code: 'SALON_DELETE_FAILED',
+      });
+    }
+
+    try {
+      telegramBotManager.stopPoller(salonId);
+    } catch (pollerErr) {
+      // Salon already deleted — do not fail the response or attempt recreation.
+      console.error('[developer] stopPoller after salon delete failed', {
+        salonId,
+        operation: 'stop_poller_after_hard_delete',
+        message: pollerErr instanceof Error ? pollerErr.message : String(pollerErr),
+      });
+    }
+
+    return res.json(result);
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === 'SALON_PROTECTED') {
+      return res.status(409).json({
+        error: 'Protected salon cannot be permanently deleted',
+        code: 'SALON_PROTECTED',
+      });
+    }
+    if (code === 'SALON_NOT_FOUND') {
+      return res.status(404).json({ error: 'Salon not found', code: 'SALON_NOT_FOUND' });
+    }
+    console.error(
+      '[developer] permanent delete error:',
+      err instanceof Error ? err.message : err
+    );
+    return res.status(500).json({
+      error: 'Could not delete salon',
+      code: 'SALON_DELETE_FAILED',
+    });
+  }
 });
 
 router.patch('/salons/:id', async (req, res) => {

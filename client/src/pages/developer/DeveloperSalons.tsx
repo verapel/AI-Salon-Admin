@@ -245,6 +245,10 @@ export default function DeveloperSalons() {
         isOpen={detailOpen}
         onClose={closeDetailModal}
         onUpdated={loadSalons}
+        onDeleted={() => {
+          setSuccessMessage(t('developer.salons.deleteSuccess'));
+          void loadSalons();
+        }}
       />
     </>
   );

@@ -213,6 +213,18 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify(body),
       }),
+    getSalonDeletePreview: (salonId: string) =>
+      request<import('@/types').SalonDeletePreview>(
+        `/developer/salons/${salonId}/delete-preview`
+      ),
+    deleteSalonPermanent: (salonId: string, body: { confirm: true }) =>
+      request<import('@/types').SalonPermanentDeleteResponse>(
+        `/developer/salons/${salonId}/permanent`,
+        {
+          method: 'DELETE',
+          body: JSON.stringify(body),
+        }
+      ),
     getTelegramIntegrations: () =>
       request<import('@/types').DeveloperTelegramIntegration[]>('/developer/integrations/telegram'),
     getWhatsAppIntegrations: () =>

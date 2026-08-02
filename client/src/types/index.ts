@@ -165,6 +165,55 @@ export interface DeveloperSalonDetail {
   telegram: DeveloperSalonTelegramSummary;
 }
 
+export interface SalonDeleteCounts {
+  clients: number;
+  staff: number;
+  services: number;
+  appointments: number;
+  activeAppointments: number;
+  reminders: number;
+  salonMembers: number;
+  integrations: number;
+  scheduleExceptions: number;
+  calendarConnections: number;
+}
+
+export type SalonDeleteProtectedReason = 'DEFAULT_SALON' | 'DELETION_PROTECTED' | null;
+
+export type SalonDeleteTelegramStatus =
+  | 'connected'
+  | 'not_connected'
+  | 'error'
+  | 'disabled'
+  | 'none';
+
+/** Developer-cabinet permanent salon delete preview (no secrets). */
+export interface SalonDeletePreview {
+  salonId: string;
+  name: string;
+  slug: string;
+  active: boolean;
+  deletionProtected: boolean;
+  protectedReason: SalonDeleteProtectedReason;
+  canPermanentlyDelete: boolean;
+  counts: SalonDeleteCounts;
+  whatsappConnected: boolean;
+  telegramStatus: SalonDeleteTelegramStatus;
+}
+
+export interface SalonPermanentDeleteResponse {
+  salonId: string;
+  deleted: boolean;
+  counts: {
+    clients: number;
+    staff: number;
+    services: number;
+    appointments: number;
+    reminders: number;
+    salonMembers: number;
+  };
+}
+
 export interface UpdateDeveloperSalonRequest {
   name?: string;
   active?: boolean;
