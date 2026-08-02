@@ -4,6 +4,7 @@ import path from 'path';
 import { supabase, checkSupabaseConnection } from '../lib/supabase.js';
 import { loadTelegramTokenFromDb } from '../lib/telegramToken.js';
 import { restartTelegramPolling } from '../lib/telegramPollingControl.js';
+import whatsappIntegrationsRouter from './whatsappIntegrations.js';
 import type {
   IntegrationHealth,
   IntegrationStatus,
@@ -1261,5 +1262,9 @@ router.post('/integrations/telegram/connect', async (req, res) => {
     integration: mapTelegramIntegration(salon, integration),
   });
 });
+
+// Developer-only WhatsApp Cloud connection management (WA-2E).
+// Salon cabinet must not mount these routes.
+router.use('/integrations/whatsapp', whatsappIntegrationsRouter);
 
 export default router;

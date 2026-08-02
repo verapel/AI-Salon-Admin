@@ -1,12 +1,11 @@
 /**
- * Owner/admin WhatsApp Cloud connection APIs (WA-2).
+ * Developer-cabinet WhatsApp Cloud connection APIs (WA-2E).
  * Connection setup only: verify + encrypt + store. No webhooks/messaging/FSM.
+ * Mounted under /api/developer (requireDeveloperAuth). Salon cabinet has no access.
  */
 
 import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
-import { getSalonId } from '../lib/salonContext.js';
-import { requireSalonWriteAccess } from '../middleware/auth.js';
 import {
   assertWhatsAppCredentialsEncryptionKeyConfigured,
   encryptWhatsAppCredential,
@@ -26,6 +25,34 @@ import type {
 } from '../types.js';
 
 const router = Router();
+
+type SalonLookupRow = {
+  id: string;
+  name: string;
+  slug: string;
+  active: boolean;
+};
+
+async function requireActiveSalon(salonId: string): Promise<SalonLookupRow | { error: string }> {
+  const trimmed = salonId.trim();
+  if (!trimmed) {
+    return { error: 'salonId is required' };
+  }
+
+  const { data, error } = await supabase
+    .from('salons')
+    .select('id, name, slug, active')
+    .eq('id', trimmed)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!data || !(data as SalonLookupRow).active) {
+    return { error: 'Salon not found' };
+  }
+  return data as SalonLookupRow;
+}
 
 const WHATSAPP_PROVIDER = 'whatsapp' as const;
 const CLOUD_PROVIDER: WhatsAppCloudProvider = 'meta_cloud';
@@ -524,51 +551,95 @@ async function capturePriorConnectionState(salonId: string): Promise<{
 }
 
 /**
- * GET /api/integrations/whatsapp
+ * GET /api/developer/integrations/whatsapp
+ * All active salons with per-salon WhatsApp public status (no secrets).
  */
-router.get('/', async (req, res) => {
+router.get('/', async (_req, res) => {
   try {
-    const salonId = getSalonId(req);
-    const payload = await loadPublicIntegration(salonId);
-    return res.json(payload);
+    const { data: salons, error } = await supabase
+      .from('salons')
+      .select('id, name, slug, active')
+      .eq('active', true)
+      .order('name');
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const rows = (salons ?? []) as SalonLookupRow[];
+    const result = [];
+    for (const salon of rows) {
+      const payload = await loadPublicIntegration(salon.id);
+      result.push({
+        salonId: salon.id,
+        salonName: salon.name,
+        slug: salon.slug,
+        connected: payload.connected,
+        connection: payload.connection,
+      });
+    }
+    return res.json(result);
   } catch (err) {
-    return handleRouteError(res, err, req.auth?.salonId ?? null, 'get');
+    return handleRouteError(res, err, null, 'developer_list');
   }
 });
 
 /**
- * POST /api/integrations/whatsapp/connect
- *
- * State machine (post WA-2C):
- * - Capture prior usable connected state before connection mutation.
- * - Meta verify + encrypt before any secret write.
- * - Upsert secrets; on failure prior row/status unchanged.
- * - Mark connected with retries; NEVER demote to not_connected as compensation.
- * - First-time + mark failure: leave not_connected, secrets kept, 503, retry OK.
- * - Reconnect + mark failure: prior status stays connected; 200 only if DB read confirms connected.
- * - Post-write public re-read failure: do not demote; return 503 (never fabricate success).
+ * GET /api/developer/integrations/whatsapp/:salonId
  */
-router.post('/connect', requireSalonWriteAccess, async (req, res) => {
+router.get('/:salonId', async (req, res) => {
+  const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
+  try {
+    const salon = await requireActiveSalon(salonId);
+    if ('error' in salon) {
+      return res.status(404).json({ error: salon.error, code: 'WHATSAPP_CONNECTION_NOT_FOUND' });
+    }
+    const payload = await loadPublicIntegration(salon.id);
+    return res.json({
+      salonId: salon.id,
+      salonName: salon.name,
+      slug: salon.slug,
+      connected: payload.connected,
+      connection: payload.connection,
+    });
+  } catch (err) {
+    return handleRouteError(res, err, salonId || null, 'developer_get');
+  }
+});
+
+/**
+ * POST /api/developer/integrations/whatsapp/:salonId/connect
+ *
+ * State machine (WA-2D preserved):
+ * - Meta verify + encrypt before secret write
+ * - Never demote a previously usable connection as compensation
+ * - HTTP 200 only after DB-confirmed public read (connected + connection)
+ */
+router.post('/:salonId/connect', async (req, res) => {
+  const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
+
+  let salon: SalonLookupRow;
+  try {
+    const looked = await requireActiveSalon(salonId);
+    if ('error' in looked) {
+      return res.status(404).json({ error: looked.error, code: 'WHATSAPP_CONNECTION_NOT_FOUND' });
+    }
+    salon = looked;
+  } catch (err) {
+    return handleRouteError(res, err, salonId || null, 'developer_connect_salon');
+  }
+
   const parsed = parseConnectBody(req.body);
   if ('error' in parsed) {
     return res.status(400).json({ error: parsed.error, code: 'WHATSAPP_INVALID_CREDENTIALS' });
   }
 
-  let salonId: string;
-  try {
-    salonId = getSalonId(req);
-  } catch {
-    return sendWhatsAppError(res, 'WHATSAPP_FORBIDDEN', 403, 'Write access required');
-  }
-
-  // Encryption key before any Meta call.
   try {
     assertWhatsAppCredentialsEncryptionKeyConfigured();
   } catch (err) {
-    return handleRouteError(res, err, salonId, 'connect_key_check');
+    return handleRouteError(res, err, salon.id, 'connect_key_check');
   }
 
-  // Meta verification (no DB secret writes yet).
   let phoneMeta;
   try {
     phoneMeta = await verifyWhatsAppCloudConnection({
@@ -577,10 +648,9 @@ router.post('/connect', requireSalonWriteAccess, async (req, res) => {
       phoneNumberId: parsed.phoneNumberId,
     });
   } catch (err) {
-    return handleRouteError(res, err, salonId, 'connect_meta_verify');
+    return handleRouteError(res, err, salon.id, 'connect_meta_verify');
   }
 
-  // Encrypt each secret independently (only after Meta success).
   let accessEnc;
   let appSecretEnc;
   let verifyEnc;
@@ -589,25 +659,24 @@ router.post('/connect', requireSalonWriteAccess, async (req, res) => {
     appSecretEnc = encryptWhatsAppCredential(parsed.appSecret);
     verifyEnc = encryptWhatsAppCredential(parsed.verifyToken);
   } catch (err) {
-    return handleRouteError(res, err, salonId, 'connect_encrypt');
+    return handleRouteError(res, err, salon.id, 'connect_encrypt');
   }
 
-  // Capture prior usability BEFORE connection mutation (reconnect preservation).
   let wasUsablyConnected = false;
   try {
-    const prior = await capturePriorConnectionState(salonId);
+    const prior = await capturePriorConnectionState(salon.id);
     wasUsablyConnected = prior.wasUsablyConnected;
   } catch (err) {
-    return handleRouteError(res, err, salonId, 'connect_prior_state');
+    return handleRouteError(res, err, salon.id, 'connect_prior_state');
   }
 
   try {
-    const integration = await ensureWhatsAppIntegrationRow(salonId);
+    const integration = await ensureWhatsAppIntegrationRow(salon.id);
     const now = new Date().toISOString();
 
     const { error: upsertError } = await supabase.from('whatsapp_business_connections').upsert(
       {
-        salon_id: salonId,
+        salon_id: salon.id,
         integration_id: integration.id,
         provider: CLOUD_PROVIDER,
         business_account_id: parsed.businessAccountId,
@@ -639,25 +708,20 @@ router.post('/connect', requireSalonWriteAccess, async (req, res) => {
           'This phone number is already connected to another salon'
         );
       }
-      // Unrelated unique / storage errors — generic safe failure (no demotion; no secret wipe).
       throw new Error('WhatsApp connection storage write failed');
     }
 
-    // Secrets written. Never demote integration status from here on.
-    const marked = await markIntegrationConnectedWithRetry(salonId, integration.id);
+    const marked = await markIntegrationConnectedWithRetry(salon.id, integration.id);
 
     if (!marked) {
       if (wasUsablyConnected) {
-        // Reconnect: prior status remains connected (ensure/upsert do not demote).
-        // New secrets are stored; do not force not_connected. 200 only if DB read confirms.
         console.error('[whatsapp] reconnect status mark failed; preserving connected', {
-          salonId,
+          salonId: salon.id,
           operation: 'connect_mark_after_reconnect',
         });
       } else {
-        // First-time: leave not_connected; secrets remain; fail closed for GET.
         console.error('[whatsapp] first-time status mark failed; leaving not_connected', {
-          salonId,
+          salonId: salon.id,
           operation: 'connect_mark_first_time',
         });
         return sendWhatsAppError(
@@ -669,26 +733,29 @@ router.post('/connect', requireSalonWriteAccess, async (req, res) => {
       }
     }
 
-    // Success requires a confirmed public DB read. Never fabricate a DTO / connected:true.
-    let payload = await loadPublicIntegrationWithRetry(salonId);
+    let payload = await loadPublicIntegrationWithRetry(salon.id);
 
     if (payload && wasUsablyConnected && !payload.connected) {
       console.error('[whatsapp] reconnect public load unexpected disconnected; not demoting', {
-        salonId,
+        salonId: salon.id,
         operation: 'connect_public_load_reconnect',
       });
-      // Best-effort mark retry, then require a confirmed connected read.
-      await markIntegrationConnectedWithRetry(salonId, integration.id);
-      payload = await loadPublicIntegrationWithRetry(salonId);
+      await markIntegrationConnectedWithRetry(salon.id, integration.id);
+      payload = await loadPublicIntegrationWithRetry(salon.id);
     }
 
     if (payload?.connected && payload.connection) {
-      return res.status(200).json(payload);
+      return res.status(200).json({
+        salonId: salon.id,
+        salonName: salon.name,
+        slug: salon.slug,
+        connected: payload.connected,
+        connection: payload.connection,
+      });
     }
 
-    // Writes may have succeeded, but final state is unconfirmed — preserve DB; safe 503.
     console.error('[whatsapp] public load unconfirmed after write; not demoting', {
-      salonId,
+      salonId: salon.id,
       operation: 'connect_public_load_unconfirmed',
       marked,
       wasUsablyConnected,
@@ -700,30 +767,28 @@ router.post('/connect', requireSalonWriteAccess, async (req, res) => {
       'WhatsApp connection storage is unavailable'
     );
   } catch (err) {
-    // No compensation / demotion in outer catch.
-    return handleRouteError(res, err, salonId, 'connect_persist');
+    return handleRouteError(res, err, salon.id, 'connect_persist');
   }
 });
 
 /**
- * DELETE /api/integrations/whatsapp/disconnect
- * Soft disconnect: clear secrets + routing metadata; keep rows; never cascade-delete.
+ * DELETE /api/developer/integrations/whatsapp/:salonId/disconnect
+ * Soft disconnect only.
  */
-router.delete('/disconnect', requireSalonWriteAccess, async (req, res) => {
-  let salonId: string;
-  try {
-    salonId = getSalonId(req);
-  } catch {
-    return sendWhatsAppError(res, 'WHATSAPP_FORBIDDEN', 403, 'Write access required');
-  }
-
+router.delete('/:salonId/disconnect', async (req, res) => {
+  const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
   const now = new Date().toISOString();
 
   try {
+    const salon = await requireActiveSalon(salonId);
+    if ('error' in salon) {
+      return res.status(404).json({ error: salon.error, code: 'WHATSAPP_CONNECTION_NOT_FOUND' });
+    }
+
     const { data: existing, error: existingError } = await supabase
       .from('whatsapp_business_connections')
       .select('id')
-      .eq('salon_id', salonId)
+      .eq('salon_id', salon.id)
       .maybeSingle();
 
     if (existingError) {
@@ -752,20 +817,25 @@ router.delete('/disconnect', requireSalonWriteAccess, async (req, res) => {
           messaging_limit_tier: null,
           updated_at: now,
         })
-        .eq('salon_id', salonId);
+        .eq('salon_id', salon.id);
 
       if (clearError) {
         throw new Error(clearError.message);
       }
     }
 
-    // Soft status flip only — never hard-delete salon_integrations (CASCADE risk).
-    await markIntegrationNotConnected(salonId);
+    await markIntegrationNotConnected(salon.id);
 
-    const payload = await loadPublicIntegration(salonId);
-    return res.json(payload);
+    const payload = await loadPublicIntegration(salon.id);
+    return res.json({
+      salonId: salon.id,
+      salonName: salon.name,
+      slug: salon.slug,
+      connected: payload.connected,
+      connection: payload.connection,
+    });
   } catch (err) {
-    return handleRouteError(res, err, salonId, 'disconnect');
+    return handleRouteError(res, err, salonId || null, 'disconnect');
   }
 });
 

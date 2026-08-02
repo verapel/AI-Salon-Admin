@@ -21,7 +21,6 @@ import authRouter from './routes/auth.js';
 import internalRouter from './routes/internal.js';
 import staffPortalRouter from './routes/staffPortal.js';
 import calendarConnectionsRouter from './routes/calendarConnections.js';
-import whatsappIntegrationsRouter from './routes/whatsappIntegrations.js';
 import {
   requireDeveloperAuth,
   requireSalonAuth,
@@ -1175,12 +1174,6 @@ app.use('/api/appointments', salonAuth, requireSalonCabinetAccess, appointmentsR
 app.use('/api/stats', salonAuth, requireSalonCabinetAccess, statsRouter);
 app.use('/api/schedule', salonAuth, requireSalonCabinetAccess, scheduleRouter);
 app.use('/api/calendar', salonAuth, requireSalonCabinetAccess, calendarConnectionsRouter);
-app.use(
-  '/api/integrations/whatsapp',
-  salonAuth,
-  requireSalonCabinetAccess,
-  whatsappIntegrationsRouter
-);
 app.use('/api/staff-portal', salonAuth, requireStaffPortalAccess, staffPortalRouter);
 app.use('/api/developer', developerAuth, developerRouter);
 

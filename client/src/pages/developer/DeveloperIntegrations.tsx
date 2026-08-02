@@ -6,6 +6,7 @@ import IntegrationTabs, {
   type IntegrationTabId,
 } from '@/components/developer/IntegrationTabs';
 import TelegramIntegrationsTab from '@/components/developer/TelegramIntegrationsTab';
+import WhatsAppIntegrationsTab from '@/components/developer/WhatsAppIntegrationsTab';
 import ComingSoonTab from '@/components/developer/ComingSoonTab';
 import AddIntegrationModal from '@/components/developer/AddIntegrationModal';
 import { useDeveloperTelegramConnect } from '@/hooks/useDeveloperTelegramConnect';
@@ -86,6 +87,8 @@ export default function DeveloperIntegrations() {
               onUpdateMetadata={updateMetadata}
               onClearError={clearConnectError}
             />
+          ) : activeTab === 'whatsapp' ? (
+            <WhatsAppIntegrationsTab refreshKey={refreshKey} />
           ) : null
         ) : (
           <ComingSoonTab tabId={activeTab} />

@@ -194,19 +194,6 @@ export const api = {
         { method: 'DELETE' }
       ),
   },
-  whatsapp: {
-    getWhatsAppIntegration: () =>
-      request<import('@/types').WhatsAppIntegrationResponse>('/integrations/whatsapp'),
-    connectWhatsApp: (body: import('@/types').WhatsAppConnectRequest) =>
-      request<import('@/types').WhatsAppIntegrationResponse>('/integrations/whatsapp/connect', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      }),
-    disconnectWhatsApp: () =>
-      request<import('@/types').WhatsAppIntegrationResponse>('/integrations/whatsapp/disconnect', {
-        method: 'DELETE',
-      }),
-  },
   developer: {
     getSalons: () => request<import('@/types').DeveloperSalon[]>('/developer/salons'),
     createSalon: (body: {
@@ -228,6 +215,27 @@ export const api = {
       }),
     getTelegramIntegrations: () =>
       request<import('@/types').DeveloperTelegramIntegration[]>('/developer/integrations/telegram'),
+    getWhatsAppIntegrations: () =>
+      request<import('@/types').DeveloperWhatsAppIntegration[]>(
+        '/developer/integrations/whatsapp'
+      ),
+    getWhatsAppIntegration: (salonId: string) =>
+      request<import('@/types').DeveloperWhatsAppIntegration>(
+        `/developer/integrations/whatsapp/${salonId}`
+      ),
+    connectWhatsApp: (salonId: string, body: import('@/types').WhatsAppConnectRequest) =>
+      request<import('@/types').DeveloperWhatsAppIntegration>(
+        `/developer/integrations/whatsapp/${salonId}/connect`,
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        }
+      ),
+    disconnectWhatsApp: (salonId: string) =>
+      request<import('@/types').DeveloperWhatsAppIntegration>(
+        `/developer/integrations/whatsapp/${salonId}/disconnect`,
+        { method: 'DELETE' }
+      ),
     connectTelegram: (body: {
       salonName?: string;
       salonId?: string;

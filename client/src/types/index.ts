@@ -359,6 +359,15 @@ export interface WhatsAppIntegrationResponse {
   connection: WhatsAppBusinessConnectionPublic | null;
 }
 
+/** Developer-cabinet per-salon WhatsApp status (no secrets). */
+export interface DeveloperWhatsAppIntegration {
+  salonId: string;
+  salonName: string;
+  slug: string;
+  connected: boolean;
+  connection: WhatsAppBusinessConnectionPublic | null;
+}
+
 export interface WeeklyHoursInput {
   weekday: number;
   isClosed: boolean;

@@ -11,7 +11,7 @@ export const INTEGRATION_TABS: {
   available: boolean;
 }[] = [
   { id: 'telegram', labelKey: 'developer.integrations.tabs.telegram', available: true },
-  { id: 'whatsapp', labelKey: 'developer.integrations.tabs.whatsapp', available: false },
+  { id: 'whatsapp', labelKey: 'developer.integrations.tabs.whatsapp', available: true },
   { id: 'instagram', labelKey: 'developer.integrations.tabs.instagram', available: false },
   { id: 'tiktok', labelKey: 'developer.integrations.tabs.tiktok', available: false },
 ];
