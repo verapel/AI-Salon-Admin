@@ -170,7 +170,7 @@ export type ChannelEventProcessingStatus =
   | 'ignored';
 
 /**
- * Safe WhatsApp Business connection metadata for future owner/developer APIs.
+ * Safe WhatsApp Business connection metadata for owner/admin APIs.
  * Never includes access_token / app_secret / verify_token ciphertext, iv, or auth_tag.
  */
 export interface WhatsAppBusinessConnectionPublic {
@@ -196,6 +196,20 @@ export interface WhatsAppBusinessConnectionPublic {
   isAppSecretStored: boolean;
   /** True when encrypted verify-token material is stored (WA-2+). */
   isVerifyTokenStored: boolean;
+}
+
+/** Transient connect request only — never persist or echo plaintext secrets. */
+export interface WhatsAppConnectRequest {
+  accessToken: string;
+  appSecret: string;
+  verifyToken: string;
+  businessAccountId: string;
+  phoneNumberId: string;
+}
+
+export interface WhatsAppIntegrationResponse {
+  connected: boolean;
+  connection: WhatsAppBusinessConnectionPublic | null;
 }
 
 export interface ClientChannelIdentity {

@@ -194,6 +194,19 @@ export const api = {
         { method: 'DELETE' }
       ),
   },
+  whatsapp: {
+    getWhatsAppIntegration: () =>
+      request<import('@/types').WhatsAppIntegrationResponse>('/integrations/whatsapp'),
+    connectWhatsApp: (body: import('@/types').WhatsAppConnectRequest) =>
+      request<import('@/types').WhatsAppIntegrationResponse>('/integrations/whatsapp/connect', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    disconnectWhatsApp: () =>
+      request<import('@/types').WhatsAppIntegrationResponse>('/integrations/whatsapp/disconnect', {
+        method: 'DELETE',
+      }),
+  },
   developer: {
     getSalons: () => request<import('@/types').DeveloperSalon[]>('/developer/salons'),
     createSalon: (body: {

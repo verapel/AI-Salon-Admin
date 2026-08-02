@@ -316,6 +316,49 @@ export interface AppleCalendarConnectResponse {
   message: string;
 }
 
+/** Meta WhatsApp Cloud API architecture marker. */
+export type WhatsAppCloudProvider = 'meta_cloud';
+
+/**
+ * Safe WhatsApp Business connection metadata from owner APIs.
+ * Never includes ciphertext, iv, authTag, or plaintext secrets.
+ */
+export interface WhatsAppBusinessConnectionPublic {
+  id: string;
+  salonId: string;
+  integrationId: string;
+  provider: WhatsAppCloudProvider;
+  businessAccountId: string | null;
+  phoneNumberId: string | null;
+  displayPhoneNumber: string | null;
+  verifiedName: string | null;
+  tokenExpiresAt: string | null;
+  lastWebhookAt: string | null;
+  lastInboundAt: string | null;
+  lastOutboundAt: string | null;
+  qualityRating: string | null;
+  messagingLimitTier: string | null;
+  createdAt: string;
+  updatedAt: string;
+  isAccessTokenStored: boolean;
+  isAppSecretStored: boolean;
+  isVerifyTokenStored: boolean;
+}
+
+/** Transient connect request only — never store or echo secrets. */
+export interface WhatsAppConnectRequest {
+  accessToken: string;
+  appSecret: string;
+  verifyToken: string;
+  businessAccountId: string;
+  phoneNumberId: string;
+}
+
+export interface WhatsAppIntegrationResponse {
+  connected: boolean;
+  connection: WhatsAppBusinessConnectionPublic | null;
+}
+
 export interface WeeklyHoursInput {
   weekday: number;
   isClosed: boolean;

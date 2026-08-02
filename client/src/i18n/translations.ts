@@ -480,6 +480,37 @@ const en = {
   'integrations.apple.loadError': 'Could not load Apple Calendar connection.',
   'integrations.apple.retry': 'Retry',
 
+  'integrations.whatsapp.title': 'WhatsApp',
+  'integrations.whatsapp.description':
+    'Connect your Meta WhatsApp Cloud API number for this salon. Messaging and booking will be added in a later stage.',
+  'integrations.whatsapp.connected': 'Connected',
+  'integrations.whatsapp.disconnected': 'Not connected',
+  'integrations.whatsapp.connect': 'Connect WhatsApp',
+  'integrations.whatsapp.reconnect': 'Reconnect',
+  'integrations.whatsapp.disconnect': 'Disconnect WhatsApp',
+  'integrations.whatsapp.accessToken': 'Access token',
+  'integrations.whatsapp.appSecret': 'App secret',
+  'integrations.whatsapp.verifyToken': 'Webhook verify token',
+  'integrations.whatsapp.businessAccountId': 'WhatsApp Business Account ID',
+  'integrations.whatsapp.phoneNumberId': 'Phone number ID',
+  'integrations.whatsapp.verifiedName': 'Verified name',
+  'integrations.whatsapp.displayPhoneNumber': 'Display phone number',
+  'integrations.whatsapp.connecting': 'Connecting...',
+  'integrations.whatsapp.disconnectConfirm':
+    'This will remove encrypted WhatsApp credentials for this salon. Clients and appointments will not be deleted.',
+  'integrations.whatsapp.credentialsRemoved':
+    'Encrypted WhatsApp credentials will be removed. Messaging will not use this connection until you reconnect.',
+  'integrations.whatsapp.invalidCredentials': 'Could not verify WhatsApp credentials.',
+  'integrations.whatsapp.providerUnavailable': 'WhatsApp provider temporarily unavailable.',
+  'integrations.whatsapp.encryptionNotConfigured':
+    'WhatsApp credential storage is not configured on the server.',
+  'integrations.whatsapp.phoneNumberNotFound': 'Phone number ID was not found for this account.',
+  'integrations.whatsapp.wabaMismatch':
+    'Phone number does not belong to this WhatsApp Business Account.',
+  'integrations.whatsapp.phoneNumberInUse':
+    'This phone number is already connected to another salon.',
+  'integrations.whatsapp.genericError': 'Could not update WhatsApp connection. Try again.',
+
   // Developer cabinet
   'developer.brand': 'AI Admin',
   'developer.cabinet': 'Developer Cabinet',
@@ -1171,6 +1202,37 @@ const ru: Record<TranslationKey, string> = {
   'integrations.apple.loadError': 'Не удалось загрузить подключение Apple Calendar.',
   'integrations.apple.retry': 'Повторить',
 
+  'integrations.whatsapp.title': 'WhatsApp',
+  'integrations.whatsapp.description':
+    'Подключите номер Meta WhatsApp Cloud API для этого салона. Сообщения и запись будут добавлены на следующем этапе.',
+  'integrations.whatsapp.connected': 'Подключено',
+  'integrations.whatsapp.disconnected': 'Не подключено',
+  'integrations.whatsapp.connect': 'Подключить WhatsApp',
+  'integrations.whatsapp.reconnect': 'Переподключить',
+  'integrations.whatsapp.disconnect': 'Отключить WhatsApp',
+  'integrations.whatsapp.accessToken': 'Access token',
+  'integrations.whatsapp.appSecret': 'App secret',
+  'integrations.whatsapp.verifyToken': 'Webhook verify token',
+  'integrations.whatsapp.businessAccountId': 'WhatsApp Business Account ID',
+  'integrations.whatsapp.phoneNumberId': 'Phone number ID',
+  'integrations.whatsapp.verifiedName': 'Проверенное имя',
+  'integrations.whatsapp.displayPhoneNumber': 'Отображаемый номер',
+  'integrations.whatsapp.connecting': 'Подключение...',
+  'integrations.whatsapp.disconnectConfirm':
+    'Зашифрованные данные WhatsApp для этого салона будут удалены. Клиенты и записи не будут удалены.',
+  'integrations.whatsapp.credentialsRemoved':
+    'Зашифрованные данные WhatsApp будут удалены. Сообщения не будут использовать это подключение, пока вы не подключите его снова.',
+  'integrations.whatsapp.invalidCredentials': 'Не удалось проверить данные WhatsApp.',
+  'integrations.whatsapp.providerUnavailable': 'Провайдер WhatsApp временно недоступен.',
+  'integrations.whatsapp.encryptionNotConfigured':
+    'Хранение учётных данных WhatsApp не настроено на сервере.',
+  'integrations.whatsapp.phoneNumberNotFound': 'Phone number ID не найден для этого аккаунта.',
+  'integrations.whatsapp.wabaMismatch':
+    'Номер не принадлежит указанному WhatsApp Business Account.',
+  'integrations.whatsapp.phoneNumberInUse':
+    'Этот номер уже подключён к другому салону.',
+  'integrations.whatsapp.genericError': 'Не удалось обновить подключение WhatsApp. Попробуйте снова.',
+
   'developer.brand': 'AI Admin',
   'developer.cabinet': 'Кабинет разработчика',
   'developer.nav.overview': 'Обзор',
@@ -1854,6 +1916,37 @@ const hy: Record<TranslationKey, string> = {
   'integrations.apple.disconnectError': 'Չհաջողվեց անջատել Apple Calendar-ը։ Փորձեք կրկին։',
   'integrations.apple.loadError': 'Չհաջողվեց բեռնել Apple Calendar միացումը։',
   'integrations.apple.retry': 'Կրկին',
+
+  'integrations.whatsapp.title': 'WhatsApp',
+  'integrations.whatsapp.description':
+    'Միացրեք Meta WhatsApp Cloud API համարը այս սրահի համար։ Հաղորդագրությունները և ամրագրումը կավելացվեն հաջորդ փուլում։',
+  'integrations.whatsapp.connected': 'Միացված է',
+  'integrations.whatsapp.disconnected': 'Միացված չէ',
+  'integrations.whatsapp.connect': 'Միացնել WhatsApp',
+  'integrations.whatsapp.reconnect': 'Վերամիացնել',
+  'integrations.whatsapp.disconnect': 'Անջատել WhatsApp',
+  'integrations.whatsapp.accessToken': 'Access token',
+  'integrations.whatsapp.appSecret': 'App secret',
+  'integrations.whatsapp.verifyToken': 'Webhook verify token',
+  'integrations.whatsapp.businessAccountId': 'WhatsApp Business Account ID',
+  'integrations.whatsapp.phoneNumberId': 'Phone number ID',
+  'integrations.whatsapp.verifiedName': 'Հաստատված անուն',
+  'integrations.whatsapp.displayPhoneNumber': 'Ցուցադրվող հեռախոսահամար',
+  'integrations.whatsapp.connecting': 'Միացվում է...',
+  'integrations.whatsapp.disconnectConfirm':
+    'Այս սրահի գաղտնագրված WhatsApp տվյալները կհեռացվեն։ Հաճախորդներն ու գրանցումները չեն ջնջվի։',
+  'integrations.whatsapp.credentialsRemoved':
+    'Գաղտնագրված WhatsApp տվյալները կհեռացվեն։ Հաղորդագրությունները չեն օգտագործի այս միացումը, մինչև նորից միացնեք։',
+  'integrations.whatsapp.invalidCredentials': 'Չհաջողվեց ստուգել WhatsApp տվյալները։',
+  'integrations.whatsapp.providerUnavailable': 'WhatsApp մատակարարը ժամանակավորապես անհասանելի է։',
+  'integrations.whatsapp.encryptionNotConfigured':
+    'WhatsApp տվյալների պահումը սերվերում կազմաձևված չէ։',
+  'integrations.whatsapp.phoneNumberNotFound': 'Phone number ID-ն չի գտնվել այս հաշվի համար։',
+  'integrations.whatsapp.wabaMismatch':
+    'Հեռախոսահամարը չի պատկանում նշված WhatsApp Business Account-ին։',
+  'integrations.whatsapp.phoneNumberInUse':
+    'Այս հեռախոսահամարը արդեն միացված է մեկ այլ սրահի։',
+  'integrations.whatsapp.genericError': 'Չհաջողվեց թարմացնել WhatsApp միացումը։ Փորձեք կրկին։',
 
   'developer.brand': 'AI Admin',
   'developer.cabinet': 'Developer վահանակ',
