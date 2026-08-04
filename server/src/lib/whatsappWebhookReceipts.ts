@@ -1,6 +1,10 @@
 /**
- * WhatsApp webhook receipt claim / reclaim (WA-3C).
+ * WhatsApp webhook receipt claim / reclaim (WA-3C / WA-3H).
  * Status-aware, race-aware idempotency for channel_event_receipts.
+ *
+ * attemptCount is the claim generation / ownership token for a worker.
+ * Finalize and mark-failed MUST pass the attemptCount returned by claim.
+ * Receipt ownership alone does not guarantee exactly-once external side effects.
  * No booking/FSM/message content handling.
  */
 
@@ -36,7 +40,11 @@ export type ReceiptClaimResult =
 
 export type ReceiptFinalizeResult =
   | { ok: true; status: 'processed' | 'ignored' }
-  | { ok: false; code: string };
+  | { ok: false; code: 'finalize_db_error' | 'finalize_lost_ownership' };
+
+export type ReceiptMarkFailedResult =
+  | { ok: true }
+  | { ok: false; code: 'mark_failed_db_error' | 'mark_failed_lost_ownership' };
 
 export type ExistingReceiptSnapshot = {
   id: string;
@@ -102,6 +110,7 @@ type ReceiptInsertInput = {
 /**
  * Claim a receipt for processing (new insert as processing, or atomic reclaim).
  * Lookup/reclaim always scoped by salon_id + provider + external_event_id.
+ * Successful claim returns attemptCount = ownership generation for this worker.
  */
 export async function claimWhatsAppEventReceipt(
   db: SupabaseClient | any,
@@ -182,6 +191,10 @@ async function loadSameSalonReceipt(
   };
 }
 
+/**
+ * Atomic reclaim with CAS on attempt_count (claim generation).
+ * Only one worker can win a given previousAttemptCount.
+ */
 async function atomicReclaimReceipt(
   db: SupabaseClient | any,
   params: {
@@ -206,7 +219,8 @@ async function atomicReclaimReceipt(
     })
     .eq('id', params.receiptId)
     .eq('salon_id', params.salonId)
-    .eq('provider', WHATSAPP_RECEIPT_PROVIDER);
+    .eq('provider', WHATSAPP_RECEIPT_PROVIDER)
+    .eq('attempt_count', params.previousAttemptCount);
 
   if (params.mode === 'retryable') {
     query = query.in('processing_status', ['received', 'failed']);
@@ -298,7 +312,7 @@ export async function reclaimExistingWhatsAppEventReceipt(
 
   const receipt = loaded.receipt;
   if (!receipt) {
-    // Unique conflict under global (provider, external_event_id) but no same-salon row.
+    // Unique conflict but no same-salon row (legacy global unique edge / race).
     return { kind: 'cross_salon_conflict' };
   }
 
@@ -340,11 +354,15 @@ export async function reclaimExistingWhatsAppEventReceipt(
   });
 }
 
+/**
+ * Finalize only if this worker still owns the claim generation (attemptCount).
+ */
 export async function finalizeWhatsAppEventReceipt(
   db: SupabaseClient | any,
   params: {
     salonId: string;
     receiptId: string;
+    attemptCount: number;
     finalStatus: 'processed' | 'ignored';
   }
 ): Promise<ReceiptFinalizeResult> {
@@ -361,29 +379,32 @@ export async function finalizeWhatsAppEventReceipt(
     .eq('salon_id', params.salonId)
     .eq('provider', WHATSAPP_RECEIPT_PROVIDER)
     .eq('processing_status', 'processing')
+    .eq('attempt_count', params.attemptCount)
     .select('id')
     .maybeSingle();
 
   if (error) {
-    return { ok: false, code: 'receipt_finalize' };
+    return { ok: false, code: 'finalize_db_error' };
   }
   if (!data?.id) {
-    return { ok: false, code: 'receipt_finalize_race' };
+    return { ok: false, code: 'finalize_lost_ownership' };
   }
   return { ok: true, status: params.finalStatus };
 }
 
 /**
- * Mark a claimed receipt as failed with a safe internal error code only.
+ * Mark failed only if this worker still owns the claim generation (attemptCount).
+ * Old workers must not fail a newer generation.
  */
 export async function markWhatsAppEventReceiptFailed(
   db: SupabaseClient | any,
   params: {
     salonId: string;
     receiptId: string;
+    attemptCount: number;
     errorCode: string;
   }
-): Promise<boolean> {
+): Promise<ReceiptMarkFailedResult> {
   const safeCode =
     typeof params.errorCode === 'string' && params.errorCode.trim().length > 0
       ? params.errorCode.trim().slice(0, 120)
@@ -401,11 +422,15 @@ export async function markWhatsAppEventReceiptFailed(
     .eq('salon_id', params.salonId)
     .eq('provider', WHATSAPP_RECEIPT_PROVIDER)
     .eq('processing_status', 'processing')
+    .eq('attempt_count', params.attemptCount)
     .select('id')
     .maybeSingle();
 
-  if (error || !data?.id) {
-    return false;
+  if (error) {
+    return { ok: false, code: 'mark_failed_db_error' };
   }
-  return true;
+  if (!data?.id) {
+    return { ok: false, code: 'mark_failed_lost_ownership' };
+  }
+  return { ok: true };
 }

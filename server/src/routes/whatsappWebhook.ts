@@ -175,7 +175,11 @@ async function touchWebhookTimestamps(params: {
  *   stale processing → processing → processed|ignored
  *   processed|ignored → terminal duplicate
  *   fresh processing → in_flight (HTTP 500 so Meta retries; stale reclaim after threshold)
- *   finalize failure → failed (or stuck processing if mark-failed fails) → HTTP 500
+ *   finalize DB error → mark-failed with same attemptCount → HTTP 500
+ *   finalize/mark-failed lost_ownership → no further mutation → HTTP 500
+ *
+ * attemptCount from claim is the ownership generation and must be passed to finalize/fail.
+ * Receipt ownership alone does not guarantee exactly-once appointments/messages.
  */
 type ReceiptOutcome =
   | 'processed'
@@ -237,42 +241,64 @@ async function claimAndFinalizeReceipt(params: {
     return 'failed_transient';
   }
 
+  // Ownership generation for this worker — required for finalize/fail CAS.
   const receiptId = claim.receiptId;
+  const attemptCount = claim.attemptCount;
 
   const finalized = await finalizeWhatsAppEventReceipt(supabase as any, {
     salonId: params.salonId,
     receiptId,
+    attemptCount,
     finalStatus: params.finalStatus,
   });
 
-  if (!finalized.ok) {
-    console.error('[whatsapp/webhook] receipt finalize failed', {
+  if (finalized.ok) {
+    return finalized.status === 'ignored' ? 'ignored' : 'processed';
+  }
+
+  if (finalized.code === 'finalize_lost_ownership') {
+    // Another worker holds a newer generation — do not markFailed with stale ownership.
+    console.error('[whatsapp/webhook] receipt finalize lost ownership', {
       provider: WHATSAPP_PROVIDER,
       salonId: params.salonId,
       operation: 'receipt_finalize',
+      result: 'finalize_lost_ownership',
       externalEventId: params.event.externalEventId,
-      code: finalized.code,
     });
-
-    const markedFailed = await markWhatsAppEventReceiptFailed(supabase as any, {
-      salonId: params.salonId,
-      receiptId,
-      errorCode: finalized.code,
-    });
-
-    if (!markedFailed) {
-      console.error('[whatsapp/webhook] receipt mark-failed failed', {
-        provider: WHATSAPP_PROVIDER,
-        salonId: params.salonId,
-        operation: 'receipt_mark_failed',
-        externalEventId: params.event.externalEventId,
-      });
-    }
-
     return 'failed_transient';
   }
 
-  return finalized.status === 'ignored' ? 'ignored' : 'processed';
+  console.error('[whatsapp/webhook] receipt finalize failed', {
+    provider: WHATSAPP_PROVIDER,
+    salonId: params.salonId,
+    operation: 'receipt_finalize',
+    result: 'finalize_db_error',
+    externalEventId: params.event.externalEventId,
+    code: finalized.code,
+  });
+
+  const markedFailed = await markWhatsAppEventReceiptFailed(supabase as any, {
+    salonId: params.salonId,
+    receiptId,
+    attemptCount,
+    errorCode: finalized.code,
+  });
+
+  if (!markedFailed.ok) {
+    console.error('[whatsapp/webhook] receipt mark-failed failed', {
+      provider: WHATSAPP_PROVIDER,
+      salonId: params.salonId,
+      operation: 'receipt_mark_failed',
+      result:
+        markedFailed.code === 'mark_failed_lost_ownership'
+          ? 'mark_failed_lost_ownership'
+          : 'mark_failed_db_error',
+      externalEventId: params.event.externalEventId,
+      code: markedFailed.code,
+    });
+  }
+
+  return 'failed_transient';
 }
 
 /**
