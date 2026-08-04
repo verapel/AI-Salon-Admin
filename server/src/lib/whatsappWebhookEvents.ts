@@ -1,9 +1,16 @@
 /**
- * WhatsApp Cloud webhook event classification + deterministic external IDs (WA-3B).
- * No booking/AI/identity/conversation side effects.
+ * WhatsApp Cloud webhook event classification + deterministic external IDs (WA-3B / WA-4B).
+ * Extracts minimal inbound sender identity fields for conversation/identity foundation.
+ * Does not inspect message text for booking/AI and does not write identities/conversations.
  */
 
 import { createHash } from 'node:crypto';
+import {
+  canonicalizeWhatsAppExternalUserId,
+  parseWhatsAppMessageTimestamp,
+  resolveInboundSenderIdentity,
+  type InboundSenderIdentity,
+} from './whatsappInboundIdentity.js';
 
 export type WhatsAppWebhookEventCategory = 'inbound_message' | 'message_status' | 'unsupported';
 
@@ -13,9 +20,16 @@ export interface ClassifiedWhatsAppWebhookEvent {
   externalMessageId: string | null;
   eventType: string;
   phoneNumberId: string | null;
-  /** Minimal non-secret metadata for receipt row only. */
+  /** Minimal non-secret metadata for receipt row only (no body, no wa_id/phone). */
   receiptMetadata: Record<string, string>;
   isInboundMessage: boolean;
+  /** Inbound sender identity when extractable; null for status/unsupported/malformed. */
+  inboundSender: InboundSenderIdentity | null;
+  /**
+   * Meta messages[].timestamp as ISO (ordering only).
+   * Not stored in receipt metadata.
+   */
+  messageTimestampIso: string | null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -34,6 +48,27 @@ function extractPhoneNumberId(value: unknown): string | null {
   const valueObj = asRecord(change?.value);
   const metadata = asRecord(valueObj?.metadata);
   return asNonEmptyString(metadata?.phone_number_id);
+}
+
+/**
+ * Build a wa_id → profile map from value.contacts (no raw payload persistence).
+ */
+function indexContacts(
+  contactsRaw: unknown
+): Map<string, { waId: string; profileName: string | null }> {
+  const map = new Map<string, { waId: string; profileName: string | null }>();
+  if (!Array.isArray(contactsRaw)) return map;
+
+  for (const contactRaw of contactsRaw) {
+    const contact = asRecord(contactRaw);
+    if (!contact) continue;
+    const waId = canonicalizeWhatsAppExternalUserId(asNonEmptyString(contact.wa_id));
+    if (!waId) continue;
+    const profile = asRecord(contact.profile);
+    const profileName = asNonEmptyString(profile?.name);
+    map.set(waId, { waId, profileName });
+  }
+  return map;
 }
 
 function unsupportedEventId(parts: string[]): string {
@@ -77,18 +112,46 @@ export function classifyWhatsAppWebhookPayload(
           phoneNumberId,
           receiptMetadata: { category: 'unsupported', field },
           isInboundMessage: false,
+          inboundSender: null,
+          messageTimestampIso: null,
         });
         continue;
       }
 
       const messages = Array.isArray(value.messages) ? value.messages : [];
       const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+      const contactsByWaId = indexContacts(value.contacts);
 
       for (const messageRaw of messages) {
         const message = asRecord(messageRaw);
         const messageId = asNonEmptyString(message?.id);
         if (!messageId) continue;
         const messageType = asNonEmptyString(message?.type) ?? 'unknown';
+        const messageFrom = asNonEmptyString(message?.from);
+        const messageTimestampIso = parseWhatsAppMessageTimestamp(message?.timestamp);
+
+        // Prefer contact matching messages[].from; else single-contact fallback when unambiguous.
+        let contactWaId: string | null = null;
+        let profileName: string | null = null;
+        const fromKey = canonicalizeWhatsAppExternalUserId(messageFrom);
+        if (fromKey && contactsByWaId.has(fromKey)) {
+          const hit = contactsByWaId.get(fromKey)!;
+          contactWaId = hit.waId;
+          profileName = hit.profileName;
+        } else if (contactsByWaId.size === 1) {
+          const only = contactsByWaId.values().next().value;
+          if (only) {
+            contactWaId = only.waId;
+            profileName = only.profileName;
+          }
+        }
+
+        const inboundSender = resolveInboundSenderIdentity({
+          messageFrom,
+          contactWaId,
+          profileName,
+        });
+
         events.push({
           category: 'inbound_message',
           externalEventId: `message:${messageId}`,
@@ -99,8 +162,13 @@ export function classifyWhatsAppWebhookPayload(
             category: 'inbound_message',
             messageType,
             ...(phoneNumberId ? { phoneNumberId } : {}),
+            ...(inboundSender ? { hasSender: '1' } : { hasSender: '0' }),
+            ...(inboundSender?.senderAddressMismatch ? { senderMismatch: '1' } : {}),
+            ...(messageTimestampIso ? { hasMessageAt: '1' } : {}),
           },
           isInboundMessage: true,
+          inboundSender,
+          messageTimestampIso,
         });
       }
 
@@ -122,6 +190,8 @@ export function classifyWhatsAppWebhookPayload(
             ...(phoneNumberId ? { phoneNumberId } : {}),
           },
           isInboundMessage: false,
+          inboundSender: null,
+          messageTimestampIso: null,
         });
       }
 
@@ -135,6 +205,8 @@ export function classifyWhatsAppWebhookPayload(
           phoneNumberId,
           receiptMetadata: { category: 'unsupported', field },
           isInboundMessage: false,
+          inboundSender: null,
+          messageTimestampIso: null,
         });
       }
     }

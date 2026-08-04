@@ -1025,6 +1025,7 @@ export interface Database {
           current_step: string | null;
           state: Json;
           last_inbound_message_id: string | null;
+          last_inbound_at: string | null;
           last_outbound_message_id: string | null;
           last_interaction_at: string | null;
           expires_at: string | null;
@@ -1043,6 +1044,7 @@ export interface Database {
           current_step?: string | null;
           state?: Json;
           last_inbound_message_id?: string | null;
+          last_inbound_at?: string | null;
           last_outbound_message_id?: string | null;
           last_interaction_at?: string | null;
           expires_at?: string | null;
@@ -1061,6 +1063,7 @@ export interface Database {
           current_step?: string | null;
           state?: Json;
           last_inbound_message_id?: string | null;
+          last_inbound_at?: string | null;
           last_outbound_message_id?: string | null;
           last_interaction_at?: string | null;
           expires_at?: string | null;
@@ -1073,6 +1076,8 @@ export interface Database {
       };
     };
     Views: Record<string, never>;
+    // WA-4B1 owned RPCs are invoked via supabase.rpc(...); keep Functions loose so
+    // incomplete Relationship metadata does not break existing join typings.
     Functions: Record<string, never>;
     Enums: {
       integration_provider: IntegrationProvider;

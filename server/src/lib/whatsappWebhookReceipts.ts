@@ -355,6 +355,42 @@ export async function reclaimExistingWhatsAppEventReceipt(
 }
 
 /**
+ * Read-only ownership probe (diagnostic / optional preflight only).
+ * NOT the correctness boundary for durable WA-4B writes.
+ * Conversation/identity/client-link mutations must use owned RPCs that
+ * lock the receipt row FOR UPDATE in the same transaction as the write.
+ */
+export async function assertWhatsAppReceiptOwnership(
+  db: SupabaseClient | any,
+  params: {
+    salonId: string;
+    receiptId: string;
+    attemptCount: number;
+  }
+): Promise<
+  | { ok: true }
+  | { ok: false; code: 'lost_ownership' | 'ownership_check_error' }
+> {
+  const { data, error } = await db
+    .from('channel_event_receipts')
+    .select('id')
+    .eq('id', params.receiptId)
+    .eq('salon_id', params.salonId)
+    .eq('provider', WHATSAPP_RECEIPT_PROVIDER)
+    .eq('processing_status', 'processing')
+    .eq('attempt_count', params.attemptCount)
+    .maybeSingle();
+
+  if (error) {
+    return { ok: false, code: 'ownership_check_error' };
+  }
+  if (!data?.id) {
+    return { ok: false, code: 'lost_ownership' };
+  }
+  return { ok: true };
+}
+
+/**
  * Finalize only if this worker still owns the claim generation (attemptCount).
  */
 export async function finalizeWhatsAppEventReceipt(

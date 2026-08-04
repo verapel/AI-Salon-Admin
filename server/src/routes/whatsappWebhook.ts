@@ -26,6 +26,7 @@ import {
   markWhatsAppEventReceiptFailed,
   RECEIPT_PROCESSING_STALE_MS,
 } from '../lib/whatsappWebhookReceipts.js';
+import { processWhatsAppInboundIdentityFoundation } from '../lib/whatsappIdentity.js';
 
 const router = Router();
 const WHATSAPP_PROVIDER = 'whatsapp' as const;
@@ -167,7 +168,7 @@ async function touchWebhookTimestamps(params: {
 }
 
 /**
- * Claim → finalize receipt for one classified event.
+ * Claim → (inbound identity/conversation foundation) → finalize.
  *
  * Transitions:
  *   NEW → processing → processed|ignored
@@ -180,6 +181,9 @@ async function touchWebhookTimestamps(params: {
  *
  * attemptCount from claim is the ownership generation and must be passed to finalize/fail.
  * Receipt ownership alone does not guarantee exactly-once appointments/messages.
+ *
+ * Permanent identity conflicts finalize as ignored (terminal) to avoid Meta retry storms.
+ * Ambiguous/unresolved phone match finalizes as processed with conversation only.
  */
 type ReceiptOutcome =
   | 'processed'
@@ -244,12 +248,103 @@ async function claimAndFinalizeReceipt(params: {
   // Ownership generation for this worker — required for finalize/fail CAS.
   const receiptId = claim.receiptId;
   const attemptCount = claim.attemptCount;
+  let finalizeStatus: 'processed' | 'ignored' = params.finalStatus;
+
+  // WA-4B: inbound message identity + durable conversation (no replies/FSM/appointments).
+  if (params.event.isInboundMessage) {
+    const foundation = await processWhatsAppInboundIdentityFoundation({
+      db: supabase as any,
+      salonId: params.salonId,
+      sender: params.event.inboundSender,
+      externalMessageId: params.event.externalMessageId,
+      messageTimestampIso: params.event.messageTimestampIso,
+      receiptId,
+      attemptCount,
+    });
+
+    if (foundation.kind === 'lost_ownership') {
+      console.error('[whatsapp/webhook] inbound foundation lost ownership', {
+        provider: WHATSAPP_PROVIDER,
+        salonId: params.salonId,
+        operation: 'inbound_identity',
+        result: 'lost_ownership',
+        externalEventId: params.event.externalEventId,
+      });
+      return 'failed_transient';
+    }
+
+    if (foundation.kind === 'error') {
+      console.error('[whatsapp/webhook] inbound foundation error', {
+        provider: WHATSAPP_PROVIDER,
+        salonId: params.salonId,
+        operation: 'inbound_identity',
+        result: 'error',
+        errorCode: foundation.code,
+        externalEventId: params.event.externalEventId,
+      });
+
+      const markedFailed = await markWhatsAppEventReceiptFailed(supabase as any, {
+        salonId: params.salonId,
+        receiptId,
+        attemptCount,
+        errorCode: foundation.code,
+      });
+
+      if (!markedFailed.ok) {
+        console.error('[whatsapp/webhook] receipt mark-failed failed', {
+          provider: WHATSAPP_PROVIDER,
+          salonId: params.salonId,
+          operation: 'receipt_mark_failed',
+          result:
+            markedFailed.code === 'mark_failed_lost_ownership'
+              ? 'mark_failed_lost_ownership'
+              : 'mark_failed_db_error',
+          externalEventId: params.event.externalEventId,
+          code: markedFailed.code,
+        });
+      }
+
+      return 'failed_transient';
+    }
+
+    if (foundation.kind === 'skipped') {
+      // Malformed sender — no conversation/identity writes; terminal ignore.
+      console.log('[whatsapp/webhook] inbound foundation skipped', {
+        provider: WHATSAPP_PROVIDER,
+        salonId: params.salonId,
+        operation: 'inbound_identity',
+        result: foundation.code,
+        externalEventId: params.event.externalEventId,
+      });
+      finalizeStatus = 'ignored';
+    } else if (foundation.kind === 'conflict') {
+      // Permanent data/payload conflict — fail closed, terminal ignore (no retry storm).
+      console.error('[whatsapp/webhook] inbound foundation conflict', {
+        provider: WHATSAPP_PROVIDER,
+        salonId: params.salonId,
+        operation: 'inbound_identity',
+        result: foundation.code,
+        externalEventId: params.event.externalEventId,
+      });
+      finalizeStatus = 'ignored';
+    } else {
+      console.log('[whatsapp/webhook] inbound foundation', {
+        provider: WHATSAPP_PROVIDER,
+        salonId: params.salonId,
+        operation: 'inbound_identity',
+        result: foundation.outcome,
+        expiredReset: foundation.expiredReset,
+        externalEventId: params.event.externalEventId,
+      });
+      finalizeStatus = 'processed';
+    }
+  }
 
   const finalized = await finalizeWhatsAppEventReceipt(supabase as any, {
     salonId: params.salonId,
     receiptId,
     attemptCount,
-    finalStatus: params.finalStatus,
+    finalStatus: finalizeStatus,
   });
 
   if (finalized.ok) {
