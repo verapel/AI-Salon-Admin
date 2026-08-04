@@ -369,8 +369,9 @@ export interface AppleCalendarConnectResponse {
 export type WhatsAppCloudProvider = 'meta_cloud';
 
 /**
- * Safe WhatsApp Business connection metadata from owner APIs.
+ * Safe WhatsApp Business connection metadata from developer WhatsApp APIs.
  * Never includes ciphertext, iv, authTag, or plaintext secrets.
+ * webhookKey is a public routing identifier (not a credential).
  */
 export interface WhatsAppBusinessConnectionPublic {
   id: string;
@@ -392,6 +393,10 @@ export interface WhatsAppBusinessConnectionPublic {
   isAccessTokenStored: boolean;
   isAppSecretStored: boolean;
   isVerifyTokenStored: boolean;
+  /** Opaque public routing UUID for Meta webhook URL (not a secret). */
+  webhookKey?: string | null;
+  /** Absolute callback URL from server APP_URL + webhookKey. */
+  webhookCallbackUrl?: string | null;
 }
 
 /** Transient connect request only — never store or echo secrets. */

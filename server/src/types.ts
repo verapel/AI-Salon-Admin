@@ -170,8 +170,9 @@ export type ChannelEventProcessingStatus =
   | 'ignored';
 
 /**
- * Safe WhatsApp Business connection metadata for owner/admin APIs.
+ * Safe WhatsApp Business connection metadata for developer WhatsApp APIs.
  * Never includes access_token / app_secret / verify_token ciphertext, iv, or auth_tag.
+ * webhookKey is a public routing identifier (not a credential) — developer cabinet only.
  */
 export interface WhatsAppBusinessConnectionPublic {
   id: string;
@@ -196,6 +197,10 @@ export interface WhatsAppBusinessConnectionPublic {
   isAppSecretStored: boolean;
   /** True when encrypted verify-token material is stored (WA-2+). */
   isVerifyTokenStored: boolean;
+  /** Opaque public routing UUID for Meta webhook URL (not a secret). */
+  webhookKey?: string | null;
+  /** Absolute callback URL built from APP_URL + webhookKey, or null if APP_URL unset. */
+  webhookCallbackUrl?: string | null;
 }
 
 /** Transient connect request only — never persist or echo plaintext secrets. */

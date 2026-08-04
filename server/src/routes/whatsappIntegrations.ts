@@ -23,6 +23,7 @@ import type {
   WhatsAppConnectRequest,
   WhatsAppIntegrationResponse,
 } from '../types.js';
+import { buildWhatsAppWebhookCallbackUrl } from '../lib/publicAppUrl.js';
 
 const router = Router();
 
@@ -67,6 +68,7 @@ const CONNECTION_METADATA_SELECT = `
   phone_number_id,
   display_phone_number,
   verified_name,
+  webhook_key,
   token_expires_at,
   last_webhook_at,
   last_inbound_at,
@@ -86,6 +88,7 @@ type ConnectionMetadataRow = {
   phone_number_id: string | null;
   display_phone_number: string | null;
   verified_name: string | null;
+  webhook_key: string | null;
   token_expires_at: string | null;
   last_webhook_at: string | null;
   last_inbound_at: string | null;
@@ -138,6 +141,11 @@ function mapConnectionPublic(
     isVerifyTokenStored: boolean;
   }
 ): WhatsAppBusinessConnectionPublic {
+  const webhookKey =
+    typeof row.webhook_key === 'string' && row.webhook_key.trim().length > 0
+      ? row.webhook_key.trim()
+      : null;
+
   return {
     id: row.id,
     salonId: row.salon_id,
@@ -158,6 +166,8 @@ function mapConnectionPublic(
     isAccessTokenStored: flags.isAccessTokenStored,
     isAppSecretStored: flags.isAppSecretStored,
     isVerifyTokenStored: flags.isVerifyTokenStored,
+    webhookKey,
+    webhookCallbackUrl: webhookKey ? buildWhatsAppWebhookCallbackUrl(webhookKey) : null,
   };
 }
 

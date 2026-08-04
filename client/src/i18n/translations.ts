@@ -671,6 +671,16 @@ const en = {
     'Connect Meta Cloud API credentials for this salon.',
   'developer.integrations.whatsapp.emptyTitle': 'No salons',
   'developer.integrations.whatsapp.emptyDesc': 'Create a salon first, then connect WhatsApp.',
+  'developer.integrations.whatsapp.webhookCallbackUrl': 'Webhook callback URL',
+  'developer.integrations.whatsapp.webhookCopy': 'Copy',
+  'developer.integrations.whatsapp.webhookCopied': 'Copied',
+  'developer.integrations.whatsapp.webhookCopyFailed': 'Could not copy. Try again.',
+  'developer.integrations.whatsapp.webhookUnavailable':
+    'Webhook URL will be available after WhatsApp connection is created.',
+  'developer.integrations.whatsapp.webhookAppUrlMissing':
+    'Connection exists, but APP_URL is not configured on the server, so the full callback URL cannot be shown.',
+  'developer.integrations.whatsapp.webhookCallbackHint':
+    'This URL is used when configuring Webhook in Meta.',
   'developer.health.title': 'Health',
   'developer.health.subtitle': 'API, database, and bot health',
   'developer.health.loading': 'Checking system health...',
@@ -1415,6 +1425,16 @@ const ru: Record<TranslationKey, string> = {
     'Подключите учётные данные Meta Cloud API для этого салона.',
   'developer.integrations.whatsapp.emptyTitle': 'Нет салонов',
   'developer.integrations.whatsapp.emptyDesc': 'Сначала создайте салон, затем подключите WhatsApp.',
+  'developer.integrations.whatsapp.webhookCallbackUrl': 'Webhook callback URL',
+  'developer.integrations.whatsapp.webhookCopy': 'Копировать',
+  'developer.integrations.whatsapp.webhookCopied': 'Скопировано',
+  'developer.integrations.whatsapp.webhookCopyFailed': 'Не удалось скопировать. Попробуйте ещё раз.',
+  'developer.integrations.whatsapp.webhookUnavailable':
+    'Webhook URL появится после создания WhatsApp connection.',
+  'developer.integrations.whatsapp.webhookAppUrlMissing':
+    'Connection есть, но на сервере не задан APP_URL — полный callback URL показать нельзя.',
+  'developer.integrations.whatsapp.webhookCallbackHint':
+    'Этот URL понадобится при настройке Webhook в Meta.',
   'developer.health.title': 'Состояние',
   'developer.health.subtitle': 'API, база данных и боты',
   'developer.health.loading': 'Проверка состояния системы...',
@@ -2151,6 +2171,16 @@ const hy: Record<TranslationKey, string> = {
     'Միացրեք Meta Cloud API տվյալները այս սրահի համար։',
   'developer.integrations.whatsapp.emptyTitle': 'Սրահներ չկան',
   'developer.integrations.whatsapp.emptyDesc': 'Նախ ստեղծեք սրահ, ապա միացրեք WhatsApp։',
+  'developer.integrations.whatsapp.webhookCallbackUrl': 'Webhook callback URL',
+  'developer.integrations.whatsapp.webhookCopy': 'Պատճենել',
+  'developer.integrations.whatsapp.webhookCopied': 'Պատճենված է',
+  'developer.integrations.whatsapp.webhookCopyFailed': 'Չհաջողվեց պատճենել։ Փորձեք կրկին։',
+  'developer.integrations.whatsapp.webhookUnavailable':
+    'Webhook URL-ը հասանելի կլինի WhatsApp connection ստեղծելուց հետո։',
+  'developer.integrations.whatsapp.webhookAppUrlMissing':
+    'Connection կա, բայց սերվերում APP_URL սահմանված չէ՝ լրիվ callback URL-ը չի կարող ցուցադրվել։',
+  'developer.integrations.whatsapp.webhookCallbackHint':
+    'Այս URL-ն օգտագործվում է Meta-ում Webhook կարգավորելիս։',
   'developer.salons.empty': 'No salons yet.',
   'developer.integrations.overviewHint': 'Connect and manage Telegram bots for each salon from this page.',
   'developer.health.title': 'Վիճակ',
