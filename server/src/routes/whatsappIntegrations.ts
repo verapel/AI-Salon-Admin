@@ -57,6 +57,12 @@ async function requireActiveSalon(salonId: string): Promise<SalonLookupRow | { e
 
 const WHATSAPP_PROVIDER = 'whatsapp' as const;
 const CLOUD_PROVIDER: WhatsAppCloudProvider = 'meta_cloud';
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string): boolean {
+  return UUID_RE.test(value);
+}
 
 /** Public metadata only — never select credential_* columns into the response path. */
 const CONNECTION_METADATA_SELECT = `
@@ -614,6 +620,107 @@ router.get('/:salonId', async (req, res) => {
     });
   } catch (err) {
     return handleRouteError(res, err, salonId || null, 'developer_get');
+  }
+});
+
+/**
+ * POST /api/developer/integrations/whatsapp/:salonId/prepare
+ *
+ * Create minimal not_connected WhatsApp connection row so webhook_key / callback URL
+ * exist before Meta credentials are available. No secrets, no Meta calls, no connect.
+ *
+ * INSERT-only when missing. Never upsert null credentials. Idempotent.
+ */
+router.post('/:salonId/prepare', async (req, res) => {
+  const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
+
+  if (!salonId || !isUuid(salonId)) {
+    return res.status(404).json({ error: 'Salon not found', code: 'WHATSAPP_CONNECTION_NOT_FOUND' });
+  }
+
+  try {
+    const salon = await requireActiveSalon(salonId);
+    if ('error' in salon) {
+      return res.status(404).json({ error: salon.error, code: 'WHATSAPP_CONNECTION_NOT_FOUND' });
+    }
+
+    // Ensure salon_integrations row (whatsapp / not_connected if new). Never demotes connected.
+    const integration = await ensureWhatsAppIntegrationRow(salon.id);
+
+    const { data: existing, error: existingError } = await supabase
+      .from('whatsapp_business_connections')
+      .select('id')
+      .eq('salon_id', salon.id)
+      .maybeSingle();
+
+    if (existingError) {
+      throw new Error(existingError.message);
+    }
+
+    if (!existing) {
+      const now = new Date().toISOString();
+      // Minimal INSERT only — DB defaults generate id + webhook_key.
+      // Do NOT write null credential/Meta columns (never wipe via upsert).
+      const { error: insertError } = await supabase.from('whatsapp_business_connections').insert({
+        salon_id: salon.id,
+        integration_id: integration.id,
+        provider: CLOUD_PROVIDER,
+        updated_at: now,
+      });
+
+      if (insertError) {
+        if (!isUniqueViolation(insertError)) {
+          throw new Error(insertError.message);
+        }
+
+        // Concurrent prepare won the insert — re-read same-salon row only.
+        const { data: raced, error: raceError } = await supabase
+          .from('whatsapp_business_connections')
+          .select('id')
+          .eq('salon_id', salon.id)
+          .maybeSingle();
+
+        if (raceError) {
+          throw new Error(raceError.message);
+        }
+        if (!raced) {
+          console.error('[whatsapp] prepare unique conflict without same-salon row', {
+            salonId: salon.id,
+            operation: 'prepare_race_missing',
+          });
+          return sendWhatsAppError(
+            res,
+            'WHATSAPP_NOT_CONFIGURED',
+            500,
+            'WhatsApp connection storage is unavailable'
+          );
+        }
+      }
+    }
+
+    const payload = await loadPublicIntegration(salon.id);
+    if (!payload.connection) {
+      console.error('[whatsapp] prepare completed but public connection missing', {
+        salonId: salon.id,
+        operation: 'prepare_public_missing',
+      });
+      return sendWhatsAppError(
+        res,
+        'WHATSAPP_NOT_CONFIGURED',
+        500,
+        'WhatsApp connection storage is unavailable'
+      );
+    }
+
+    return res.status(200).json({
+      salonId: salon.id,
+      salonName: salon.name,
+      slug: salon.slug,
+      connected: payload.connected,
+      connection: payload.connection,
+    });
+  } catch (err) {
+    return handleRouteError(res, err, salonId || null, 'prepare');
   }
 });
 

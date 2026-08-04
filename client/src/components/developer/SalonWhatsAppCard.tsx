@@ -8,6 +8,9 @@ interface SalonWhatsAppCardProps {
   onConnect: () => void;
   onReconnect: () => void;
   onDisconnect: () => void;
+  onPrepare: () => Promise<boolean>;
+  preparing?: boolean;
+  prepareError?: string | null;
 }
 
 export default function SalonWhatsAppCard({
@@ -15,12 +18,16 @@ export default function SalonWhatsAppCard({
   onConnect,
   onReconnect,
   onDisconnect,
+  onPrepare,
+  preparing = false,
+  prepareError = null,
 }: SalonWhatsAppCardProps) {
   const { t } = useLanguage();
   const connected = integration.connected;
   const connection = integration.connection;
   const webhookCallbackUrl = connection?.webhookCallbackUrl?.trim() || null;
   const webhookKey = connection?.webhookKey?.trim() || null;
+  const needsPrepare = !connection;
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
 
   async function handleCopyWebhookUrl() {
@@ -36,6 +43,11 @@ export default function SalonWhatsAppCard({
     } catch {
       setCopyState('error');
     }
+  }
+
+  async function handlePrepare() {
+    if (preparing || !needsPrepare) return;
+    await onPrepare();
   }
 
   return (
@@ -152,20 +164,53 @@ export default function SalonWhatsAppCard({
         )}
       </div>
 
-      <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+      {prepareError ? (
+        <p className="mt-3 text-sm text-red-600 dark:text-red-400">{prepareError}</p>
+      ) : null}
+
+      <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         {connected ? (
           <>
-            <button type="button" className="btn-secondary w-full sm:w-auto" onClick={onReconnect}>
+            <button
+              type="button"
+              className="btn-secondary w-full sm:w-auto"
+              disabled={preparing}
+              onClick={onReconnect}
+            >
               {t('integrations.whatsapp.reconnect')}
             </button>
-            <button type="button" className="btn-secondary w-full sm:w-auto" onClick={onDisconnect}>
+            <button
+              type="button"
+              className="btn-secondary w-full sm:w-auto"
+              disabled={preparing}
+              onClick={onDisconnect}
+            >
               {t('integrations.whatsapp.disconnect')}
             </button>
           </>
         ) : (
-          <button type="button" className="btn-primary w-full sm:w-auto" onClick={onConnect}>
-            {t('integrations.whatsapp.connect')}
-          </button>
+          <>
+            {needsPrepare ? (
+              <button
+                type="button"
+                className="btn-secondary w-full sm:w-auto"
+                disabled={preparing}
+                onClick={() => void handlePrepare()}
+              >
+                {preparing
+                  ? t('developer.integrations.whatsapp.preparing')
+                  : t('developer.integrations.whatsapp.prepare')}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn-primary w-full sm:w-auto"
+              disabled={preparing}
+              onClick={onConnect}
+            >
+              {t('integrations.whatsapp.connect')}
+            </button>
+          </>
         )}
       </div>
     </div>

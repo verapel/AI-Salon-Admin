@@ -681,6 +681,10 @@ const en = {
     'Connection exists, but APP_URL is not configured on the server, so the full callback URL cannot be shown.',
   'developer.integrations.whatsapp.webhookCallbackHint':
     'This URL is used when configuring Webhook in Meta.',
+  'developer.integrations.whatsapp.prepare': 'Prepare WhatsApp',
+  'developer.integrations.whatsapp.preparing': 'Preparing...',
+  'developer.integrations.whatsapp.prepared': 'WhatsApp prepared',
+  'developer.integrations.whatsapp.prepareFailed': 'Failed to prepare WhatsApp',
   'developer.health.title': 'Health',
   'developer.health.subtitle': 'API, database, and bot health',
   'developer.health.loading': 'Checking system health...',
@@ -1435,6 +1439,10 @@ const ru: Record<TranslationKey, string> = {
     'Connection есть, но на сервере не задан APP_URL — полный callback URL показать нельзя.',
   'developer.integrations.whatsapp.webhookCallbackHint':
     'Этот URL понадобится при настройке Webhook в Meta.',
+  'developer.integrations.whatsapp.prepare': 'Подготовить WhatsApp',
+  'developer.integrations.whatsapp.preparing': 'Подготовка...',
+  'developer.integrations.whatsapp.prepared': 'WhatsApp подготовлен',
+  'developer.integrations.whatsapp.prepareFailed': 'Не удалось подготовить WhatsApp',
   'developer.health.title': 'Состояние',
   'developer.health.subtitle': 'API, база данных и боты',
   'developer.health.loading': 'Проверка состояния системы...',
@@ -2181,6 +2189,10 @@ const hy: Record<TranslationKey, string> = {
     'Connection կա, բայց սերվերում APP_URL սահմանված չէ՝ լրիվ callback URL-ը չի կարող ցուցադրվել։',
   'developer.integrations.whatsapp.webhookCallbackHint':
     'Այս URL-ն օգտագործվում է Meta-ում Webhook կարգավորելիս։',
+  'developer.integrations.whatsapp.prepare': 'Պատրաստել WhatsApp',
+  'developer.integrations.whatsapp.preparing': 'Պատրաստվում է...',
+  'developer.integrations.whatsapp.prepared': 'WhatsApp-ը պատրաստ է',
+  'developer.integrations.whatsapp.prepareFailed': 'Չհաջողվեց պատրաստել WhatsApp',
   'developer.salons.empty': 'No salons yet.',
   'developer.integrations.overviewHint': 'Connect and manage Telegram bots for each salon from this page.',
   'developer.health.title': 'Վիճակ',

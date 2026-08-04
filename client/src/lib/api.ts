@@ -243,6 +243,11 @@ export const api = {
           body: JSON.stringify(body),
         }
       ),
+    prepareWhatsApp: (salonId: string) =>
+      request<import('@/types').DeveloperWhatsAppIntegration>(
+        `/developer/integrations/whatsapp/${salonId}/prepare`,
+        { method: 'POST' }
+      ),
     disconnectWhatsApp: (salonId: string) =>
       request<import('@/types').DeveloperWhatsAppIntegration>(
         `/developer/integrations/whatsapp/${salonId}/disconnect`,

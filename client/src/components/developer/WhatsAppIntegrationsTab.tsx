@@ -56,6 +56,9 @@ export default function WhatsAppIntegrationsTab({ refreshKey = 0 }: WhatsAppInte
   const [disconnectSubmitting, setDisconnectSubmitting] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
 
+  const [preparingSalonId, setPreparingSalonId] = useState<string | null>(null);
+  const [prepareErrors, setPrepareErrors] = useState<Record<string, string>>({});
+
   const loadIntegrations = useCallback(() => {
     setError(false);
     setLoading(true);
@@ -119,6 +122,31 @@ export default function WhatsAppIntegrationsTab({ refreshKey = 0 }: WhatsAppInte
     }
   }
 
+  async function handlePrepare(integration: DeveloperWhatsAppIntegration): Promise<boolean> {
+    if (preparingSalonId) return false;
+    setPreparingSalonId(integration.salonId);
+    setPrepareErrors((prev) => {
+      const next = { ...prev };
+      delete next[integration.salonId];
+      return next;
+    });
+    try {
+      const updated = await api.developer.prepareWhatsApp(integration.salonId);
+      setIntegrations((prev) =>
+        prev.map((row) => (row.salonId === updated.salonId ? updated : row))
+      );
+      return true;
+    } catch {
+      setPrepareErrors((prev) => ({
+        ...prev,
+        [integration.salonId]: t('developer.integrations.whatsapp.prepareFailed'),
+      }));
+      return false;
+    } finally {
+      setPreparingSalonId(null);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[240px] flex-col items-center justify-center gap-3">
@@ -160,6 +188,9 @@ export default function WhatsAppIntegrationsTab({ refreshKey = 0 }: WhatsAppInte
           <SalonWhatsAppCard
             key={integration.salonId}
             integration={integration}
+            preparing={preparingSalonId === integration.salonId}
+            prepareError={prepareErrors[integration.salonId] ?? null}
+            onPrepare={() => handlePrepare(integration)}
             onConnect={() => openConnect(integration, 'connect')}
             onReconnect={() => openConnect(integration, 'reconnect')}
             onDisconnect={() => {
