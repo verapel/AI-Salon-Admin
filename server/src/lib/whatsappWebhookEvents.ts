@@ -1,7 +1,7 @@
 /**
- * WhatsApp Cloud webhook event classification + deterministic external IDs (WA-3B / WA-4B).
- * Extracts minimal inbound sender identity fields for conversation/identity foundation.
- * Does not inspect message text for booking/AI and does not write identities/conversations.
+ * WhatsApp Cloud webhook event classification + deterministic external IDs (WA-3B / WA-4B / WA-4C).
+ * Extracts minimal inbound sender identity fields + in-memory text body for FSM.
+ * Text body is never placed in receipt metadata. Does not write identities/conversations.
  */
 
 import { createHash } from 'node:crypto';
@@ -30,6 +30,13 @@ export interface ClassifiedWhatsAppWebhookEvent {
    * Not stored in receipt metadata.
    */
   messageTimestampIso: string | null;
+  /** messages[].type — in-memory only. */
+  messageType: string | null;
+  /**
+   * messages[].text.body when type=text — in-memory FSM only.
+   * Never copy into receipt metadata, logs, or conversation.state.
+   */
+  messageTextBody: string | null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -79,7 +86,7 @@ function unsupportedEventId(parts: string[]): string {
 
 /**
  * Extract classified events from a parsed Meta WhatsApp webhook payload.
- * Does not inspect message text for business logic.
+ * Text body is extracted in-memory for type=text only (not persisted here).
  */
 export function classifyWhatsAppWebhookPayload(
   payload: unknown
@@ -114,6 +121,8 @@ export function classifyWhatsAppWebhookPayload(
           isInboundMessage: false,
           inboundSender: null,
           messageTimestampIso: null,
+          messageType: null,
+          messageTextBody: null,
         });
         continue;
       }
@@ -129,6 +138,9 @@ export function classifyWhatsAppWebhookPayload(
         const messageType = asNonEmptyString(message?.type) ?? 'unknown';
         const messageFrom = asNonEmptyString(message?.from);
         const messageTimestampIso = parseWhatsAppMessageTimestamp(message?.timestamp);
+        const textObj = asRecord(message?.text);
+        const messageTextBody =
+          messageType === 'text' ? asNonEmptyString(textObj?.body) : null;
 
         // Prefer contact matching messages[].from; else single-contact fallback when unambiguous.
         let contactWaId: string | null = null;
@@ -165,10 +177,13 @@ export function classifyWhatsAppWebhookPayload(
             ...(inboundSender ? { hasSender: '1' } : { hasSender: '0' }),
             ...(inboundSender?.senderAddressMismatch ? { senderMismatch: '1' } : {}),
             ...(messageTimestampIso ? { hasMessageAt: '1' } : {}),
+            // Intentionally omit messageTextBody / raw body.
           },
           isInboundMessage: true,
           inboundSender,
           messageTimestampIso,
+          messageType,
+          messageTextBody,
         });
       }
 
@@ -192,6 +207,8 @@ export function classifyWhatsAppWebhookPayload(
           isInboundMessage: false,
           inboundSender: null,
           messageTimestampIso: null,
+          messageType: null,
+          messageTextBody: null,
         });
       }
 
@@ -207,6 +224,8 @@ export function classifyWhatsAppWebhookPayload(
           isInboundMessage: false,
           inboundSender: null,
           messageTimestampIso: null,
+          messageType: null,
+          messageTextBody: null,
         });
       }
     }

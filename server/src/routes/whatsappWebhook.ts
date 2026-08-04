@@ -1,7 +1,7 @@
 /**
- * Public Meta WhatsApp Cloud webhook foundation (WA-3B).
- * GET verification + POST HMAC + receipt dedupe only.
- * No messaging, FSM, clients, appointments, or Meta API calls.
+ * Public Meta WhatsApp Cloud webhook foundation (WA-3B / WA-4B / WA-4C).
+ * GET verification + POST HMAC + receipt dedupe + inbound identity + booking FSM.
+ * FSM produces internal reply results only — no Meta outbound, no appointments/clients.
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -27,6 +27,8 @@ import {
   RECEIPT_PROCESSING_STALE_MS,
 } from '../lib/whatsappWebhookReceipts.js';
 import { processWhatsAppInboundIdentityFoundation } from '../lib/whatsappIdentity.js';
+import { extractWhatsAppInboundTextBody } from '../lib/whatsappInboundText.js';
+import { processWhatsAppBookingFsm } from '../lib/whatsappBookingFlow.js';
 
 const router = Router();
 const WHATSAPP_PROVIDER = 'whatsapp' as const;
@@ -168,7 +170,7 @@ async function touchWebhookTimestamps(params: {
 }
 
 /**
- * Claim → (inbound identity/conversation foundation) → finalize.
+ * Claim → (inbound identity/conversation foundation) → (booking FSM) → finalize.
  *
  * Transitions:
  *   NEW → processing → processed|ignored
@@ -180,7 +182,7 @@ async function touchWebhookTimestamps(params: {
  *   finalize/mark-failed lost_ownership → no further mutation → HTTP 500
  *
  * attemptCount from claim is the ownership generation and must be passed to finalize/fail.
- * Receipt ownership alone does not guarantee exactly-once appointments/messages.
+ * Booking FSM durable writes use owned expected-step RPC (WA-4C); no appointments yet.
  *
  * Permanent identity conflicts finalize as ignored (terminal) to avoid Meta retry storms.
  * Ambiguous/unresolved phone match finalizes as processed with conversation only.
@@ -334,8 +336,79 @@ async function claimAndFinalizeReceipt(params: {
         operation: 'inbound_identity',
         result: foundation.outcome,
         expiredReset: foundation.expiredReset,
+        advanced: foundation.advanced,
         externalEventId: params.event.externalEventId,
       });
+
+      // WA-4C: durable booking FSM (internal reply only — no Meta send / no appointments).
+      const textBody = extractWhatsAppInboundTextBody(params.event);
+      if (textBody) {
+        const fsm = await processWhatsAppBookingFsm({
+          db: supabase as any,
+          salonId: params.salonId,
+          externalUserId: foundation.externalUserId,
+          text: textBody,
+          externalMessageId: params.event.externalMessageId,
+          messageTimestampIso: params.event.messageTimestampIso,
+          receiptId,
+          attemptCount,
+          inboundAdvanced: foundation.advanced,
+        });
+
+        if (fsm.kind === 'lost_ownership') {
+          console.error('[whatsapp/webhook] booking fsm lost ownership', {
+            provider: WHATSAPP_PROVIDER,
+            salonId: params.salonId,
+            operation: 'booking_fsm',
+            result: 'lost_ownership',
+            externalEventId: params.event.externalEventId,
+          });
+          return 'failed_transient';
+        }
+
+        if (fsm.kind === 'error') {
+          console.error('[whatsapp/webhook] booking fsm error', {
+            provider: WHATSAPP_PROVIDER,
+            salonId: params.salonId,
+            operation: 'booking_fsm',
+            result: 'error',
+            errorCode: fsm.code,
+            externalEventId: params.event.externalEventId,
+          });
+          const markedFailed = await markWhatsAppEventReceiptFailed(supabase as any, {
+            salonId: params.salonId,
+            receiptId,
+            attemptCount,
+            errorCode: fsm.code,
+          });
+          if (!markedFailed.ok) {
+            console.error('[whatsapp/webhook] receipt mark-failed failed', {
+              provider: WHATSAPP_PROVIDER,
+              salonId: params.salonId,
+              operation: 'receipt_mark_failed',
+              result:
+                markedFailed.code === 'mark_failed_lost_ownership'
+                  ? 'mark_failed_lost_ownership'
+                  : 'mark_failed_db_error',
+              externalEventId: params.event.externalEventId,
+              code: markedFailed.code,
+            });
+          }
+          return 'failed_transient';
+        }
+
+        // Log structured outcome only — never raw message body.
+        console.log('[whatsapp/webhook] booking fsm', {
+          provider: WHATSAPP_PROVIDER,
+          salonId: params.salonId,
+          operation: 'booking_fsm',
+          result: fsm.kind,
+          messageKey: fsm.kind === 'reply' ? fsm.messageKey : undefined,
+          reason: fsm.kind === 'noop' ? fsm.reason : undefined,
+          externalEventId: params.event.externalEventId,
+        });
+      }
+
       finalizeStatus = 'processed';
     }
   }

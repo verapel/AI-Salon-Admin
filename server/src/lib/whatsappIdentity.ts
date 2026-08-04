@@ -2,7 +2,7 @@
  * WhatsApp client_channel_identities resolution + attach (WA-4B / WA-4B1).
  * Conversation-first: never creates clients; attaches identity only to a real client.
  * Durable identity/client-link writes go through owned Postgres RPCs (receipt FOR UPDATE).
- * No appointments, FSM, or outbound messaging.
+ * No appointments or outbound messaging (booking FSM is WA-4C, separate).
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -31,6 +31,9 @@ export type InboundIdentityFoundationResult =
       conversationId: string;
       clientId: string | null;
       expiredReset: boolean;
+      /** False when inbound was older than conversation.last_inbound_at (out-of-order). */
+      advanced: boolean;
+      externalUserId: string;
     }
   | {
       kind: 'conflict';
@@ -314,6 +317,8 @@ export async function processWhatsAppInboundIdentityFoundation(params: {
       conversationId,
       clientId: clientLoad.client.id,
       expiredReset: touched.expiredReset,
+      advanced: touched.advanced,
+      externalUserId: sender.externalUserId,
     };
   }
 
@@ -325,6 +330,8 @@ export async function processWhatsAppInboundIdentityFoundation(params: {
       conversationId,
       clientId: touched.clientId,
       expiredReset: touched.expiredReset,
+      advanced: touched.advanced,
+      externalUserId: sender.externalUserId,
     };
   }
 
@@ -341,6 +348,8 @@ export async function processWhatsAppInboundIdentityFoundation(params: {
       conversationId,
       clientId: null,
       expiredReset: touched.expiredReset,
+      advanced: touched.advanced,
+      externalUserId: sender.externalUserId,
     };
   }
   if (phoneMatch.kind === 'none') {
@@ -350,6 +359,8 @@ export async function processWhatsAppInboundIdentityFoundation(params: {
       conversationId,
       clientId: touched.clientId,
       expiredReset: touched.expiredReset,
+      advanced: touched.advanced,
+      externalUserId: sender.externalUserId,
     };
   }
 
@@ -387,5 +398,7 @@ export async function processWhatsAppInboundIdentityFoundation(params: {
     conversationId,
     clientId: phoneMatch.client.id,
     expiredReset: touched.expiredReset,
+    advanced: touched.advanced,
+    externalUserId: sender.externalUserId,
   };
 }
