@@ -232,6 +232,7 @@ export async function claimWhatsAppOutboundMessage(params: {
 }): Promise<
   | { kind: 'claimed'; row: WhatsAppOutboundRow; claimToken: string }
   | { kind: 'not_claimable' }
+  | { kind: 'exhausted'; attemptCount?: number }
   | { kind: 'error'; code: string }
 > {
   const { data, error } = await params.db.rpc('claim_whatsapp_outbound_message', {
@@ -243,6 +244,13 @@ export async function claimWhatsAppOutboundMessage(params: {
   if (!row) return { kind: 'error', code: 'claim_rpc_shape' };
   const kind = String(row.kind ?? '');
   if (kind === 'not_claimable') return { kind: 'not_claimable' };
+  if (kind === 'exhausted') {
+    return {
+      kind: 'exhausted',
+      attemptCount:
+        row.attempt_count == null ? undefined : Number(row.attempt_count),
+    };
+  }
   if (kind !== 'claimed') return { kind: 'error', code: 'claim_rpc_kind' };
   const claimToken = String(row.claim_token ?? '');
   if (!claimToken) return { kind: 'error', code: 'claim_token_missing' };
@@ -253,7 +261,8 @@ export async function claimWhatsAppOutboundMessage(params: {
   };
 }
 
-async function finalizeSent(params: {
+/** Exported for WA-4F2 stale-claimant finalize CAS tests. */
+export async function finalizeWhatsAppOutboundSent(params: {
   db: SupabaseClient | any;
   messageId: string;
   claimToken: string;
@@ -273,7 +282,8 @@ async function finalizeSent(params: {
   return 'error';
 }
 
-async function finalizeFailure(params: {
+/** Exported for WA-4F2 stale-claimant finalize CAS tests. */
+export async function finalizeWhatsAppOutboundFailure(params: {
   db: SupabaseClient | any;
   messageId: string;
   claimToken: string;
@@ -339,6 +349,9 @@ export async function flushWhatsAppOutboundMessage(params: {
   if (claimed.kind === 'not_claimable') {
     return { kind: 'skipped', code: 'not_claimable' };
   }
+  if (claimed.kind === 'exhausted') {
+    return { kind: 'failed', code: 'exhausted' };
+  }
   if (claimed.kind === 'error') {
     return { kind: 'error', code: claimed.code };
   }
@@ -346,7 +359,7 @@ export async function flushWhatsAppOutboundMessage(params: {
   const text =
     typeof claimed.row.payload?.text === 'string' ? claimed.row.payload.text.trim() : '';
   if (!text) {
-    await finalizeFailure({
+    await finalizeWhatsAppOutboundFailure({
       db: params.db,
       messageId: claimed.row.id,
       claimToken: claimed.claimToken,
@@ -362,7 +375,7 @@ export async function flushWhatsAppOutboundMessage(params: {
     salonId: claimed.row.salon_id,
   });
   if (resolved.kind === 'error') {
-    await finalizeFailure({
+    await finalizeWhatsAppOutboundFailure({
       db: params.db,
       messageId: claimed.row.id,
       claimToken: claimed.claimToken,
@@ -381,7 +394,7 @@ export async function flushWhatsAppOutboundMessage(params: {
       const code = isWhatsAppCredentialCryptoError(err)
         ? 'crypto_invalid'
         : 'crypto_error';
-      await finalizeFailure({
+      await finalizeWhatsAppOutboundFailure({
         db: params.db,
         messageId: claimed.row.id,
         claimToken: claimed.claimToken,
@@ -407,7 +420,7 @@ export async function flushWhatsAppOutboundMessage(params: {
 
   const classified = classifySendForOutbox(sendResult);
   if (sendResult.kind === 'sent' && classified.metaMessageId) {
-    const fin = await finalizeSent({
+    const fin = await finalizeWhatsAppOutboundSent({
       db: params.db,
       messageId: claimed.row.id,
       claimToken: claimed.claimToken,
@@ -420,7 +433,7 @@ export async function flushWhatsAppOutboundMessage(params: {
     return { kind: 'error', code: 'finalize_sent_failed' };
   }
 
-  const fin = await finalizeFailure({
+  const fin = await finalizeWhatsAppOutboundFailure({
     db: params.db,
     messageId: claimed.row.id,
     claimToken: claimed.claimToken,

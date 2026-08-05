@@ -29,6 +29,7 @@ import {
   requireStaffPortalAccess,
 } from './middleware/auth.js';
 import { supabase, checkSupabaseConnection } from './lib/supabase.js';
+import { startWhatsAppOutboundWorker } from './lib/whatsappOutboundWorker.js';
 import { loadTelegramTokenFromDb, saveTelegramTokenToDb } from './lib/telegramToken.js';
 import { registerTelegramPollingRestarter } from './lib/telegramPollingControl.js';
 import {
@@ -1226,6 +1227,18 @@ async function bootstrap() {
       });
     } else {
       startTelegramPolling();
+    }
+
+    // WA-4F2: WhatsApp outbound retry worker (separate from Telegram).
+    // Safe without Meta credentials / before migration (batch errors are non-fatal).
+    try {
+      startWhatsAppOutboundWorker({ db: supabase });
+    } catch (err) {
+      console.error('[whatsapp/outbound-worker] bootstrap failed', {
+        operation: 'outbound_worker_bootstrap',
+        result: 'error',
+        message: err instanceof Error ? err.message : 'unknown',
+      });
     }
   });
 }

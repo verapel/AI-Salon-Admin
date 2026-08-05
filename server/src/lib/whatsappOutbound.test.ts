@@ -675,17 +675,22 @@ describe('WA-4F1 migration / ordering / safety (executed static)', () => {
 
   it('23. enqueue-before-finalize route ordering', () => {
     assert.match(webhook, /enqueue durable outbound BEFORE inbound finalize/);
-    // Use call-site markers (not import lines).
-    const enqueueIdx = webhook.indexOf('const enqueued = await enqueueWhatsAppOutbound');
-    const finalizeIdx = webhook.indexOf(
-      'const finalized = await finalizeWhatsAppEventReceipt',
+    // WA-4F2: gate helper owns enqueue→finalize; flush remains after gate.
+    const gateIdx = webhook.indexOf(
+      'enqueueWhatsAppOutboundThenFinalizeInbound',
+    );
+    // Prefer the call site (not the import).
+    const gateCallIdx = webhook.indexOf(
+      'await enqueueWhatsAppOutboundThenFinalizeInbound',
     );
     const flushIdx = webhook.indexOf(
       'const flushed = await flushWhatsAppOutboundMessage',
     );
-    assert.ok(enqueueIdx > 0, 'enqueue call site');
-    assert.ok(finalizeIdx > enqueueIdx, 'finalize after enqueue');
-    assert.ok(flushIdx > finalizeIdx, 'flush after finalize');
+    assert.ok(gateIdx > 0, 'gate import/helper present');
+    assert.ok(gateCallIdx > 0, 'gate call site');
+    assert.ok(flushIdx > gateCallIdx, 'flush after finalize gate');
+    assert.match(webhook, /finalizeWhatsAppEventReceipt/);
+    assert.match(webhook, /enqueueWhatsAppOutbound/);
   });
 
   it('24. inline send failure does not reopen inbound receipt', () => {
@@ -724,9 +729,21 @@ describe('WA-4F1 migration / ordering / safety (executed static)', () => {
     assert.equal(/TelegramBotManager|startTelegramPolling/.test(worker), false);
   });
 
-  it('worker not bootstrapped in index', () => {
-    assert.equal(indexSrc.includes('runWhatsAppOutboundBatch'), false);
-    assert.equal(indexSrc.includes('whatsappOutboundWorker'), false);
+  it('14. inline flush after finalize still present (WA-4F2 unchanged order)', () => {
+    assert.match(webhook, /Best-effort inline flush AFTER finalize/);
+    assert.match(webhook, /enqueueWhatsAppOutboundThenFinalizeInbound/);
+  });
+
+  it('index starts WhatsApp worker only (tiny bootstrap)', () => {
+    assert.match(indexSrc, /startWhatsAppOutboundWorker/);
+    assert.match(indexSrc, /from '\.\/lib\/whatsappOutboundWorker\.js'/);
+    // Must not intermingle with Telegram restart/FSM.
+    assert.equal(indexSrc.includes('restartTelegramPolling();'), true); // still present elsewhere
+    const bootBlock = indexSrc.slice(
+      indexSrc.indexOf('startWhatsAppOutboundWorker'),
+      indexSrc.indexOf('startWhatsAppOutboundWorker') + 400,
+    );
+    assert.equal(/TelegramBotManager|startTelegramPolling|bookingState/.test(bootBlock), false);
   });
 
   it('N. residual crash-window documented (reasoned)', () => {

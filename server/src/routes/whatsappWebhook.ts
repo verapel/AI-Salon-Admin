@@ -35,6 +35,7 @@ import {
   enqueueWhatsAppOutbound,
   flushWhatsAppOutboundMessage,
 } from '../lib/whatsappOutbound.js';
+import { enqueueWhatsAppOutboundThenFinalizeInbound } from '../lib/whatsappOutboundGate.js';
 import {
   renderWhatsAppCommitOutbound,
   renderWhatsAppFsmOutbound,
@@ -564,48 +565,59 @@ async function claimAndFinalizeReceipt(params: {
     }
   }
 
-  // WA-4F1: enqueue durable outbound BEFORE inbound finalize.
+  // WA-4F1/4F2: enqueue durable outbound BEFORE inbound finalize.
   // Enqueue failure → transient 500 so Meta can retry (unique key prevents dup intent).
-  let outboxMessageId: string | null = null;
-  if (pendingOutbound && finalizeStatus === 'processed') {
-    const enqueued = await enqueueWhatsAppOutbound({
-      db: supabase as any,
-      salonId: params.salonId,
-      conversationId: pendingOutbound.conversationId,
-      inboundReceiptId: receiptId,
-      recipientExternalUserId: pendingOutbound.recipientExternalUserId,
-      messageKey: pendingOutbound.messageKey,
-      text: pendingOutbound.text,
-      sequence: 0,
-    });
-    if (enqueued.kind === 'error') {
-      console.error('[whatsapp/webhook] outbound enqueue failed', {
-        provider: WHATSAPP_PROVIDER,
+  const gateOutbound =
+    pendingOutbound && finalizeStatus === 'processed' ? pendingOutbound : null;
+
+  const gated = await enqueueWhatsAppOutboundThenFinalizeInbound({
+    pendingOutbound: gateOutbound,
+    enqueue: async () => {
+      const enqueued = await enqueueWhatsAppOutbound({
+        db: supabase as any,
         salonId: params.salonId,
-        operation: 'outbound_enqueue',
-        result: 'error',
-        errorCode: enqueued.code,
-        externalEventId: params.event.externalEventId,
+        conversationId: gateOutbound!.conversationId,
+        inboundReceiptId: receiptId,
+        recipientExternalUserId: gateOutbound!.recipientExternalUserId,
+        messageKey: gateOutbound!.messageKey,
+        text: gateOutbound!.text,
+        sequence: 0,
       });
-      return 'failed_transient';
-    }
-    outboxMessageId = enqueued.row.id;
-    console.log('[whatsapp/webhook] outbound enqueued', {
+      if (enqueued.kind === 'enqueued') {
+        console.log('[whatsapp/webhook] outbound enqueued', {
+          provider: WHATSAPP_PROVIDER,
+          salonId: params.salonId,
+          operation: 'outbound_enqueue',
+          result: enqueued.created ? 'created' : 'duplicate',
+          messageKey: gateOutbound!.messageKey,
+          externalEventId: params.event.externalEventId,
+        });
+      }
+      return enqueued;
+    },
+    finalizeInbound: async () =>
+      finalizeWhatsAppEventReceipt(supabase as any, {
+        salonId: params.salonId,
+        receiptId,
+        attemptCount,
+        finalStatus: finalizeStatus,
+      }),
+  });
+
+  if (gated.kind === 'enqueue_failed') {
+    console.error('[whatsapp/webhook] outbound enqueue failed', {
       provider: WHATSAPP_PROVIDER,
       salonId: params.salonId,
       operation: 'outbound_enqueue',
-      result: enqueued.created ? 'created' : 'duplicate',
-      messageKey: pendingOutbound.messageKey,
+      result: 'error',
+      errorCode: gated.code,
       externalEventId: params.event.externalEventId,
     });
+    return 'failed_transient';
   }
 
-  const finalized = await finalizeWhatsAppEventReceipt(supabase as any, {
-    salonId: params.salonId,
-    receiptId,
-    attemptCount,
-    finalStatus: finalizeStatus,
-  });
+  const outboxMessageId = gated.outboxMessageId;
+  const finalized = gated.finalize;
 
   if (finalized.ok) {
     // Best-effort inline flush AFTER finalize. Send failure must not reopen inbound.
