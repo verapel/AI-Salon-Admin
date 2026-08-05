@@ -1,7 +1,8 @@
 /**
- * WA-4D1 / WA-4D2 booking commit tests (no Meta, no real Postgres RPC execution).
- * Executed: result mapping, overlap math, FSM commit signal, migration static checks.
- * Reasoned/static: full SQL RPC concurrency (covered by migration review + mocked kinds).
+ * WA-4D / WA-4E1 booking commit tests (no Meta, no real Postgres RPC execution).
+ * Executed: result mapping, overlap math, FSM commit signal, slot recovery with mocks,
+ * migration static checks, AppointmentSource type drift.
+ * Reasoned/static: full SQL RPC concurrency / already_booked repair branches in Postgres.
  *
  * Run: npm run test --prefix server
  */
@@ -9,7 +10,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
-import { commitWhatsAppBookingOwned } from './whatsappBookingCommit.js';
+import {
+  commitWhatsAppBookingOwned,
+  recoverWhatsAppBookingSlotUnavailable,
+  type WhatsAppSlotRecoveryDeps,
+} from './whatsappBookingCommit.js';
 import { processWhatsAppBookingFsm } from './whatsappBookingFlow.js';
 import {
   WHATSAPP_BOOKING_FLOW,
@@ -17,6 +22,7 @@ import {
 } from './whatsappBookingState.js';
 import type { WhatsAppBookingFsmDeps } from './whatsappBookingFlow.js';
 import type { ConversationBookingSnapshot } from './whatsappConversation.js';
+import type { AppointmentSource as ServerAppointmentSource } from '../types.js';
 
 /** Same interval rule as scheduleSlots / commit RPC. */
 function intervalsOverlap(
@@ -87,6 +93,7 @@ describe('WA-4D1 commit RPC mapping (executed with mock db)', () => {
     name: 'Анна',
     phone: '+15551234567',
     runPrecheck: false as const,
+    recoverSlotUnavailable: false as const,
   };
 
   it('1. booking_created', async () => {
@@ -110,9 +117,22 @@ describe('WA-4D1 commit RPC mapping (executed with mock db)', () => {
     assert.equal(r.kind, 'already_booked');
   });
 
-  it('5. slot_unavailable', async () => {
+  it('5. slot_unavailable (raw RPC mapping; recovery disabled)', async () => {
     const r = await commitWhatsAppBookingOwned({ ...base, db: mockDb('slot_unavailable') });
     assert.equal(r.kind, 'slot_unavailable');
+  });
+
+  it('WA-4E1: already_booked_no_repair / repair_conflict mapped', async () => {
+    const a = await commitWhatsAppBookingOwned({
+      ...base,
+      db: mockDb('already_booked_no_repair'),
+    });
+    assert.equal(a.kind, 'already_booked_no_repair');
+    const b = await commitWhatsAppBookingOwned({
+      ...base,
+      db: mockDb('already_booked_repair_conflict'),
+    });
+    assert.equal(b.kind, 'already_booked_repair_conflict');
   });
 
   it('9. service_unavailable', async () => {
@@ -369,10 +389,470 @@ describe('WA-4D1 FSM commit signal (executed)', () => {
   });
 });
 
+describe('WA-4E1 slot recovery (executed with mocks)', () => {
+  const recoveryState: WhatsAppBookingState = {
+    serviceId: 'svc-1',
+    serviceName: 'Стрижка',
+    staffId: 'stf-1',
+    staffName: 'Мария',
+    date: '2099-06-15',
+    time: '12:00',
+    name: 'Анна',
+    phone: '+15551234567',
+    sourceMessageId: 'wamid.phone',
+  };
+
+  function makeRecoveryDeps(opts: {
+    slots: string[];
+    dates?: string[];
+    transitionKind?: 'ok' | 'lost_ownership' | 'stale_step' | 'outdated';
+  }): {
+    deps: WhatsAppSlotRecoveryDeps;
+    transitionArgs: Array<Record<string, unknown>>;
+  } {
+    const transitionArgs: Array<Record<string, unknown>> = [];
+    const deps: WhatsAppSlotRecoveryDeps = {
+      resolveServiceById: async () => ({
+        id: 'svc-1',
+        name: 'Стрижка',
+        duration: 60,
+        category: 'Hair',
+      }),
+      computeAvailableSlots: async () => opts.slots,
+      findNextAvailableDates: async () => opts.dates ?? ['2099-06-16', '2099-06-17'],
+      transition: async (params) => {
+        transitionArgs.push({
+          externalMessageId: params.externalMessageId,
+          expectedStep: params.expectedStep,
+          nextStep: params.nextStep,
+          nextState: params.nextState,
+        });
+        if (opts.transitionKind === 'lost_ownership') return { kind: 'lost_ownership' };
+        if (opts.transitionKind === 'stale_step') {
+          return { kind: 'stale_step', currentFlow: 'booking', currentStep: 'service' };
+        }
+        if (opts.transitionKind === 'outdated') return { kind: 'outdated' };
+        return {
+          kind: 'ok',
+          duplicate: false,
+          conversationId: 'c1',
+          currentFlow: WHATSAPP_BOOKING_FLOW,
+          currentStep: params.nextStep,
+          state: params.nextState as WhatsAppBookingState,
+          clientId: null,
+        };
+      },
+    };
+    return { deps, transitionArgs };
+  }
+
+  it('1. slot conflict + free slots → time recovery', async () => {
+    const { deps, transitionArgs } = makeRecoveryDeps({ slots: ['10:00', '14:00'] });
+    const r = await recoverWhatsAppBookingSlotUnavailable(
+      {
+        db: {},
+        salonId: 'salon-1',
+        receiptId: 'r1',
+        attemptCount: 1,
+        externalUserId: 'u1',
+        sourceMessageId: 'wamid.phone',
+        messageTimestampIso: '2026-08-05T12:00:00.000Z',
+        state: recoveryState,
+      },
+      deps,
+    );
+    assert.equal(r.kind, 'slot_unavailable_choose_time');
+    if (r.kind === 'slot_unavailable_choose_time') {
+      assert.equal(r.date, '2099-06-15');
+      assert.deepEqual(
+        r.options.map((o) => o.id),
+        ['10:00', '14:00'],
+      );
+    }
+    assert.equal(transitionArgs[0]?.externalMessageId, null);
+    assert.equal(transitionArgs[0]?.expectedStep, 'ready_to_book');
+    assert.equal(transitionArgs[0]?.nextStep, 'time');
+    const ns = transitionArgs[0]?.nextState as Record<string, string>;
+    assert.equal(ns.sourceMessageId, 'wamid.phone');
+    assert.equal(ns.date, '2099-06-15');
+    assert.equal(ns.time, undefined);
+    assert.equal(ns.name, undefined);
+    assert.equal(ns.phone, undefined);
+    assert.equal(ns.appointmentId, undefined);
+  });
+
+  it('2. slot conflict + no slots → date recovery', async () => {
+    const { deps, transitionArgs } = makeRecoveryDeps({
+      slots: [],
+      dates: ['2099-06-16'],
+    });
+    const r = await recoverWhatsAppBookingSlotUnavailable(
+      {
+        db: {},
+        salonId: 'salon-1',
+        receiptId: 'r1',
+        attemptCount: 1,
+        externalUserId: 'u1',
+        sourceMessageId: 'wamid.phone',
+        messageTimestampIso: '2026-08-05T12:00:00.000Z',
+        state: recoveryState,
+      },
+      deps,
+    );
+    assert.equal(r.kind, 'slot_unavailable_choose_date');
+    if (r.kind === 'slot_unavailable_choose_date') {
+      assert.deepEqual(
+        r.options.map((o) => o.id),
+        ['2099-06-16'],
+      );
+    }
+    assert.equal(transitionArgs[0]?.externalMessageId, null);
+    assert.equal(transitionArgs[0]?.nextStep, 'date');
+    const ns = transitionArgs[0]?.nextState as Record<string, string>;
+    assert.equal(ns.date, undefined);
+    assert.equal(ns.sourceMessageId, 'wamid.phone');
+  });
+
+  it('3/4. recovery uses externalMessageId=null; stores sourceMessageId', async () => {
+    const { deps, transitionArgs } = makeRecoveryDeps({ slots: ['11:00'] });
+    await recoverWhatsAppBookingSlotUnavailable(
+      {
+        db: {},
+        salonId: 'salon-1',
+        receiptId: 'r1',
+        attemptCount: 1,
+        externalUserId: 'u1',
+        sourceMessageId: 'wamid.phone',
+        messageTimestampIso: null,
+        state: recoveryState,
+      },
+      deps,
+    );
+    assert.equal(transitionArgs[0]?.externalMessageId, null);
+    assert.equal(
+      (transitionArgs[0]?.nextState as Record<string, string>).sourceMessageId,
+      'wamid.phone',
+    );
+  });
+
+  it('8. lost ownership during recovery', async () => {
+    const { deps } = makeRecoveryDeps({ slots: ['11:00'], transitionKind: 'lost_ownership' });
+    const r = await recoverWhatsAppBookingSlotUnavailable(
+      {
+        db: {},
+        salonId: 'salon-1',
+        receiptId: 'r1',
+        attemptCount: 1,
+        externalUserId: 'u1',
+        sourceMessageId: 'wamid.phone',
+        messageTimestampIso: null,
+        state: recoveryState,
+      },
+      deps,
+    );
+    assert.equal(r.kind, 'lost_ownership');
+  });
+
+  it('9. stale_step during recovery → no overwrite kind', async () => {
+    const { deps } = makeRecoveryDeps({ slots: ['11:00'], transitionKind: 'stale_step' });
+    const r = await recoverWhatsAppBookingSlotUnavailable(
+      {
+        db: {},
+        salonId: 'salon-1',
+        receiptId: 'r1',
+        attemptCount: 1,
+        externalUserId: 'u1',
+        sourceMessageId: 'wamid.phone',
+        messageTimestampIso: null,
+        state: recoveryState,
+      },
+      deps,
+    );
+    assert.equal(r.kind, 'stale_state');
+    if (r.kind === 'stale_state') assert.equal(r.code, 'recovery_stale_step');
+  });
+
+  it('commit wrapper recovers after RPC slot_unavailable', async () => {
+    const { deps, transitionArgs } = makeRecoveryDeps({ slots: ['13:00'] });
+    const db = {
+      async rpc(name: string) {
+        assert.equal(name, 'commit_whatsapp_booking_owned');
+        return { data: { kind: 'slot_unavailable' }, error: null };
+      },
+    };
+    const r = await commitWhatsAppBookingOwned({
+      salonId: 'salon-1',
+      receiptId: 'r1',
+      attemptCount: 1,
+      externalUserId: 'u1',
+      expectedSourceMessageId: 'wamid.phone',
+      externalEventId: 'message:wamid.phone',
+      serviceId: 'svc-1',
+      staffId: 'stf-1',
+      date: '2099-06-15',
+      time: '12:00',
+      name: 'Анна',
+      phone: '+15551234567',
+      runPrecheck: false,
+      recoverSlotUnavailable: true,
+      stateForRecovery: recoveryState,
+      db,
+      recoveryDeps: deps,
+    });
+    assert.equal(r.kind, 'slot_unavailable_choose_time');
+    assert.equal(transitionArgs.length, 1);
+  });
+});
+
+describe('WA-4E1 FSM after recovery (executed)', () => {
+  function makeDeps(initial: ConversationBookingSnapshot) {
+    let snap: ConversationBookingSnapshot = {
+      ...initial,
+      state: { ...initial.state },
+    };
+    const services = [
+      { id: 'svc-1', name: 'Стрижка', duration: 60, category: 'Hair' },
+    ];
+    const staff = [{ id: 'stf-1', name: 'Мария', specialties: ['Стрижка'] }];
+    const deps: WhatsAppBookingFsmDeps = {
+      fetchActiveServices: async () => services,
+      resolveServiceById: async (_s, id) => services.find((x) => x.id === id) ?? null,
+      findStaffForServiceSpecialization: async () => staff,
+      getActiveStaffById: async (_s, id) => staff.find((x) => x.id === id) ?? null,
+      computeAvailableSlots: async () => ['10:00', '12:00', '14:00'],
+      findNextAvailableDates: async () => ['2099-06-15', '2099-06-16'],
+      getSalonTimezone: async () => 'UTC',
+      loadSnapshot: async () => ({ kind: 'ok', snapshot: { ...snap, state: { ...snap.state } } }),
+      transition: async (params) => {
+        if (
+          snap.currentFlow !== params.expectedFlow ||
+          snap.currentStep !== params.expectedStep
+        ) {
+          return {
+            kind: 'stale_step',
+            currentFlow: snap.currentFlow,
+            currentStep: snap.currentStep,
+          };
+        }
+        snap = {
+          ...snap,
+          currentFlow: params.nextFlow,
+          currentStep: params.nextStep,
+          state: params.nextState as WhatsAppBookingState,
+        };
+        return {
+          kind: 'ok',
+          duplicate: false,
+          conversationId: snap.conversationId,
+          currentFlow: snap.currentFlow,
+          currentStep: snap.currentStep,
+          state: snap.state,
+          clientId: snap.clientId,
+        };
+      },
+    };
+    return { deps, getSnap: () => snap };
+  }
+
+  it('5. same old event retry after time recovery does not recommit', async () => {
+    const { deps } = makeDeps({
+      conversationId: 'c1',
+      clientId: null,
+      currentFlow: WHATSAPP_BOOKING_FLOW,
+      currentStep: 'time',
+      state: {
+        serviceId: 'svc-1',
+        serviceName: 'Стрижка',
+        staffId: 'stf-1',
+        staffName: 'Мария',
+        date: '2099-06-15',
+        sourceMessageId: 'wamid.phone',
+      },
+      lastInboundMessageId: 'wamid.phone',
+      lastInboundAt: '2026-08-05T12:00:00.000Z',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    });
+    const r = await processWhatsAppBookingFsm(
+      {
+        db: {},
+        salonId: 'salon-1',
+        externalUserId: 'u1',
+        text: 'anything',
+        externalMessageId: 'wamid.phone',
+        messageTimestampIso: '2026-08-05T12:00:00.000Z',
+        receiptId: 'r1',
+        attemptCount: 2,
+        inboundAdvanced: true,
+      },
+      deps,
+    );
+    assert.equal(r.kind, 'noop');
+    if (r.kind === 'noop') assert.equal(r.reason, 'duplicate_message_applied');
+  });
+
+  it('6. next new message after time recovery parses as time', async () => {
+    const { deps, getSnap } = makeDeps({
+      conversationId: 'c1',
+      clientId: null,
+      currentFlow: WHATSAPP_BOOKING_FLOW,
+      currentStep: 'time',
+      state: {
+        serviceId: 'svc-1',
+        serviceName: 'Стрижка',
+        staffId: 'stf-1',
+        staffName: 'Мария',
+        date: '2099-06-15',
+        sourceMessageId: 'wamid.phone',
+      },
+      lastInboundMessageId: 'wamid.phone',
+      lastInboundAt: '2026-08-05T12:00:00.000Z',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    });
+    const r = await processWhatsAppBookingFsm(
+      {
+        db: {},
+        salonId: 'salon-1',
+        externalUserId: 'u1',
+        text: '14:00',
+        externalMessageId: 'wamid.new',
+        messageTimestampIso: '2026-08-05T12:10:00.000Z',
+        receiptId: 'r2',
+        attemptCount: 1,
+        inboundAdvanced: true,
+      },
+      deps,
+    );
+    assert.notEqual(r.kind, 'ready_to_book_pending_commit');
+    assert.equal(getSnap().currentStep, 'name');
+    assert.equal(getSnap().state.time, '14:00');
+  });
+
+  it('7. next new message after date recovery parses as date', async () => {
+    const { deps, getSnap } = makeDeps({
+      conversationId: 'c1',
+      clientId: null,
+      currentFlow: WHATSAPP_BOOKING_FLOW,
+      currentStep: 'date',
+      state: {
+        serviceId: 'svc-1',
+        serviceName: 'Стрижка',
+        staffId: 'stf-1',
+        staffName: 'Мария',
+        sourceMessageId: 'wamid.phone',
+      },
+      lastInboundMessageId: 'wamid.phone',
+      lastInboundAt: '2026-08-05T12:00:00.000Z',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    });
+    const r = await processWhatsAppBookingFsm(
+      {
+        db: {},
+        salonId: 'salon-1',
+        externalUserId: 'u1',
+        text: '2099-06-16',
+        externalMessageId: 'wamid.new',
+        messageTimestampIso: '2026-08-05T12:10:00.000Z',
+        receiptId: 'r2',
+        attemptCount: 1,
+        inboundAdvanced: true,
+      },
+      deps,
+    );
+    assert.notEqual(r.kind, 'ready_to_book_pending_commit');
+    assert.equal(getSnap().currentStep, 'time');
+    assert.equal(getSnap().state.date, '2099-06-16');
+    if (r.kind === 'reply') assert.ok(r.options && r.options.length > 0);
+  });
+
+  it('15. completed booking → new запись clears old appointmentId from FSM state', async () => {
+    const { deps, getSnap } = makeDeps({
+      conversationId: 'c1',
+      clientId: 'client-1',
+      currentFlow: null,
+      currentStep: null,
+      state: {
+        // appointmentId is not part of WhatsAppBookingState parser; prove start replaces state.
+        sourceMessageId: 'wamid.old',
+      } as WhatsAppBookingState,
+      lastInboundMessageId: 'wamid.old',
+      lastInboundAt: '2026-08-05T12:00:00.000Z',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    });
+    // Seed raw appointmentId into snap via transition path simulation:
+    (getSnap() as { state: Record<string, string> }).state.appointmentId = 'appt-old';
+    const r = await processWhatsAppBookingFsm(
+      {
+        db: {},
+        salonId: 'salon-1',
+        externalUserId: 'u1',
+        text: 'запись',
+        externalMessageId: 'wamid.start',
+        messageTimestampIso: '2026-08-05T13:00:00.000Z',
+        receiptId: 'r3',
+        attemptCount: 1,
+        inboundAdvanced: true,
+      },
+      deps,
+    );
+    assert.equal(r.kind, 'reply');
+    assert.equal(getSnap().currentStep, 'service');
+    assert.equal((getSnap().state as Record<string, unknown>).appointmentId, undefined);
+    assert.equal(getSnap().state.sourceMessageId, 'wamid.start');
+  });
+
+  it('16. cancel completed clears conversation only (no appointment DML in FSM)', async () => {
+    const { deps, getSnap } = makeDeps({
+      conversationId: 'c1',
+      clientId: 'client-1',
+      currentFlow: null,
+      currentStep: null,
+      state: { sourceMessageId: 'wamid.old' },
+      lastInboundMessageId: 'wamid.old',
+      lastInboundAt: '2026-08-05T12:00:00.000Z',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    });
+    const r = await processWhatsAppBookingFsm(
+      {
+        db: {},
+        salonId: 'salon-1',
+        externalUserId: 'u1',
+        text: 'отмена',
+        externalMessageId: 'wamid.cancel',
+        messageTimestampIso: '2026-08-05T13:00:00.000Z',
+        receiptId: 'r4',
+        attemptCount: 1,
+        inboundAdvanced: true,
+      },
+      deps,
+    );
+    assert.equal(r.kind, 'reply');
+    if (r.kind === 'reply') assert.equal(r.messageKey, 'whatsapp.booking.cancelled');
+    assert.equal(getSnap().currentFlow, null);
+    assert.equal(getSnap().currentStep, null);
+    // FSM transition only — never touches appointments table (no deps hook for appointments).
+  });
+});
+
+describe('WA-4E1 AppointmentSource type cleanup (executed)', () => {
+  it('17/18. server AppointmentSource accepts whatsapp', () => {
+    const src: ServerAppointmentSource = 'whatsapp';
+    assert.equal(src, 'whatsapp');
+    const allowed: ServerAppointmentSource[] = ['telegram', 'owner', 'apple', 'whatsapp'];
+    assert.ok(allowed.includes('whatsapp'));
+  });
+});
+
 describe('WA-4D1 migration static checks (executed)', () => {
   const sql = readFileSync(
     new URL(
       '../../../supabase/migrations/20260805000002_whatsapp_idempotent_booking_commit.sql',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  const recoverySql = readFileSync(
+    new URL(
+      '../../../supabase/migrations/20260805000003_whatsapp_booking_recovery.sql',
       import.meta.url,
     ),
     'utf8',
@@ -436,5 +916,24 @@ describe('WA-4D1 migration static checks (executed)', () => {
 
   it('23/24. no Meta / Telegram runtime in migration', () => {
     assert.equal(/notifySalonAdmin|telegram_chat_id|graph\.facebook/.test(sql), false);
+  });
+
+  it('WA-4E1: already_booked repair guards (static/reasoned SQL)', () => {
+    assert.match(recoverySql, /already_booked_no_repair/);
+    assert.match(recoverySql, /already_booked_repair_conflict/);
+    assert.match(recoverySql, /sourceMessageId/);
+    assert.match(recoverySql, /ready_to_book/);
+    // Must not flip different client.
+    assert.match(
+      recoverySql,
+      /v_conv\.client_id IS DISTINCT FROM v_existing\.client_id/,
+    );
+    // Newer booking protection: non ready_to_book / non-idle → no_repair.
+    assert.match(recoverySql, /already_booked_no_repair/);
+    assert.equal(recoverySql.includes('syncAppointmentReminder'), false);
+    assert.equal(/graph\.facebook|notifySalonAdmin/.test(recoverySql), false);
+    // Function replace only — no appointment schema churn.
+    assert.equal(recoverySql.includes('ADD COLUMN'), false);
+    assert.match(recoverySql, /CREATE OR REPLACE FUNCTION public\.commit_whatsapp_booking_owned/);
   });
 });

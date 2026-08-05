@@ -449,9 +449,12 @@ async function claimAndFinalizeReceipt(params: {
               name: st.name,
               phone: st.phone,
               stateForPrecheck: st,
+              stateForRecovery: st,
+              messageTimestampIso: params.event.messageTimestampIso ?? null,
             });
 
             if (booked.kind === 'lost_ownership') {
+              // Includes recovery transition lost_ownership — no finalize/markFailed.
               console.error('[whatsapp/webhook] booking commit lost ownership', {
                 provider: WHATSAPP_PROVIDER,
                 salonId: params.salonId,
@@ -493,15 +496,18 @@ async function claimAndFinalizeReceipt(params: {
               return 'failed_transient';
             }
 
-            // Permanent/business conflicts (incl. client_blocked, client_resolution_conflict):
-            // finalize processed (no Meta retry storm). Success / already_booked: processed.
+            // Permanent/business conflicts + WA-4E1 recovery / already_booked variants:
+            // finalize processed (no Meta retry storm). Outbound deferred.
             console.log('[whatsapp/webhook] booking commit', {
               provider: WHATSAPP_PROVIDER,
               salonId: params.salonId,
               operation: 'booking_commit',
               result: booked.kind,
               appointmentId:
-                booked.kind === 'booking_created' || booked.kind === 'already_booked'
+                booked.kind === 'booking_created' ||
+                booked.kind === 'already_booked' ||
+                booked.kind === 'already_booked_no_repair' ||
+                booked.kind === 'already_booked_repair_conflict'
                   ? booked.appointmentId
                   : undefined,
               externalEventId: params.event.externalEventId,
