@@ -1,8 +1,8 @@
 /**
- * Public Meta WhatsApp Cloud webhook foundation (WA-3B / WA-4B / WA-4C / WA-4D1).
+ * Public Meta WhatsApp Cloud webhook foundation (WA-3B…WA-4F1).
  * GET verification + POST HMAC + receipt dedupe + inbound identity + booking FSM
- * + idempotent atomic booking commit at ready_to_book.
- * No Meta outbound. No Telegram reminders for WhatsApp bookings.
+ * + idempotent atomic booking commit + durable outbound enqueue + inline flush.
+ * No Telegram reminders for WhatsApp bookings. No templates/reminders.
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -31,6 +31,14 @@ import { processWhatsAppInboundIdentityFoundation } from '../lib/whatsappIdentit
 import { extractWhatsAppInboundTextBody } from '../lib/whatsappInboundText.js';
 import { processWhatsAppBookingFsm } from '../lib/whatsappBookingFlow.js';
 import { commitWhatsAppBookingOwned } from '../lib/whatsappBookingCommit.js';
+import {
+  enqueueWhatsAppOutbound,
+  flushWhatsAppOutboundMessage,
+} from '../lib/whatsappOutbound.js';
+import {
+  renderWhatsAppCommitOutbound,
+  renderWhatsAppFsmOutbound,
+} from '../lib/whatsappOutboundRenderer.js';
 
 const router = Router();
 const WHATSAPP_PROVIDER = 'whatsapp' as const;
@@ -253,6 +261,13 @@ async function claimAndFinalizeReceipt(params: {
   const receiptId = claim.receiptId;
   const attemptCount = claim.attemptCount;
   let finalizeStatus: 'processed' | 'ignored' = params.finalStatus;
+  /** WA-4F1: durable outbound intent to enqueue before finalize (null = no reply). */
+  let pendingOutbound: {
+    conversationId: string | null;
+    recipientExternalUserId: string;
+    messageKey: string;
+    text: string;
+  } | null = null;
 
   // WA-4B: inbound message identity + durable conversation (no replies/FSM/appointments).
   if (params.event.isInboundMessage) {
@@ -413,6 +428,18 @@ async function claimAndFinalizeReceipt(params: {
           externalEventId: params.event.externalEventId,
         });
 
+        // WA-4F1: plain FSM replies enqueue outbound (commit path overrides below).
+        // No outbound for noop / outdated / stale_step.
+        if (fsm.kind === 'reply') {
+          const rendered = renderWhatsAppFsmOutbound(fsm);
+          pendingOutbound = {
+            conversationId: foundation.conversationId,
+            recipientExternalUserId: foundation.externalUserId,
+            messageKey: rendered.messageKey,
+            text: rendered.text,
+          };
+        }
+
         // WA-4D1: commit only when THIS message owns ready_to_book (not later chatter).
         if (fsm.kind === 'ready_to_book_pending_commit') {
           const st = fsm.state;
@@ -497,7 +524,7 @@ async function claimAndFinalizeReceipt(params: {
             }
 
             // Permanent/business conflicts + WA-4E1 recovery / already_booked variants:
-            // finalize processed (no Meta retry storm). Outbound deferred.
+            // finalize processed (no Meta retry storm). Outbound via outbox below.
             console.log('[whatsapp/webhook] booking commit', {
               provider: WHATSAPP_PROVIDER,
               salonId: params.salonId,
@@ -512,6 +539,22 @@ async function claimAndFinalizeReceipt(params: {
                   : undefined,
               externalEventId: params.event.externalEventId,
             });
+            const commitRendered = renderWhatsAppCommitOutbound(booked, {
+              serviceName: st.serviceName,
+              staffName: st.staffName,
+              date: st.date,
+              time: st.time,
+            });
+            if (commitRendered) {
+              pendingOutbound = {
+                conversationId: foundation.conversationId,
+                recipientExternalUserId: foundation.externalUserId,
+                messageKey: commitRendered.messageKey,
+                text: commitRendered.text,
+              };
+            } else {
+              pendingOutbound = null;
+            }
             finalizeStatus = 'processed';
           }
         }
@@ -519,6 +562,42 @@ async function claimAndFinalizeReceipt(params: {
 
       finalizeStatus = finalizeStatus === 'ignored' ? 'ignored' : 'processed';
     }
+  }
+
+  // WA-4F1: enqueue durable outbound BEFORE inbound finalize.
+  // Enqueue failure → transient 500 so Meta can retry (unique key prevents dup intent).
+  let outboxMessageId: string | null = null;
+  if (pendingOutbound && finalizeStatus === 'processed') {
+    const enqueued = await enqueueWhatsAppOutbound({
+      db: supabase as any,
+      salonId: params.salonId,
+      conversationId: pendingOutbound.conversationId,
+      inboundReceiptId: receiptId,
+      recipientExternalUserId: pendingOutbound.recipientExternalUserId,
+      messageKey: pendingOutbound.messageKey,
+      text: pendingOutbound.text,
+      sequence: 0,
+    });
+    if (enqueued.kind === 'error') {
+      console.error('[whatsapp/webhook] outbound enqueue failed', {
+        provider: WHATSAPP_PROVIDER,
+        salonId: params.salonId,
+        operation: 'outbound_enqueue',
+        result: 'error',
+        errorCode: enqueued.code,
+        externalEventId: params.event.externalEventId,
+      });
+      return 'failed_transient';
+    }
+    outboxMessageId = enqueued.row.id;
+    console.log('[whatsapp/webhook] outbound enqueued', {
+      provider: WHATSAPP_PROVIDER,
+      salonId: params.salonId,
+      operation: 'outbound_enqueue',
+      result: enqueued.created ? 'created' : 'duplicate',
+      messageKey: pendingOutbound.messageKey,
+      externalEventId: params.event.externalEventId,
+    });
   }
 
   const finalized = await finalizeWhatsAppEventReceipt(supabase as any, {
@@ -529,6 +608,31 @@ async function claimAndFinalizeReceipt(params: {
   });
 
   if (finalized.ok) {
+    // Best-effort inline flush AFTER finalize. Send failure must not reopen inbound.
+    if (outboxMessageId) {
+      try {
+        const flushed = await flushWhatsAppOutboundMessage({
+          db: supabase as any,
+          messageId: outboxMessageId,
+        });
+        console.log('[whatsapp/webhook] outbound flush', {
+          provider: WHATSAPP_PROVIDER,
+          salonId: params.salonId,
+          operation: 'outbound_flush',
+          result: flushed.kind,
+          code: 'code' in flushed ? flushed.code : undefined,
+          externalEventId: params.event.externalEventId,
+        });
+      } catch {
+        console.error('[whatsapp/webhook] outbound flush exception', {
+          provider: WHATSAPP_PROVIDER,
+          salonId: params.salonId,
+          operation: 'outbound_flush',
+          result: 'exception',
+          externalEventId: params.event.externalEventId,
+        });
+      }
+    }
     return finalized.status === 'ignored' ? 'ignored' : 'processed';
   }
 

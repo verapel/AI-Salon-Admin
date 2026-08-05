@@ -1,7 +1,7 @@
 /**
- * Minimal Meta WhatsApp Cloud API client for WA-2 connection verification only.
- * Does not send messages, register webhooks, or touch Telegram/Apple.
- * Never logs access tokens or raw provider payloads.
+ * Minimal Meta WhatsApp Cloud API client (WA-2 verify + WA-4F1 text send).
+ * Does not register webhooks or touch Telegram/Apple.
+ * Never logs access tokens, message bodies, or raw provider payloads.
  */
 
 export const WHATSAPP_GRAPH_API_VERSION = 'v22.0';
@@ -295,4 +295,143 @@ async function assertPhoneBelongsToWaba(input: {
     400,
     'Phone number does not belong to this business account'
   );
+}
+
+export type WhatsAppSendTextResult =
+  | { kind: 'sent'; metaMessageId: string }
+  | {
+      kind: 'retryable_error';
+      code:
+        | 'timeout'
+        | 'network'
+        | 'provider_5xx'
+        | 'rate_limited'
+        | 'provider_unavailable';
+    }
+  | {
+      kind: 'permanent_error';
+      code:
+        | 'invalid_input'
+        | 'invalid_credentials'
+        | 'invalid_recipient'
+        | 'invalid_payload'
+        | 'malformed_response';
+    };
+
+async function graphPostJson(
+  path: string,
+  accessToken: string,
+  body: Record<string, unknown>
+): Promise<{ status: number; body: unknown }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const url = `${GRAPH_BASE}${path}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    let parsed: unknown = null;
+    try {
+      parsed = await res.json();
+    } catch {
+      parsed = null;
+    }
+
+    return { status: res.status, body: parsed };
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      return { status: 0, body: { __local: 'timeout' } };
+    }
+    return { status: 0, body: { __local: 'network' } };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Low-level WhatsApp Cloud text send.
+ * Does not resolve salons/credentials, does not retry, does not log secrets/bodies.
+ */
+export async function sendWhatsAppTextMessage(input: {
+  accessToken: string;
+  phoneNumberId: string;
+  to: string;
+  text: string;
+}): Promise<WhatsAppSendTextResult> {
+  const accessToken = input.accessToken.trim();
+  const phoneNumberId = input.phoneNumberId.trim();
+  const to = input.to.trim();
+  const text = input.text.trim();
+
+  if (!accessToken || !phoneNumberId || !to || !text) {
+    return { kind: 'permanent_error', code: 'invalid_input' };
+  }
+  if (text.length > 4096) {
+    return { kind: 'permanent_error', code: 'invalid_payload' };
+  }
+
+  const result = await graphPostJson(
+    `/${encodeURIComponent(phoneNumberId)}/messages`,
+    accessToken,
+    {
+      messaging_product: 'whatsapp',
+      to,
+      type: 'text',
+      text: { body: text },
+    }
+  );
+
+  if (result.status === 0) {
+    const local =
+      result.body &&
+      typeof result.body === 'object' &&
+      (result.body as { __local?: string }).__local;
+    if (local === 'timeout') return { kind: 'retryable_error', code: 'timeout' };
+    return { kind: 'retryable_error', code: 'network' };
+  }
+
+  if (result.status === 401 || result.status === 403) {
+    return { kind: 'permanent_error', code: 'invalid_credentials' };
+  }
+  if (result.status === 429) {
+    return { kind: 'retryable_error', code: 'rate_limited' };
+  }
+  if (result.status >= 500) {
+    return { kind: 'retryable_error', code: 'provider_5xx' };
+  }
+  if (result.status === 400 || result.status === 404 || result.status === 422) {
+    // Conservative: treat most 4xx as permanent payload/recipient issues.
+    return { kind: 'permanent_error', code: 'invalid_recipient' };
+  }
+  if (result.status < 200 || result.status >= 300) {
+    return { kind: 'retryable_error', code: 'provider_unavailable' };
+  }
+
+  const body = result.body;
+  if (!body || typeof body !== 'object') {
+    return { kind: 'permanent_error', code: 'malformed_response' };
+  }
+  const messages = (body as { messages?: unknown }).messages;
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return { kind: 'permanent_error', code: 'malformed_response' };
+  }
+  const first = messages[0];
+  const metaMessageId =
+    first && typeof first === 'object'
+      ? asNonBlankString((first as { id?: unknown }).id)
+      : null;
+  if (!metaMessageId) {
+    return { kind: 'permanent_error', code: 'malformed_response' };
+  }
+
+  return { kind: 'sent', metaMessageId };
 }
