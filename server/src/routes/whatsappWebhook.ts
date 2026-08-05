@@ -1,7 +1,8 @@
 /**
- * Public Meta WhatsApp Cloud webhook foundation (WA-3B / WA-4B / WA-4C).
- * GET verification + POST HMAC + receipt dedupe + inbound identity + booking FSM.
- * FSM produces internal reply results only — no Meta outbound, no appointments/clients.
+ * Public Meta WhatsApp Cloud webhook foundation (WA-3B / WA-4B / WA-4C / WA-4D1).
+ * GET verification + POST HMAC + receipt dedupe + inbound identity + booking FSM
+ * + idempotent atomic booking commit at ready_to_book.
+ * No Meta outbound. No Telegram reminders for WhatsApp bookings.
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -29,6 +30,7 @@ import {
 import { processWhatsAppInboundIdentityFoundation } from '../lib/whatsappIdentity.js';
 import { extractWhatsAppInboundTextBody } from '../lib/whatsappInboundText.js';
 import { processWhatsAppBookingFsm } from '../lib/whatsappBookingFlow.js';
+import { commitWhatsAppBookingOwned } from '../lib/whatsappBookingCommit.js';
 
 const router = Router();
 const WHATSAPP_PROVIDER = 'whatsapp' as const;
@@ -403,13 +405,113 @@ async function claimAndFinalizeReceipt(params: {
           salonId: params.salonId,
           operation: 'booking_fsm',
           result: fsm.kind,
-          messageKey: fsm.kind === 'reply' ? fsm.messageKey : undefined,
+          messageKey:
+            fsm.kind === 'reply' || fsm.kind === 'ready_to_book_pending_commit'
+              ? fsm.messageKey
+              : undefined,
           reason: fsm.kind === 'noop' ? fsm.reason : undefined,
           externalEventId: params.event.externalEventId,
         });
+
+        // WA-4D1: commit only when THIS message owns ready_to_book (not later chatter).
+        if (fsm.kind === 'ready_to_book_pending_commit') {
+          const st = fsm.state;
+          if (
+            !st.serviceId ||
+            !st.staffId ||
+            !st.date ||
+            !st.time ||
+            !st.name ||
+            !st.phone ||
+            !params.event.externalMessageId
+          ) {
+            console.error('[whatsapp/webhook] booking commit incomplete state', {
+              provider: WHATSAPP_PROVIDER,
+              salonId: params.salonId,
+              operation: 'booking_commit',
+              result: 'incomplete_state',
+              externalEventId: params.event.externalEventId,
+            });
+            finalizeStatus = 'ignored';
+          } else {
+            const booked = await commitWhatsAppBookingOwned({
+              db: supabase as any,
+              salonId: params.salonId,
+              receiptId,
+              attemptCount,
+              externalUserId: foundation.externalUserId,
+              expectedSourceMessageId: params.event.externalMessageId,
+              externalEventId: params.event.externalEventId,
+              serviceId: st.serviceId,
+              staffId: st.staffId,
+              date: st.date,
+              time: st.time,
+              name: st.name,
+              phone: st.phone,
+              stateForPrecheck: st,
+            });
+
+            if (booked.kind === 'lost_ownership') {
+              console.error('[whatsapp/webhook] booking commit lost ownership', {
+                provider: WHATSAPP_PROVIDER,
+                salonId: params.salonId,
+                operation: 'booking_commit',
+                result: 'lost_ownership',
+                externalEventId: params.event.externalEventId,
+              });
+              return 'failed_transient';
+            }
+
+            if (booked.kind === 'error') {
+              console.error('[whatsapp/webhook] booking commit error', {
+                provider: WHATSAPP_PROVIDER,
+                salonId: params.salonId,
+                operation: 'booking_commit',
+                result: 'error',
+                errorCode: booked.code,
+                externalEventId: params.event.externalEventId,
+              });
+              const markedFailed = await markWhatsAppEventReceiptFailed(supabase as any, {
+                salonId: params.salonId,
+                receiptId,
+                attemptCount,
+                errorCode: booked.code,
+              });
+              if (!markedFailed.ok) {
+                console.error('[whatsapp/webhook] receipt mark-failed failed', {
+                  provider: WHATSAPP_PROVIDER,
+                  salonId: params.salonId,
+                  operation: 'receipt_mark_failed',
+                  result:
+                    markedFailed.code === 'mark_failed_lost_ownership'
+                      ? 'mark_failed_lost_ownership'
+                      : 'mark_failed_db_error',
+                  externalEventId: params.event.externalEventId,
+                  code: markedFailed.code,
+                });
+              }
+              return 'failed_transient';
+            }
+
+            // Permanent/business conflicts (incl. client_blocked, client_resolution_conflict):
+            // finalize processed (no Meta retry storm). Success / already_booked: processed.
+            console.log('[whatsapp/webhook] booking commit', {
+              provider: WHATSAPP_PROVIDER,
+              salonId: params.salonId,
+              operation: 'booking_commit',
+              result: booked.kind,
+              appointmentId:
+                booked.kind === 'booking_created' || booked.kind === 'already_booked'
+                  ? booked.appointmentId
+                  : undefined,
+              externalEventId: params.event.externalEventId,
+            });
+            finalizeStatus = 'processed';
+          }
+        }
       }
 
-      finalizeStatus = 'processed';
+      finalizeStatus = finalizeStatus === 'ignored' ? 'ignored' : 'processed';
     }
   }
 

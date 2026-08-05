@@ -276,12 +276,12 @@ describe('whatsapp booking FSM', () => {
     const ready = await call('+15551234567', phoneCtx.deps, 'm14');
     assert.equal(phoneCtx.getSnap().currentStep, 'ready_to_book');
     assert.equal(phoneCtx.getSnap().state.phone, '+15551234567');
-    if (ready.kind === 'reply') assert.equal(ready.messageKey, 'whatsapp.booking.readyToBook');
-    assert.equal(
-      phoneCtx.transitions.every((t) => t.nextStep === 'ready_to_book' || t.nextStep === undefined || true),
-      true,
-    );
-    // Ensure we never transitioned into an appointment-create step.
+    assert.equal(ready.kind, 'ready_to_book_pending_commit');
+    if (ready.kind === 'ready_to_book_pending_commit') {
+      assert.equal(ready.messageKey, 'whatsapp.booking.readyToBook');
+      assert.equal(ready.state.phone, '+15551234567');
+    }
+    // Ensure we never transitioned into an appointment-create step in FSM.
     assert.equal(
       phoneCtx.transitions.some((t) => String(t.nextStep) === 'create_appointment'),
       false,

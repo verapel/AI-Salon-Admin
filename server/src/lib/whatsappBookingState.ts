@@ -34,8 +34,17 @@ export type WhatsAppBookingReply = {
   options?: Array<{ id: string; label: string }>
 }
 
+/** Emitted only when this inbound message owns the ready_to_book transition (or retry). */
+export type WhatsAppBookingReadyToCommit = {
+  kind: 'ready_to_book_pending_commit'
+  messageKey: string
+  text: string
+  state: WhatsAppBookingState
+}
+
 export type WhatsAppBookingActionResult =
   | WhatsAppBookingReply
+  | WhatsAppBookingReadyToCommit
   | { kind: 'noop'; reason: string }
   | { kind: 'lost_ownership' }
   | { kind: 'stale_step' }

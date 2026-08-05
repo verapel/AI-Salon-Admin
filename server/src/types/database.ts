@@ -26,7 +26,7 @@ export type SalonMemberRole = 'owner' | 'admin' | 'staff_readonly';
 export type PlatformUserRole = 'developer';
 
 /** Origin of an appointment row. NULL in DB = legacy/unknown. */
-export type AppointmentSource = 'telegram' | 'owner' | 'apple';
+export type AppointmentSource = 'telegram' | 'owner' | 'apple' | 'whatsapp';
 
 export type CalendarProvider = 'apple' | 'google';
 
@@ -318,6 +318,7 @@ export interface Database {
           created_at: string;
           salon_id: string | null;
           source: AppointmentSource | null;
+          source_external_event_id: string | null;
         };
         Insert: {
           id?: string;
@@ -333,6 +334,7 @@ export interface Database {
           created_at?: string;
           salon_id?: string | null;
           source?: AppointmentSource | null;
+          source_external_event_id?: string | null;
         };
         Update: {
           id?: string;
@@ -348,6 +350,7 @@ export interface Database {
           created_at?: string;
           salon_id?: string | null;
           source?: AppointmentSource | null;
+          source_external_event_id?: string | null;
         };
         Relationships: [];
       };

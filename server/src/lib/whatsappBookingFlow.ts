@@ -435,6 +435,24 @@ export async function processWhatsAppBookingFsm(
     snapshot.state.sourceMessageId &&
     snapshot.state.sourceMessageId === params.externalMessageId
   ) {
+    // Retry of the phone→ready_to_book source message: re-signal commit (idempotent RPC).
+    if (
+      snapshot.currentFlow === WHATSAPP_BOOKING_FLOW &&
+      snapshot.currentStep === 'ready_to_book' &&
+      snapshot.state.serviceId &&
+      snapshot.state.staffId &&
+      snapshot.state.date &&
+      snapshot.state.time &&
+      snapshot.state.name &&
+      snapshot.state.phone
+    ) {
+      return {
+        kind: 'ready_to_book_pending_commit',
+        messageKey: 'whatsapp.booking.readyToBook',
+        text: 'Данные собраны. Запись будет создана на следующем этапе.',
+        state: { ...snapshot.state },
+      };
+    }
     return { kind: 'noop', reason: 'duplicate_message_applied' };
   }
 
@@ -966,11 +984,23 @@ export async function processWhatsAppBookingFsm(
     const fail = mapTransitionFailure(t);
     if (fail) return fail;
 
-    // WA-4C boundary: stop here — no appointment, no client create, no Meta send.
-    return reply(
-      'whatsapp.booking.readyToBook',
-      `Данные собраны: ${state.serviceName}, ${state.date} ${state.time}, ${state.name}, ${phone}. Запись будет создана на следующем этапе.`,
-    );
+    // WA-4D1: signal webhook to invoke owned booking commit for THIS message only.
+    return {
+      kind: 'ready_to_book_pending_commit',
+      messageKey: 'whatsapp.booking.readyToBook',
+      text: `Данные собраны: ${state.serviceName}, ${state.date} ${state.time}, ${state.name}, ${phone}. Запись будет создана.`,
+      state: {
+        serviceId: state.serviceId,
+        serviceName: state.serviceName,
+        staffId: state.staffId,
+        staffName: state.staffName,
+        date: state.date,
+        time: state.time,
+        name: state.name,
+        phone,
+        sourceMessageId: params.externalMessageId ?? undefined,
+      },
+    };
   }
 
   return { kind: 'noop', reason: 'unhandled_step' };
