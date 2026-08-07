@@ -1,9 +1,10 @@
 /**
- * IG-3 / IG-4: Per-event Instagram webhook processing.
- * Route → claim → (IG-4) owned identity/conversation → finalize.
- * No booking, outbound, or Meta profile lookups.
+ * IG-3 / IG-4 / IG-5: Per-event Instagram webhook processing.
+ * Route → claim → identity/conversation touch → booking FSM → finalize.
+ * No appointment/client writes. No Meta outbound.
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ReceiptClaimResult } from './whatsappWebhookReceipts.js';
 import {
   instagramReceiptPayloadHash,
@@ -14,6 +15,11 @@ import {
   parseInstagramMessageTimestamp,
   type InstagramIdentityConversationResult,
 } from './instagramIdentityConversation.js';
+import {
+  processInstagramBookingFsm,
+  type InstagramBookingFsmDeps,
+} from './instagramBookingFlow.js';
+import type { InstagramBookingIntent } from './instagramBookingState.js';
 import {
   claimInstagramEventReceipt,
   finalizeInstagramEventReceipt,
@@ -28,7 +34,7 @@ import {
 import { supabase } from './supabase.js';
 
 export type InstagramEventProcessResult =
-  | { outcome: 'processed' }
+  | { outcome: 'processed'; bookingIntent?: InstagramBookingIntent }
   | { outcome: 'ignored'; reason: string }
   | { outcome: 'duplicate_terminal' }
   | { outcome: 'in_flight' }
@@ -51,10 +57,6 @@ export type InstagramProcessDeps = {
     attemptCount: number;
     errorCode: string;
   }) => Promise<{ ok: true } | { ok: false; code: string }>;
-  /**
-   * IG-4 owned identity+conversation mutation.
-   * Only invoked for connected message/postback with sender id (never echo).
-   */
   applyIdentityConversation: (params: {
     salonId: string;
     receiptId: string;
@@ -63,6 +65,20 @@ export type InstagramProcessDeps = {
     externalMessageId: string | null;
     messageTimestampIso: string | null;
   }) => Promise<InstagramIdentityConversationResult>;
+  /** Injectable FSM runner (tests). Production uses processInstagramBookingFsm. */
+  runBookingFsm?: (params: {
+    db: SupabaseClient | any;
+    salonId: string;
+    externalUserId: string;
+    text: string;
+    externalMessageId: string | null;
+    messageTimestampIso: string | null;
+    receiptId: string;
+    attemptCount: number;
+    inboundAdvanced?: boolean;
+  }) => Promise<InstagramBookingIntent>;
+  bookingFsmDeps?: InstagramBookingFsmDeps;
+  db?: SupabaseClient | any;
 };
 
 export function createDefaultInstagramProcessDeps(
@@ -78,6 +94,8 @@ export function createDefaultInstagramProcessDeps(
         db: supabase as any,
         ...params,
       }),
+    runBookingFsm: (params) => processInstagramBookingFsm(params),
+    db: supabase as any,
   };
 }
 
@@ -92,16 +110,18 @@ function shouldTouchIdentityConversation(
   return true;
 }
 
+function ephemeralFsmText(event: NormalizedInstagramWebhookEvent): string | null {
+  if (event.kind === 'message' && event.inboundText) return event.inboundText;
+  if (event.kind === 'postback' && event.inboundPostbackPayload) {
+    return event.inboundPostbackPayload;
+  }
+  // Empty text still starts idle→service (greeting with no body).
+  if (event.kind === 'message' || event.kind === 'postback') return '';
+  return null;
+}
+
 /**
  * Process one normalized Instagram webhook event.
- *
- * Policy:
- * - no stable Meta mid → ignore, no route, no receipt
- * - unknown account → ignore, no receipt
- * - disconnected / inactive → ignored receipt, no identity/conversation
- * - echo with mid → ignored receipt, no identity/conversation
- * - connected message/postback with sender → claim → owned mutation → finalize processed
- * - claim in_flight / failed_transient → retryable
  */
 export async function processInstagramWebhookEvent(
   event: NormalizedInstagramWebhookEvent,
@@ -165,6 +185,9 @@ export async function processInstagramWebhookEvent(
     return { outcome: 'failed_transient', code: 'cross_salon_conflict' };
   }
 
+  let inboundAdvanced = true;
+  let bookingIntent: InstagramBookingIntent | undefined;
+
   if (shouldTouchIdentityConversation(event, route.kind)) {
     const touched = await deps.applyIdentityConversation({
       salonId,
@@ -176,7 +199,6 @@ export async function processInstagramWebhookEvent(
     });
 
     if (touched.kind === 'lost_ownership') {
-      // Do not finalize stale generation.
       return { outcome: 'in_flight' };
     }
     if (touched.kind === 'error') {
@@ -188,13 +210,44 @@ export async function processInstagramWebhookEvent(
       });
       return { outcome: 'failed_transient', code: touched.code };
     }
+    inboundAdvanced = touched.advanced;
+
+    const fsmText = ephemeralFsmText(event);
+    if (fsmText != null && deps.runBookingFsm) {
+      const fsm = await deps.runBookingFsm({
+        db: deps.db ?? supabase,
+        salonId,
+        externalUserId: event.externalUserId!,
+        text: fsmText,
+        externalMessageId: event.externalMessageId,
+        messageTimestampIso: parseInstagramMessageTimestamp(event.timestampMs),
+        receiptId: claim.receiptId,
+        attemptCount: claim.attemptCount,
+        inboundAdvanced,
+      });
+
+      if (fsm.kind === 'lost_ownership') {
+        return { outcome: 'in_flight' };
+      }
+      if (fsm.kind === 'error') {
+        await deps.markFailed({
+          salonId,
+          receiptId: claim.receiptId,
+          attemptCount: claim.attemptCount,
+          errorCode: fsm.code,
+        });
+        return { outcome: 'failed_transient', code: fsm.code };
+      }
+      // stale_step / outdated / invalid_state / noop / intents → finalize (no appointment side effects)
+      // invalid_state is deterministic malformed next-state — terminal, not 500-retry.
+      bookingIntent = fsm;
+    }
   } else if (
     route.kind === 'connected' &&
     (event.kind === 'message' || event.kind === 'postback') &&
     !event.isEcho &&
     !event.externalUserId?.trim()
   ) {
-    // Recognized inbound without opaque sender — cannot form identity key.
     finalStatus = 'ignored';
     metadata.reason = 'missing_sender';
   }
@@ -219,7 +272,10 @@ export async function processInstagramWebhookEvent(
     return { outcome: 'failed_transient', code: finalized.code };
   }
 
-  return finalStatus === 'processed'
-    ? { outcome: 'processed' }
-    : { outcome: 'ignored', reason: metadata.reason || routingCode };
+  if (finalStatus === 'processed') {
+    return bookingIntent
+      ? { outcome: 'processed', bookingIntent }
+      : { outcome: 'processed' };
+  }
+  return { outcome: 'ignored', reason: metadata.reason || routingCode };
 }

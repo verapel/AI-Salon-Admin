@@ -378,6 +378,7 @@ describe('IG-3 opaque IDs + normalization (executed)', () => {
     assert.equal(ok[0].kind, 'message');
     assert.equal(ok[0].receiptMetadata.hasText, '1');
     assert.ok(!JSON.stringify(ok[0].receiptMetadata).includes('hello'));
+    assert.equal(ok[0].inboundText, 'hello secret text');
 
     const numericProf = normalizeInstagramWebhookPayload(
       messagePayload({ numericProfessional: true }),
@@ -411,8 +412,9 @@ describe('IG-3 opaque IDs + normalization (executed)', () => {
     const pb = normalizeInstagramWebhookPayload(postbackPayload);
     assert.equal(pb[0].kind, 'postback');
     assert.equal(pb[0].externalEventId, 'mid.post.1');
-    assert.ok(!JSON.stringify(pb[0]).includes('GET_STARTED'));
+    assert.ok(!JSON.stringify(pb[0].receiptMetadata).includes('GET_STARTED'));
     assert.ok(!JSON.stringify(pb[0].receiptMetadata).includes('Start'));
+    assert.equal(pb[0].inboundPostbackPayload, 'GET_STARTED');
 
     const echo = normalizeInstagramWebhookPayload(messagePayload({ isEcho: true }));
     assert.equal(echo[0].kind, 'unsupported');
@@ -1393,8 +1395,8 @@ describe('IG-3 process + multi-event (executed)', () => {
     const events = normalizeInstagramWebhookPayload(
       messagePayload({ text: 'PRIVATE_BODY_TEXT', mid: 'mid.priv' }),
     );
-    const blob = JSON.stringify(events);
-    assert.ok(!blob.includes('PRIVATE_BODY_TEXT'));
+    assert.ok(!JSON.stringify(events[0].receiptMetadata).includes('PRIVATE_BODY_TEXT'));
+    assert.equal(events[0].inboundText, 'PRIVATE_BODY_TEXT');
     assert.ok(!('text' in events[0].receiptMetadata));
     assert.ok(!('username' in events[0].receiptMetadata));
     assert.ok(!('raw' in events[0].receiptMetadata));

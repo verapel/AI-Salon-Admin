@@ -31,6 +31,16 @@ export type NormalizedInstagramWebhookEvent = {
   kind: InstagramWebhookEventKind;
   timestampMs: number | null;
   isEcho: boolean;
+  /**
+   * Ephemeral inbound message text for IG-5 FSM parsing only.
+   * Never copied into receiptMetadata / identity / durable state.
+   */
+  inboundText: string | null;
+  /**
+   * Ephemeral postback.payload for IG-5 FSM parsing only.
+   * Never copied into receiptMetadata / durable state.
+   */
+  inboundPostbackPayload: string | null;
   /** Minimal non-content metadata for receipt row only. */
   receiptMetadata: Record<string, string>;
 };
@@ -52,12 +62,24 @@ export function tryParseInstagramWebhookOpaqueId(value: unknown): string | null 
 
 /** Terminal no-id event: process layer must not route or claim. */
 function noClaimEvent(
-  partial: Omit<NormalizedInstagramWebhookEvent, 'provider' | 'externalEventId' | 'externalMessageId'>,
+  partial: Omit<
+    NormalizedInstagramWebhookEvent,
+    | 'provider'
+    | 'externalEventId'
+    | 'externalMessageId'
+    | 'inboundText'
+    | 'inboundPostbackPayload'
+  > &
+    Partial<
+      Pick<NormalizedInstagramWebhookEvent, 'inboundText' | 'inboundPostbackPayload'>
+    >,
 ): NormalizedInstagramWebhookEvent {
   return {
     provider: 'instagram',
     externalEventId: '',
     externalMessageId: null,
+    inboundText: null,
+    inboundPostbackPayload: null,
     ...partial,
   };
 }
@@ -200,6 +222,11 @@ export function normalizeInstagramWebhookPayload(
         const hasAttachments = Array.isArray(message.attachments) && message.attachments.length > 0;
         const kind: InstagramWebhookEventKind = isEcho ? 'unsupported' : 'message';
 
+        const inboundText =
+          typeof message.text === 'string' && message.text.trim().length > 0
+            ? message.text.trim()
+            : null;
+
         events.push({
           provider: 'instagram',
           externalEventId: mid,
@@ -209,6 +236,8 @@ export function normalizeInstagramWebhookPayload(
           kind,
           timestampMs,
           isEcho,
+          inboundText,
+          inboundPostbackPayload: null,
           receiptMetadata: {
             kind,
             hasMessage: '1',
@@ -224,6 +253,10 @@ export function normalizeInstagramWebhookPayload(
 
       if (postback) {
         const mid = tryParseInstagramWebhookOpaqueId(postback.mid);
+        const inboundPostbackPayload =
+          typeof postback.payload === 'string' && postback.payload.trim().length > 0
+            ? postback.payload.trim()
+            : null;
         if (!mid) {
           events.push(
             noClaimEvent({
@@ -254,6 +287,8 @@ export function normalizeInstagramWebhookPayload(
           kind: 'postback',
           timestampMs,
           isEcho: false,
+          inboundText: null,
+          inboundPostbackPayload,
           receiptMetadata: {
             kind: 'postback',
             hasPostback: '1',

@@ -337,12 +337,14 @@ describe('IG-4 pipeline integration (executed mocks)', () => {
 });
 
 describe('IG-4 privacy + identity policy (executed)', () => {
-  it('50-55. no DM/postback content in normalized events; no username matching helpers', () => {
+  it('50-55. no DM/postback content in receipt metadata; no username matching helpers', () => {
     const msg = messageEvent({ text: 'PRIVATE_DM_BODY' });
     const pb = postbackEvent();
-    assert.ok(!JSON.stringify(msg).includes('PRIVATE_DM_BODY'));
-    assert.ok(!JSON.stringify(pb).includes('START'));
-    assert.ok(!JSON.stringify(pb).includes('Book'));
+    // Ephemeral inboundText/payload may exist in-memory for IG-5; must not enter receipt metadata.
+    assert.ok(!JSON.stringify(msg.receiptMetadata).includes('PRIVATE_DM_BODY'));
+    assert.ok(!JSON.stringify(pb.receiptMetadata).includes('START'));
+    assert.ok(!JSON.stringify(pb.receiptMetadata).includes('Book'));
+    assert.equal(msg.inboundText, 'PRIVATE_DM_BODY');
     const src = readFileSync(
       new URL('./instagramIdentityConversation.ts', import.meta.url),
       'utf8',
