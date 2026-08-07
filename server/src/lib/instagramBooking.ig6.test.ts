@@ -256,6 +256,12 @@ describe('IG-6 pipeline integration (executed mocks)', () => {
         messageKey: 'k',
         text: 't',
       }),
+      enqueueOutbound: async () => ({
+        kind: 'enqueued',
+        id: 'ob-ig6',
+        created: true,
+        intentKey: 'ask_service',
+      }),
       ...overrides,
     };
   }

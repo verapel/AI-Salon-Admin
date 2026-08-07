@@ -1,7 +1,9 @@
 /**
- * IG-3 / IG-4 / IG-5 / IG-6: Per-event Instagram webhook processing.
- * Route → claim → identity/conversation touch → booking FSM → commit → finalize.
- * No Meta outbound.
+ * IG-3 / IG-4 / IG-5 / IG-6 / IG-7: Per-event Instagram webhook processing.
+ * Route → claim → identity/conversation → booking FSM → commit
+ * → durable outbound enqueue → finalize receipt.
+ *
+ * No synchronous Meta Send API in the webhook path.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -35,6 +37,15 @@ import {
   type InstagramRouteResult,
   type InstagramRoutingDeps,
 } from './instagramWebhookRouting.js';
+import {
+  enqueueInstagramOutboundOwned,
+  type EnqueueInstagramOutboundResult,
+} from './instagramOutbound.js';
+import { enqueueInstagramOutboundThenFinalizeInbound } from './instagramOutboundGate.js';
+import {
+  resolveInstagramOutboundIntent,
+  type InstagramOutboundIntent,
+} from './instagramOutboundIntent.js';
 import { supabase } from './supabase.js';
 
 export type InstagramEventProcessResult =
@@ -42,6 +53,8 @@ export type InstagramEventProcessResult =
       outcome: 'processed';
       bookingIntent?: InstagramBookingIntent;
       bookingCommit?: InstagramBookingCommitResult;
+      outboundIntent?: InstagramOutboundIntent;
+      outboxMessageId?: string | null;
     }
   | { outcome: 'ignored'; reason: string }
   | { outcome: 'duplicate_terminal' }
@@ -97,6 +110,14 @@ export type InstagramProcessDeps = {
     stateForPrecheck: NonNullable<Extract<InstagramBookingIntent, { kind: 'ready_to_book' }>['state']>;
     messageTimestampIso: string | null;
   }) => Promise<InstagramBookingCommitResult>;
+  /** Injectable owned outbound enqueue (tests). */
+  enqueueOutbound?: (params: {
+    db: SupabaseClient | any;
+    salonId: string;
+    receiptId: string;
+    attemptCount: number;
+    intent: InstagramOutboundIntent;
+  }) => Promise<EnqueueInstagramOutboundResult>;
   bookingFsmDeps?: InstagramBookingFsmDeps;
   db?: SupabaseClient | any;
 };
@@ -127,6 +148,14 @@ export function createDefaultInstagramProcessDeps(
         stateForPrecheck: params.stateForPrecheck,
         stateForRecovery: params.stateForPrecheck,
         messageTimestampIso: params.messageTimestampIso,
+      }),
+    enqueueOutbound: (params) =>
+      enqueueInstagramOutboundOwned({
+        db: params.db,
+        salonId: params.salonId,
+        receiptId: params.receiptId,
+        attemptCount: params.attemptCount,
+        intent: params.intent,
       }),
     db: supabase as any,
   };
@@ -179,6 +208,10 @@ export async function processInstagramWebhookEvent(
   const salonId = route.salonId;
   const routingCode =
     route.kind === 'connected' ? 'connected' : `disconnected:${route.reason}`;
+  const professionalAccountId =
+    route.kind === 'connected' || route.kind === 'disconnected'
+      ? route.professionalAccountId
+      : null;
 
   let finalStatus: 'processed' | 'ignored';
   if (route.kind === 'disconnected') {
@@ -317,13 +350,62 @@ export async function processInstagramWebhookEvent(
     metadata.reason = 'missing_sender';
   }
 
-  const finalized = await deps.finalize({
-    salonId,
-    receiptId: claim.receiptId,
-    attemptCount: claim.attemptCount,
-    finalStatus,
+  // IG-7: durable outbound enqueue BEFORE receipt finalize (crash-safe dedupe).
+  // No Meta Send API here — worker flushes asynchronously when enabled.
+  let outboundIntent: InstagramOutboundIntent | null = null;
+  if (
+    finalStatus === 'processed' &&
+    route.kind === 'connected' &&
+    professionalAccountId &&
+    !event.isEcho
+  ) {
+    outboundIntent = resolveInstagramOutboundIntent({
+      sourceEventId: event.externalEventId,
+      recipientExternalUserId: event.externalUserId,
+      professionalAccountId,
+      bookingIntent,
+      bookingCommit,
+    });
+  }
+
+  // Production defaults always provide enqueueOutbound. Older IG-3…6 unit mocks
+  // may omit it — skip enqueue rather than hitting live RPC in those tests.
+  const pendingIntent =
+    outboundIntent && deps.enqueueOutbound ? outboundIntent : null;
+
+  const gated = await enqueueInstagramOutboundThenFinalizeInbound({
+    pendingIntent,
+    enqueue: () =>
+      deps.enqueueOutbound!({
+        db: deps.db ?? supabase,
+        salonId,
+        receiptId: claim.receiptId,
+        attemptCount: claim.attemptCount,
+        intent: outboundIntent!,
+      }),
+    finalizeInbound: () =>
+      deps.finalize({
+        salonId,
+        receiptId: claim.receiptId,
+        attemptCount: claim.attemptCount,
+        finalStatus,
+      }),
   });
 
+  if (gated.kind === 'lost_ownership') {
+    return { outcome: 'in_flight' };
+  }
+  if (gated.kind === 'enqueue_failed') {
+    await deps.markFailed({
+      salonId,
+      receiptId: claim.receiptId,
+      attemptCount: claim.attemptCount,
+      errorCode: gated.code,
+    });
+    return { outcome: 'failed_transient', code: gated.code };
+  }
+
+  const finalized = gated.finalize;
   if (!finalized.ok) {
     if (finalized.code === 'finalize_lost_ownership') {
       return { outcome: 'in_flight' };
@@ -342,6 +424,10 @@ export async function processInstagramWebhookEvent(
       outcome: 'processed',
       ...(bookingIntent ? { bookingIntent } : {}),
       ...(bookingCommit ? { bookingCommit } : {}),
+      ...(outboundIntent ? { outboundIntent } : {}),
+      ...(gated.outboxMessageId !== undefined
+        ? { outboxMessageId: gated.outboxMessageId }
+        : {}),
     };
   }
   return { outcome: 'ignored', reason: metadata.reason || routingCode };

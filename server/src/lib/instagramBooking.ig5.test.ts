@@ -805,6 +805,12 @@ describe('IG-5 pipeline integration (executed mocks)', () => {
         messageKey: 'instagram.booking.chooseService',
         text: 'choose',
       }),
+      enqueueOutbound: async () => ({
+        kind: 'enqueued',
+        id: 'ob-ig5',
+        created: true,
+        intentKey: 'ask_service',
+      }),
       ...overrides,
     };
   }
