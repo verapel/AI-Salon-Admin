@@ -1,7 +1,7 @@
 /**
- * IG-3 / IG-4 / IG-5: Per-event Instagram webhook processing.
- * Route → claim → identity/conversation touch → booking FSM → finalize.
- * No appointment/client writes. No Meta outbound.
+ * IG-3 / IG-4 / IG-5 / IG-6: Per-event Instagram webhook processing.
+ * Route → claim → identity/conversation touch → booking FSM → commit → finalize.
+ * No Meta outbound.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -21,6 +21,10 @@ import {
 } from './instagramBookingFlow.js';
 import type { InstagramBookingIntent } from './instagramBookingState.js';
 import {
+  commitInstagramBookingOwned,
+  type InstagramBookingCommitResult,
+} from './instagramBookingCommit.js';
+import {
   claimInstagramEventReceipt,
   finalizeInstagramEventReceipt,
   markInstagramEventReceiptFailed,
@@ -34,7 +38,11 @@ import {
 import { supabase } from './supabase.js';
 
 export type InstagramEventProcessResult =
-  | { outcome: 'processed'; bookingIntent?: InstagramBookingIntent }
+  | {
+      outcome: 'processed';
+      bookingIntent?: InstagramBookingIntent;
+      bookingCommit?: InstagramBookingCommitResult;
+    }
   | { outcome: 'ignored'; reason: string }
   | { outcome: 'duplicate_terminal' }
   | { outcome: 'in_flight' }
@@ -77,6 +85,18 @@ export type InstagramProcessDeps = {
     attemptCount: number;
     inboundAdvanced?: boolean;
   }) => Promise<InstagramBookingIntent>;
+  /** Injectable commit (tests). Production uses commitInstagramBookingOwned. */
+  commitBooking?: (params: {
+    db: SupabaseClient | any;
+    salonId: string;
+    receiptId: string;
+    attemptCount: number;
+    externalUserId: string;
+    expectedSourceMessageId: string;
+    externalEventId: string;
+    stateForPrecheck: NonNullable<Extract<InstagramBookingIntent, { kind: 'ready_to_book' }>['state']>;
+    messageTimestampIso: string | null;
+  }) => Promise<InstagramBookingCommitResult>;
   bookingFsmDeps?: InstagramBookingFsmDeps;
   db?: SupabaseClient | any;
 };
@@ -95,6 +115,19 @@ export function createDefaultInstagramProcessDeps(
         ...params,
       }),
     runBookingFsm: (params) => processInstagramBookingFsm(params),
+    commitBooking: (params) =>
+      commitInstagramBookingOwned({
+        db: params.db,
+        salonId: params.salonId,
+        receiptId: params.receiptId,
+        attemptCount: params.attemptCount,
+        externalUserId: params.externalUserId,
+        expectedSourceMessageId: params.expectedSourceMessageId,
+        externalEventId: params.externalEventId,
+        stateForPrecheck: params.stateForPrecheck,
+        stateForRecovery: params.stateForPrecheck,
+        messageTimestampIso: params.messageTimestampIso,
+      }),
     db: supabase as any,
   };
 }
@@ -187,6 +220,7 @@ export async function processInstagramWebhookEvent(
 
   let inboundAdvanced = true;
   let bookingIntent: InstagramBookingIntent | undefined;
+  let bookingCommit: InstagramBookingCommitResult | undefined;
 
   if (shouldTouchIdentityConversation(event, route.kind)) {
     const touched = await deps.applyIdentityConversation({
@@ -238,9 +272,40 @@ export async function processInstagramWebhookEvent(
         });
         return { outcome: 'failed_transient', code: fsm.code };
       }
-      // stale_step / outdated / invalid_state / noop / intents → finalize (no appointment side effects)
-      // invalid_state is deterministic malformed next-state — terminal, not 500-retry.
       bookingIntent = fsm;
+
+      // IG-6: commit only when this inbound produced/re-signaled ready_to_book.
+      if (
+        fsm.kind === 'ready_to_book' &&
+        event.externalMessageId &&
+        deps.commitBooking
+      ) {
+        const booked = await deps.commitBooking({
+          db: deps.db ?? supabase,
+          salonId,
+          receiptId: claim.receiptId,
+          attemptCount: claim.attemptCount,
+          externalUserId: event.externalUserId!,
+          expectedSourceMessageId: event.externalMessageId,
+          externalEventId: event.externalEventId,
+          stateForPrecheck: fsm.state,
+          messageTimestampIso: parseInstagramMessageTimestamp(event.timestampMs),
+        });
+
+        if (booked.kind === 'lost_ownership') {
+          return { outcome: 'in_flight' };
+        }
+        if (booked.kind === 'error') {
+          await deps.markFailed({
+            salonId,
+            receiptId: claim.receiptId,
+            attemptCount: claim.attemptCount,
+            errorCode: booked.code,
+          });
+          return { outcome: 'failed_transient', code: booked.code };
+        }
+        bookingCommit = booked;
+      }
     }
   } else if (
     route.kind === 'connected' &&
@@ -273,9 +338,11 @@ export async function processInstagramWebhookEvent(
   }
 
   if (finalStatus === 'processed') {
-    return bookingIntent
-      ? { outcome: 'processed', bookingIntent }
-      : { outcome: 'processed' };
+    return {
+      outcome: 'processed',
+      ...(bookingIntent ? { bookingIntent } : {}),
+      ...(bookingCommit ? { bookingCommit } : {}),
+    };
   }
   return { outcome: 'ignored', reason: metadata.reason || routingCode };
 }

@@ -3,6 +3,12 @@ import { supabase } from '../lib/supabase.js';
 import { getSalonId } from '../lib/salonContext.js';
 import { formatTimeValue } from '../lib/mappers.js';
 import { isValidHhMm, isValidIsoDate, timeOrderOk } from '../lib/scheduleSlots.js';
+import {
+  createScheduleExceptionCoordinated,
+  deleteScheduleExceptionCoordinated,
+  upsertSalonWeeklyHoursCoordinated,
+  upsertStaffWeeklyHoursCoordinated,
+} from '../lib/scheduleCoordination.js';
 import { requireSalonWriteAccess } from '../middleware/auth.js';
 
 const router = Router();
@@ -214,24 +220,16 @@ router.put('/salon-weekly', requireSalonWriteAccess, async (req, res) => {
   const parsed = parseHoursArray((req.body as { hours?: unknown })?.hours);
   if (!parsed.ok) return res.status(400).json({ error: parsed.error });
 
-  const now = new Date().toISOString();
-  const rows = parsed.hours.map((h) => ({
-    salon_id: salonId,
-    weekday: h.weekday,
-    is_closed: h.isClosed,
-    open_time: h.openTime,
-    close_time: h.closeTime,
-    updated_at: now,
-  }));
-
-  const { data, error } = await (supabase as any)
-    .from('salon_weekly_hours')
-    .upsert(rows, { onConflict: 'salon_id,weekday' })
-    .select('*')
-    .order('weekday');
-
-  if (error) return res.status(500).json({ error: error.message });
-  res.json((data ?? []).map(mapSalonWeekly));
+  const result = await upsertSalonWeeklyHoursCoordinated(
+    supabase as any,
+    salonId,
+    parsed.hours,
+  );
+  if (!result.ok) return res.status(500).json({ error: result.error });
+  const sorted = [...result.rows].sort(
+    (a, b) => Number(a.weekday ?? 0) - Number(b.weekday ?? 0),
+  );
+  res.json(sorted.map((row) => mapSalonWeekly(row as any)));
 });
 
 /** PUT /api/schedule/staff/:staffId/weekly */
@@ -246,25 +244,22 @@ router.put('/staff/:staffId/weekly', requireSalonWriteAccess, async (req, res) =
   const parsed = parseHoursArray((req.body as { hours?: unknown })?.hours);
   if (!parsed.ok) return res.status(400).json({ error: parsed.error });
 
-  const now = new Date().toISOString();
-  const rows = parsed.hours.map((h) => ({
-    salon_id: salonId,
-    staff_id: staffId,
-    weekday: h.weekday,
-    is_closed: h.isClosed,
-    open_time: h.openTime,
-    close_time: h.closeTime,
-    updated_at: now,
-  }));
-
-  const { data, error } = await (supabase as any)
-    .from('staff_weekly_hours')
-    .upsert(rows, { onConflict: 'staff_id,weekday' })
-    .select('*')
-    .order('weekday');
-
-  if (error) return res.status(500).json({ error: error.message });
-  res.json((data ?? []).map(mapStaffWeekly));
+  const result = await upsertStaffWeeklyHoursCoordinated(
+    supabase as any,
+    salonId,
+    staffId,
+    parsed.hours,
+  );
+  if (!result.ok) {
+    if (result.error.includes('IG6B_STAFF_NOT_FOUND')) {
+      return res.status(404).json({ error: 'Staff member not found' });
+    }
+    return res.status(500).json({ error: result.error });
+  }
+  const sorted = [...result.rows].sort(
+    (a, b) => Number(a.weekday ?? 0) - Number(b.weekday ?? 0),
+  );
+  res.json(sorted.map((row) => mapStaffWeekly(row as any)));
 });
 
 /** GET /api/schedule/exceptions */
@@ -355,24 +350,24 @@ router.post('/exceptions', requireSalonWriteAccess, async (req, res) => {
   const note =
     typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null;
 
-  const { data, error } = await (supabase as any)
-    .from('schedule_exceptions')
-    .insert({
-      salon_id: salonId,
-      scope,
-      staff_id: staffId,
-      kind,
-      start_date: startDate,
-      end_date: endDate,
-      open_time: openTime,
-      close_time: closeTime,
-      note,
-    })
-    .select('*')
-    .single();
-
-  if (error) return res.status(500).json({ error: error.message });
-  res.status(201).json(mapException(data));
+  const created = await createScheduleExceptionCoordinated(supabase as any, {
+    salonId,
+    scope,
+    staffId,
+    kind,
+    startDate: startDate as string,
+    endDate: endDate as string,
+    openTime,
+    closeTime,
+    note,
+  });
+  if (!created.ok) {
+    if (created.code === 'range_too_large') {
+      return res.status(400).json({ error: created.error });
+    }
+    return res.status(500).json({ error: created.error });
+  }
+  res.status(201).json(mapException(created.row as any));
 });
 
 /** DELETE /api/schedule/exceptions/:id */
@@ -381,16 +376,14 @@ router.delete('/exceptions/:id', requireSalonWriteAccess, async (req, res) => {
   const id = (req.params.id as string)?.trim();
   if (!id) return res.status(400).json({ error: 'id is required' });
 
-  const { data, error } = await (supabase as any)
-    .from('schedule_exceptions')
-    .delete()
-    .eq('id', id)
-    .eq('salon_id', salonId)
-    .select('id')
-    .maybeSingle();
-
-  if (error) return res.status(500).json({ error: error.message });
-  if (!data) return res.status(404).json({ error: 'Exception not found' });
+  const deleted = await deleteScheduleExceptionCoordinated(supabase as any, {
+    salonId,
+    exceptionId: id,
+  });
+  if (!deleted.ok) {
+    if (deleted.notFound) return res.status(404).json({ error: 'Exception not found' });
+    return res.status(500).json({ error: deleted.error });
+  }
   res.status(204).send();
 });
 

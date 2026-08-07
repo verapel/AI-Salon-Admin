@@ -8,6 +8,11 @@ import {
   isValidIsoDate,
   timeOrderOk,
 } from '../lib/scheduleSlots.js';
+import {
+  createScheduleExceptionCoordinated,
+  deleteScheduleExceptionCoordinated,
+  upsertStaffWeeklyHoursCoordinated,
+} from '../lib/scheduleCoordination.js';
 
 const router = Router();
 
@@ -349,30 +354,22 @@ router.put('/schedule/weekly', async (req, res) => {
   const parsed = parseHoursArray((req.body as { hours?: unknown })?.hours);
   if (!parsed.ok) return res.status(400).json({ error: parsed.error });
 
-  const now = new Date().toISOString();
-  const rows = parsed.hours.map((h) => ({
-    salon_id: salonId,
-    staff_id: staffId,
-    weekday: h.weekday,
-    is_closed: h.isClosed,
-    open_time: h.openTime,
-    close_time: h.closeTime,
-    updated_at: now,
-  }));
-
-  const { data, error } = await (supabase as any)
-    .from('staff_weekly_hours')
-    .upsert(rows, { onConflict: 'staff_id,weekday' })
-    .select('*')
-    .order('weekday');
-
-  if (error) {
-    console.error('[staffPortal] PUT schedule/weekly error:', error.message);
+  const result = await upsertStaffWeeklyHoursCoordinated(
+    supabase as any,
+    salonId,
+    staffId,
+    parsed.hours,
+  );
+  if (!result.ok) {
+    console.error('[staffPortal] PUT schedule/weekly error:', result.error);
     return res.status(500).json({ error: 'Failed to save weekly schedule' });
   }
 
+  const sorted = [...result.rows].sort(
+    (a, b) => Number(a.weekday ?? 0) - Number(b.weekday ?? 0),
+  );
   res.json({
-    staffWeekly: (data ?? []).map(mapStaffWeekly),
+    staffWeekly: sorted.map((row) => mapStaffWeekly(row as any)),
   });
 });
 
@@ -439,28 +436,26 @@ router.post('/schedule/exceptions', async (req, res) => {
   }
 
   // Force scope/salon/staff from auth — never from body.
-  const { data, error } = await (supabase as any)
-    .from('schedule_exceptions')
-    .insert({
-      salon_id: salonId,
-      scope: 'staff',
-      staff_id: staffId,
-      kind,
-      start_date: startDate,
-      end_date: endDate,
-      open_time: openTime,
-      close_time: closeTime,
-      note,
-    })
-    .select('*')
-    .single();
-
-  if (error) {
-    console.error('[staffPortal] POST schedule/exceptions error:', error.message);
+  const created = await createScheduleExceptionCoordinated(supabase as any, {
+    salonId,
+    scope: 'staff',
+    staffId,
+    kind,
+    startDate: startDate as string,
+    endDate: endDate as string,
+    openTime,
+    closeTime,
+    note,
+  });
+  if (!created.ok) {
+    if (created.code === 'range_too_large') {
+      return res.status(400).json({ error: created.error });
+    }
+    console.error('[staffPortal] POST schedule/exceptions error:', created.error);
     return res.status(500).json({ error: 'Failed to create exception' });
   }
 
-  res.status(201).json({ exception: mapException(data) });
+  res.status(201).json({ exception: mapException(created.row as any) });
 });
 
 /** DELETE /api/staff-portal/schedule/exceptions/:id — own staff exception only */
@@ -474,21 +469,16 @@ router.delete('/schedule/exceptions/:id', async (req, res) => {
   const id = (req.params.id as string)?.trim();
   if (!id) return res.status(400).json({ error: 'id is required' });
 
-  const { data, error } = await (supabase as any)
-    .from('schedule_exceptions')
-    .delete()
-    .eq('id', id)
-    .eq('salon_id', salonId)
-    .eq('staff_id', staffId)
-    .eq('scope', 'staff')
-    .select('id')
-    .maybeSingle();
-
-  if (error) {
-    console.error('[staffPortal] DELETE schedule/exceptions error:', error.message);
+  const deleted = await deleteScheduleExceptionCoordinated(supabase as any, {
+    salonId,
+    exceptionId: id,
+    requireStaffId: staffId,
+  });
+  if (!deleted.ok) {
+    if (deleted.notFound) return res.status(404).json({ error: 'Exception not found' });
+    console.error('[staffPortal] DELETE schedule/exceptions error:', deleted.error);
     return res.status(500).json({ error: 'Failed to delete exception' });
   }
-  if (!data) return res.status(404).json({ error: 'Exception not found' });
 
   res.json({ ok: true });
 });

@@ -837,7 +837,13 @@ describe('WA-4E1 AppointmentSource type cleanup (executed)', () => {
   it('17/18. server AppointmentSource accepts whatsapp', () => {
     const src: ServerAppointmentSource = 'whatsapp';
     assert.equal(src, 'whatsapp');
-    const allowed: ServerAppointmentSource[] = ['telegram', 'owner', 'apple', 'whatsapp'];
+    const allowed: ServerAppointmentSource[] = [
+      'telegram',
+      'owner',
+      'apple',
+      'whatsapp',
+      'instagram',
+    ];
     assert.ok(allowed.includes('whatsapp'));
   });
 });
