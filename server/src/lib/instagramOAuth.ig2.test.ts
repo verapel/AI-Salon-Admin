@@ -987,9 +987,11 @@ describe('IG-2A/B persistence / reconnect / security (static + reasoned)', () =>
     assert.match(apple, /CALENDAR_CREDENTIALS_ENCRYPTION_KEY/);
   });
 
-  it('schema additive token_expires_at only; no messaging webhook; grantedScopes not fabricated', () => {
+  it('schema additive token_expires_at only; grantedScopes not fabricated', () => {
     assert.match(mig2, /ADD COLUMN IF NOT EXISTS token_expires_at/);
-    assert.doesNotMatch(indexSrc, /\/api\/webhooks\/instagram/);
+    // IG-3 mounts messaging webhook separately from IG-2 OAuth callback.
+    assert.match(indexSrc, /\/api\/webhooks\/instagram/);
+    assert.match(indexSrc, /\/api\/integrations\/instagram/);
     assert.doesNotMatch(
       apiSrc,
       /grantedScopes:\s*\[\s*\.\.\.INSTAGRAM_REQUIRED_SCOPES/,

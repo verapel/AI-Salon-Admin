@@ -44,8 +44,11 @@ export type WhatsAppCloudProvider = 'meta_cloud';
 /** Channel identity providers for client_channel_identities. */
 export type ClientChannelProvider = 'telegram' | 'whatsapp';
 
-/** Providers for channel_event_receipts / channel_conversations (WA-1: WhatsApp only). */
-export type ChannelMessagingProvider = 'whatsapp';
+/**
+ * Providers for channel_event_receipts (WA-1 WhatsApp; IG-3 Instagram receipts).
+ * channel_conversations / client_channel_identities remain WhatsApp-only until IG-4.
+ */
+export type ChannelMessagingProvider = 'whatsapp' | 'instagram';
 
 export type ChannelEventProcessingStatus =
   | 'received'

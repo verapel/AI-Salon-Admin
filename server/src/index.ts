@@ -22,6 +22,7 @@ import internalRouter from './routes/internal.js';
 import staffPortalRouter from './routes/staffPortal.js';
 import calendarConnectionsRouter from './routes/calendarConnections.js';
 import whatsappWebhookRouter from './routes/whatsappWebhook.js';
+import instagramWebhookRouter from './routes/instagramWebhook.js';
 import instagramOAuthCallbackRouter from './routes/instagramOAuthCallback.js';
 import {
   requireDeveloperAuth,
@@ -418,9 +419,10 @@ async function handleBirthdayCollection(
 }
 
 app.use(cors());
-// WhatsApp Cloud webhooks need the exact raw body for HMAC. Mount before express.json().
+// WhatsApp / Instagram webhooks need the exact raw body for HMAC. Mount before express.json().
 // Path-scoped only — does not change JSON parsing for Telegram or salon/developer APIs.
 app.use('/api/webhooks/whatsapp', whatsappWebhookRouter);
+app.use('/api/webhooks/instagram', instagramWebhookRouter);
 app.use(express.json());
 async function generateAIResponse(
   ctx: TelegramSalonContext,

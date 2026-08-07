@@ -160,7 +160,8 @@ export type WhatsAppCloudProvider = 'meta_cloud';
 export type ClientChannelProvider = 'telegram' | 'whatsapp';
 
 /** Providers that may write channel_event_receipts / channel_conversations (WA-1: WhatsApp only). */
-export type ChannelMessagingProvider = 'whatsapp';
+/** channel_event_receipts: whatsapp + instagram (IG-3). Conversations remain WA-only until IG-4. */
+export type ChannelMessagingProvider = 'whatsapp' | 'instagram';
 
 export type ChannelEventProcessingStatus =
   | 'received'

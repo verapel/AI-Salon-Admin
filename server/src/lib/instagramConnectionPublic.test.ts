@@ -109,7 +109,7 @@ describe('IG-1 authz / route boundary static checks', () => {
   const igRoutes = readRepo('../routes/instagramIntegrations.ts');
   const auth = readRepo('../middleware/auth.ts');
 
-  it('8. Instagram management mounted under developer; OAuth callback outside webhooks', () => {
+  it('8. Instagram management mounted under developer; OAuth callback outside developer Bearer', () => {
     assert.match(
       developer,
       /router\.use\('\/integrations\/instagram',\s*instagramIntegrationsRouter\)/,
@@ -117,7 +117,12 @@ describe('IG-1 authz / route boundary static checks', () => {
     // IG-2 callback router is mounted outside /api/developer (no Bearer).
     assert.match(index, /instagramOAuthCallbackRouter/);
     assert.match(index, /\/api\/integrations\/instagram/);
-    assert.doesNotMatch(index, /\/api\/webhooks\/instagram/);
+    // IG-3 messaging webhook is a separate path from OAuth callback.
+    assert.match(index, /\/api\/webhooks\/instagram/);
+    assert.notEqual(
+      index.indexOf('/api/integrations/instagram'),
+      index.indexOf('/api/webhooks/instagram'),
+    );
   });
 
   it('9. developer gate denies non-developers (owner/admin/staff)', () => {
