@@ -825,6 +825,54 @@ export interface Database {
         };
         Relationships: [];
       };
+      instagram_business_connections: {
+        Row: {
+          id: string;
+          salon_id: string;
+          instagram_user_id: string | null;
+          instagram_username: string | null;
+          access_token_ciphertext: string | null;
+          access_token_iv: string | null;
+          access_token_auth_tag: string | null;
+          status: IntegrationStatus;
+          connected_at: string | null;
+          last_webhook_at: string | null;
+          last_error: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          instagram_user_id?: string | null;
+          instagram_username?: string | null;
+          access_token_ciphertext?: string | null;
+          access_token_iv?: string | null;
+          access_token_auth_tag?: string | null;
+          status?: IntegrationStatus;
+          connected_at?: string | null;
+          last_webhook_at?: string | null;
+          last_error?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          instagram_user_id?: string | null;
+          instagram_username?: string | null;
+          access_token_ciphertext?: string | null;
+          access_token_iv?: string | null;
+          access_token_auth_tag?: string | null;
+          status?: IntegrationStatus;
+          connected_at?: string | null;
+          last_webhook_at?: string | null;
+          last_error?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       whatsapp_business_connections: {
         Row: {
           id: string;

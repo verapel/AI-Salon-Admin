@@ -253,6 +253,19 @@ export const api = {
         `/developer/integrations/whatsapp/${salonId}/disconnect`,
         { method: 'DELETE' }
       ),
+    getInstagramIntegrations: () =>
+      request<import('@/types').DeveloperInstagramIntegration[]>(
+        '/developer/integrations/instagram'
+      ),
+    getInstagramIntegration: (salonId: string) =>
+      request<import('@/types').DeveloperInstagramIntegration>(
+        `/developer/integrations/instagram/${salonId}`
+      ),
+    disconnectInstagram: (salonId: string) =>
+      request<import('@/types').DeveloperInstagramIntegration>(
+        `/developer/integrations/instagram/${salonId}/disconnect`,
+        { method: 'DELETE' }
+      ),
     connectTelegram: (body: {
       salonName?: string;
       salonId?: string;

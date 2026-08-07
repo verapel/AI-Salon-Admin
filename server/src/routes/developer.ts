@@ -5,6 +5,7 @@ import { supabase, checkSupabaseConnection } from '../lib/supabase.js';
 import { loadTelegramTokenFromDb } from '../lib/telegramToken.js';
 import { restartTelegramPolling } from '../lib/telegramPollingControl.js';
 import whatsappIntegrationsRouter from './whatsappIntegrations.js';
+import instagramIntegrationsRouter from './instagramIntegrations.js';
 import { telegramBotManager } from '../lib/telegramBotManager.js';
 import {
   buildSalonDeletePreview,
@@ -1391,5 +1392,9 @@ router.post('/integrations/telegram/connect', async (req, res) => {
 // Developer-only WhatsApp Cloud connection management (WA-2E).
 // Salon cabinet must not mount these routes.
 router.use('/integrations/whatsapp', whatsappIntegrationsRouter);
+
+// Instagram Business integrations (IG-1 connection foundation — read/disconnect only).
+// Salon cabinet must not mount these routes.
+router.use('/integrations/instagram', instagramIntegrationsRouter);
 
 export default router;

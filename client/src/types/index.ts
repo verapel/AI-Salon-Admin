@@ -422,6 +422,41 @@ export interface DeveloperWhatsAppIntegration {
   connection: WhatsAppBusinessConnectionPublic | null;
 }
 
+/** IG-1 Instagram connection status (connection table). */
+export type InstagramConnectionStatus =
+  | 'not_connected'
+  | 'connected'
+  | 'error'
+  | 'disabled';
+
+/**
+ * Safe Instagram Business connection metadata for developer Instagram APIs.
+ * Never includes access_token ciphertext, iv, or auth_tag.
+ */
+export interface InstagramBusinessConnectionPublic {
+  id: string;
+  salonId: string;
+  status: InstagramConnectionStatus;
+  /** Instagram Professional Account ID (routing identity). */
+  instagramUserId: string | null;
+  instagramUsername: string | null;
+  connectedAt: string | null;
+  lastWebhookAt: string | null;
+  lastError: string | null;
+  isAccessTokenStored: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Developer-cabinet per-salon Instagram status (no secrets). */
+export interface DeveloperInstagramIntegration {
+  salonId: string;
+  salonName: string;
+  slug: string;
+  connected: boolean;
+  connection: InstagramBusinessConnectionPublic | null;
+}
+
 export interface WeeklyHoursInput {
   weekday: number;
   isClosed: boolean;

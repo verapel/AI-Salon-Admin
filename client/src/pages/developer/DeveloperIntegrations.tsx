@@ -7,6 +7,7 @@ import IntegrationTabs, {
 } from '@/components/developer/IntegrationTabs';
 import TelegramIntegrationsTab from '@/components/developer/TelegramIntegrationsTab';
 import WhatsAppIntegrationsTab from '@/components/developer/WhatsAppIntegrationsTab';
+import InstagramIntegrationsTab from '@/components/developer/InstagramIntegrationsTab';
 import ComingSoonTab from '@/components/developer/ComingSoonTab';
 import AddIntegrationModal from '@/components/developer/AddIntegrationModal';
 import { useDeveloperTelegramConnect } from '@/hooks/useDeveloperTelegramConnect';
@@ -89,6 +90,8 @@ export default function DeveloperIntegrations() {
             />
           ) : activeTab === 'whatsapp' ? (
             <WhatsAppIntegrationsTab refreshKey={refreshKey} />
+          ) : activeTab === 'instagram' ? (
+            <InstagramIntegrationsTab refreshKey={refreshKey} />
           ) : null
         ) : (
           <ComingSoonTab tabId={activeTab} />
