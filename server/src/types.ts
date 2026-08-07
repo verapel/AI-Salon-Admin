@@ -238,6 +238,7 @@ export interface InstagramBusinessConnectionPublic {
   connectedAt: string | null;
   lastWebhookAt: string | null;
   lastError: string | null;
+  tokenExpiresAt?: string | null;
   isAccessTokenStored: boolean;
   createdAt: string;
   updatedAt: string;

@@ -686,20 +686,36 @@ const en = {
   'developer.integrations.whatsapp.prepared': 'WhatsApp prepared',
   'developer.integrations.whatsapp.prepareFailed': 'Failed to prepare WhatsApp',
   'developer.integrations.instagram.description':
-    'Read-only Instagram Professional Account status per salon. Connect flow arrives in a later stage; secrets are never shown.',
+    'Connect Instagram Professional Accounts for each salon via Meta Instagram Login. Secrets are never shown in the browser.',
   'developer.integrations.instagram.notConnectedHint':
-    'No Instagram connection stored for this salon yet. Meta connect is not available in this stage.',
+    'Connect this salon with Instagram Login. Messaging webhooks arrive in a later stage.',
   'developer.integrations.instagram.emptyTitle': 'No salons',
-  'developer.integrations.instagram.emptyDesc': 'Create a salon first, then review Instagram status here.',
+  'developer.integrations.instagram.emptyDesc': 'Create a salon first, then connect Instagram here.',
   'developer.integrations.instagram.username': 'Instagram username',
   'developer.integrations.instagram.professionalAccountId': 'Professional Account ID',
   'developer.integrations.instagram.lastWebhookAt': 'Last webhook',
   'developer.integrations.instagram.lastError': 'Last error',
+  'developer.integrations.instagram.connect': 'Connect Instagram',
+  'developer.integrations.instagram.reconnect': 'Reconnect',
+  'developer.integrations.instagram.connecting': 'Redirecting...',
   'developer.integrations.instagram.disconnect': 'Disconnect Instagram',
   'developer.integrations.instagram.disconnecting': 'Disconnecting...',
   'developer.integrations.instagram.disconnectConfirm':
     'Clear stored Instagram credentials for this salon? Clients and appointments are not deleted.',
   'developer.integrations.instagram.genericError': 'Could not update Instagram connection. Try again.',
+  'developer.integrations.instagram.notConfigured':
+    'Instagram OAuth is not configured on the server yet.',
+  'developer.integrations.instagram.oauthConnected': 'Instagram connected successfully.',
+  'developer.integrations.instagram.oauthConnectedPending':
+    'Instagram connected. Status refresh may take a moment.',
+  'developer.integrations.instagram.oauthCancelled': 'Instagram connection was cancelled.',
+  'developer.integrations.instagram.oauthFailed': 'Could not complete Instagram connection.',
+  'developer.integrations.instagram.oauthPermissionDenied':
+    'Required Instagram permissions were not granted.',
+  'developer.integrations.instagram.oauthAccountInUse':
+    'This Instagram Professional Account is already connected to another salon.',
+  'developer.integrations.instagram.oauthNotProfessional':
+    'The Instagram account must be a Professional Account.',
   'developer.health.title': 'Health',
   'developer.health.subtitle': 'API, database, and bot health',
   'developer.health.loading': 'Checking system health...',
@@ -1459,20 +1475,36 @@ const ru: Record<TranslationKey, string> = {
   'developer.integrations.whatsapp.prepared': 'WhatsApp подготовлен',
   'developer.integrations.whatsapp.prepareFailed': 'Не удалось подготовить WhatsApp',
   'developer.integrations.instagram.description':
-    'Только чтение статуса Instagram Professional Account по салонам. Подключение появится позже; секреты не показываются.',
+    'Подключайте Instagram Professional Account для каждого салона через Meta Instagram Login. Секреты в браузере не показываются.',
   'developer.integrations.instagram.notConnectedHint':
-    'Для этого салона пока нет сохранённого подключения Instagram. Meta connect недоступен на этом этапе.',
+    'Подключите салон через Instagram Login. Messaging webhook появится позже.',
   'developer.integrations.instagram.emptyTitle': 'Нет салонов',
-  'developer.integrations.instagram.emptyDesc': 'Сначала создайте салон, затем смотрите статус Instagram здесь.',
+  'developer.integrations.instagram.emptyDesc': 'Сначала создайте салон, затем подключите Instagram здесь.',
   'developer.integrations.instagram.username': 'Имя пользователя Instagram',
   'developer.integrations.instagram.professionalAccountId': 'ID Professional Account',
   'developer.integrations.instagram.lastWebhookAt': 'Последний webhook',
   'developer.integrations.instagram.lastError': 'Последняя ошибка',
+  'developer.integrations.instagram.connect': 'Подключить Instagram',
+  'developer.integrations.instagram.reconnect': 'Переподключить',
+  'developer.integrations.instagram.connecting': 'Перенаправление...',
   'developer.integrations.instagram.disconnect': 'Отключить Instagram',
   'developer.integrations.instagram.disconnecting': 'Отключение...',
   'developer.integrations.instagram.disconnectConfirm':
     'Очистить сохранённые данные Instagram для этого салона? Клиенты и записи не удаляются.',
   'developer.integrations.instagram.genericError': 'Не удалось обновить подключение Instagram. Попробуйте снова.',
+  'developer.integrations.instagram.notConfigured':
+    'Instagram OAuth ещё не настроен на сервере.',
+  'developer.integrations.instagram.oauthConnected': 'Instagram успешно подключён.',
+  'developer.integrations.instagram.oauthConnectedPending':
+    'Instagram подключён. Обновление статуса может занять немного времени.',
+  'developer.integrations.instagram.oauthCancelled': 'Подключение Instagram отменено.',
+  'developer.integrations.instagram.oauthFailed': 'Не удалось завершить подключение Instagram.',
+  'developer.integrations.instagram.oauthPermissionDenied':
+    'Не выданы необходимые разрешения Instagram.',
+  'developer.integrations.instagram.oauthAccountInUse':
+    'Этот Instagram Professional Account уже подключён к другому салону.',
+  'developer.integrations.instagram.oauthNotProfessional':
+    'Аккаунт Instagram должен быть Professional Account.',
   'developer.health.title': 'Состояние',
   'developer.health.subtitle': 'API, база данных и боты',
   'developer.health.loading': 'Проверка состояния системы...',
@@ -2224,20 +2256,36 @@ const hy: Record<TranslationKey, string> = {
   'developer.integrations.whatsapp.prepared': 'WhatsApp-ը պատրաստ է',
   'developer.integrations.whatsapp.prepareFailed': 'Չհաջողվեց պատրաստել WhatsApp',
   'developer.integrations.instagram.description':
-    'Միայն Instagram Professional Account կարգավիճակի ընթերցում ըստ սրահի։ Միացումը կավելանա հետագայում; գաղտնիքները չեն ցուցադրվում։',
+    'Միացրեք Instagram Professional Account-ը ըստ սրահի՝ Meta Instagram Login-ով։ Գաղտնիքները բրաուզերում չեն ցուցադրվում։',
   'developer.integrations.instagram.notConnectedHint':
-    'Այս սրահի համար Instagram միացում դեռ պահված չէ։ Meta connect-ը այս փուլում հասանելի չէ։',
+    'Միացրեք այս սրահը Instagram Login-ով։ Messaging webhook-ը կավելանա հետագայում։',
   'developer.integrations.instagram.emptyTitle': 'Սրահներ չկան',
-  'developer.integrations.instagram.emptyDesc': 'Նախ ստեղծեք սրահ, ապա այստեղ դիտեք Instagram կարգավիճակը։',
+  'developer.integrations.instagram.emptyDesc': 'Նախ ստեղծեք սրահ, ապա այստեղ միացրեք Instagram։',
   'developer.integrations.instagram.username': 'Instagram օգտանուն',
   'developer.integrations.instagram.professionalAccountId': 'Professional Account ID',
   'developer.integrations.instagram.lastWebhookAt': 'Վերջին webhook',
   'developer.integrations.instagram.lastError': 'Վերջին սխալ',
+  'developer.integrations.instagram.connect': 'Միացնել Instagram',
+  'developer.integrations.instagram.reconnect': 'Վերամիացնել',
+  'developer.integrations.instagram.connecting': 'Վերահղվում է...',
   'developer.integrations.instagram.disconnect': 'Անջատել Instagram',
   'developer.integrations.instagram.disconnecting': 'Անջատվում է...',
   'developer.integrations.instagram.disconnectConfirm':
     'Մաքրե՞լ այս սրահի պահված Instagram տվյալները։ Հաճախորդները և գրանցումները չեն ջնջվում։',
   'developer.integrations.instagram.genericError': 'Չհաջողվեց թարմացնել Instagram միացումը։ Փորձեք կրկին։',
+  'developer.integrations.instagram.notConfigured':
+    'Instagram OAuth-ը սերվերում դեռ կարգավորված չէ։',
+  'developer.integrations.instagram.oauthConnected': 'Instagram-ը հաջողությամբ միացվեց։',
+  'developer.integrations.instagram.oauthConnectedPending':
+    'Instagram-ը միացված է։ Կարգավիճակի թարմացումը կարող է մի պահ տևել։',
+  'developer.integrations.instagram.oauthCancelled': 'Instagram միացումը չեղարկվեց։',
+  'developer.integrations.instagram.oauthFailed': 'Չհաջողվեց ավարտել Instagram միացումը։',
+  'developer.integrations.instagram.oauthPermissionDenied':
+    'Պահանջվող Instagram թույլտվությունները չեն տրվել։',
+  'developer.integrations.instagram.oauthAccountInUse':
+    'Այս Instagram Professional Account-ն արդեն միացված է այլ սրահի։',
+  'developer.integrations.instagram.oauthNotProfessional':
+    'Instagram հաշիվը պետք է լինի Professional Account։',
   'developer.salons.empty': 'No salons yet.',
   'developer.integrations.overviewHint': 'Connect and manage Telegram bots for each salon from this page.',
   'developer.health.title': 'Վիճակ',

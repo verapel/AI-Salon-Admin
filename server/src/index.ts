@@ -22,6 +22,7 @@ import internalRouter from './routes/internal.js';
 import staffPortalRouter from './routes/staffPortal.js';
 import calendarConnectionsRouter from './routes/calendarConnections.js';
 import whatsappWebhookRouter from './routes/whatsappWebhook.js';
+import instagramOAuthCallbackRouter from './routes/instagramOAuthCallback.js';
 import {
   requireDeveloperAuth,
   requireSalonAuth,
@@ -1166,6 +1167,9 @@ app.post('/api/integrations/telegram/connect', requireDeveloperAuth, async (req,
 
 app.use('/api/auth', authRouter);
 app.use('/api/internal', internalRouter);
+// IG-2 Instagram OAuth callback (Meta browser redirect). Not a messaging webhook.
+// Intentionally outside /api/developer — callback has no developer Bearer token.
+app.use('/api/integrations/instagram', instagramOAuthCallbackRouter);
 
 const API_AUTH_REQUIRED = process.env.API_AUTH_REQUIRED === 'true';
 const noopAuth: RequestHandler = (_req, _res, next) => next();

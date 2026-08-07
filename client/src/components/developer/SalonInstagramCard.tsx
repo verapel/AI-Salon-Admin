@@ -4,6 +4,10 @@ import type { DeveloperInstagramIntegration, InstagramConnectionStatus } from '@
 
 interface SalonInstagramCardProps {
   integration: DeveloperInstagramIntegration;
+  connecting?: boolean;
+  connectError?: string | null;
+  onConnect: () => void;
+  onReconnect: () => void;
   onDisconnect: () => void;
 }
 
@@ -30,6 +34,10 @@ function statusLabelKey(status: InstagramConnectionStatus | undefined): Translat
 
 export default function SalonInstagramCard({
   integration,
+  connecting = false,
+  connectError = null,
+  onConnect,
+  onReconnect,
   onDisconnect,
 }: SalonInstagramCardProps) {
   const { t } = useLanguage();
@@ -37,6 +45,7 @@ export default function SalonInstagramCard({
   const status = connection?.status ?? 'not_connected';
   const canDisconnect =
     Boolean(connection) && (status === 'connected' || status === 'error' || status === 'disabled');
+  const isConnected = integration.connected || status === 'connected';
 
   return (
     <div className="card flex w-full min-w-0 max-w-full flex-col p-4 sm:p-5">
@@ -67,7 +76,7 @@ export default function SalonInstagramCard({
         </span>
       </div>
 
-      {connection ? (
+      {connection && isConnected ? (
         <dl className="mt-4 grid gap-3 text-sm">
           <div className="flex min-w-0 justify-between gap-3">
             <dt className="shrink-0 text-gray-500 dark:text-gray-400">
@@ -122,11 +131,38 @@ export default function SalonInstagramCard({
         </p>
       )}
 
+      {connectError ? (
+        <p className="mt-3 text-sm text-red-600 dark:text-red-400">{connectError}</p>
+      ) : null}
+
       <div className="mt-auto flex flex-wrap gap-2 border-t border-gray-100 pt-4 dark:border-gray-800">
+        {isConnected ? (
+          <button
+            type="button"
+            className="btn-secondary w-full sm:w-auto"
+            disabled={connecting}
+            onClick={onReconnect}
+          >
+            {connecting
+              ? t('developer.integrations.instagram.connecting')
+              : t('developer.integrations.instagram.reconnect')}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn-primary w-full sm:w-auto"
+            disabled={connecting}
+            onClick={onConnect}
+          >
+            {connecting
+              ? t('developer.integrations.instagram.connecting')
+              : t('developer.integrations.instagram.connect')}
+          </button>
+        )}
         <button
           type="button"
           className="btn-secondary w-full sm:w-auto"
-          disabled={!canDisconnect}
+          disabled={!canDisconnect || connecting}
           onClick={onDisconnect}
         >
           {t('developer.integrations.instagram.disconnect')}

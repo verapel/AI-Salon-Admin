@@ -838,6 +838,7 @@ export interface Database {
           connected_at: string | null;
           last_webhook_at: string | null;
           last_error: string | null;
+          token_expires_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -853,6 +854,7 @@ export interface Database {
           connected_at?: string | null;
           last_webhook_at?: string | null;
           last_error?: string | null;
+          token_expires_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -868,6 +870,7 @@ export interface Database {
           connected_at?: string | null;
           last_webhook_at?: string | null;
           last_error?: string | null;
+          token_expires_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };

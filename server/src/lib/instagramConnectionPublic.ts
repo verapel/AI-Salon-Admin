@@ -18,6 +18,8 @@ export type InstagramBusinessConnectionPublic = {
   connectedAt: string | null;
   lastWebhookAt: string | null;
   lastError: string | null;
+  /** Long-lived token expiry when known (IG-2). */
+  tokenExpiresAt: string | null;
   /** True when encrypted access-token material is stored (no ciphertext returned). */
   isAccessTokenStored: boolean;
   createdAt: string;
@@ -42,6 +44,7 @@ export type InstagramConnectionMetadataRow = {
   connected_at: string | null;
   last_webhook_at: string | null;
   last_error: string | null;
+  token_expires_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -63,6 +66,7 @@ export const INSTAGRAM_CONNECTION_PUBLIC_SELECT = `
   connected_at,
   last_webhook_at,
   last_error,
+  token_expires_at,
   created_at,
   updated_at
 `.replace(/\s+/g, ' ').trim();
@@ -117,6 +121,7 @@ export function mapInstagramConnectionPublic(
     connectedAt: row.connected_at,
     lastWebhookAt: row.last_webhook_at,
     lastError: row.last_error,
+    tokenExpiresAt: row.token_expires_at ?? null,
     isAccessTokenStored,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

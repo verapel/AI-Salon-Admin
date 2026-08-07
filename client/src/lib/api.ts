@@ -261,6 +261,11 @@ export const api = {
       request<import('@/types').DeveloperInstagramIntegration>(
         `/developer/integrations/instagram/${salonId}`
       ),
+    startInstagramConnect: (salonId: string) =>
+      request<{ salonId: string; authorizationUrl: string }>(
+        `/developer/integrations/instagram/${salonId}/connect/start`,
+        { method: 'POST', body: JSON.stringify({}) }
+      ),
     disconnectInstagram: (salonId: string) =>
       request<import('@/types').DeveloperInstagramIntegration>(
         `/developer/integrations/instagram/${salonId}/disconnect`,

@@ -28,6 +28,7 @@ describe('instagramConnectionPublic DTO (executed)', () => {
       connected_at: '2026-08-07T00:00:00.000Z',
       last_webhook_at: null,
       last_error: null,
+      token_expires_at: null,
       created_at: '2026-08-07T00:00:00.000Z',
       updated_at: '2026-08-07T00:00:00.000Z',
     };
@@ -63,6 +64,7 @@ describe('instagramConnectionPublic DTO (executed)', () => {
       connected_at: null,
       last_webhook_at: null,
       last_error: null,
+      token_expires_at: null,
       created_at: '2026-08-07T00:00:00.000Z',
       updated_at: '2026-08-07T00:00:00.000Z',
     };
@@ -107,13 +109,14 @@ describe('IG-1 authz / route boundary static checks', () => {
   const igRoutes = readRepo('../routes/instagramIntegrations.ts');
   const auth = readRepo('../middleware/auth.ts');
 
-  it('8. Instagram mounted only under developer router', () => {
+  it('8. Instagram management mounted under developer; OAuth callback outside webhooks', () => {
     assert.match(
       developer,
       /router\.use\('\/integrations\/instagram',\s*instagramIntegrationsRouter\)/,
     );
-    assert.doesNotMatch(index, /instagramIntegrations/);
-    assert.doesNotMatch(index, /\/api\/integrations\/instagram/);
+    // IG-2 callback router is mounted outside /api/developer (no Bearer).
+    assert.match(index, /instagramOAuthCallbackRouter/);
+    assert.match(index, /\/api\/integrations\/instagram/);
     assert.doesNotMatch(index, /\/api\/webhooks\/instagram/);
   });
 
@@ -124,11 +127,12 @@ describe('IG-1 authz / route boundary static checks', () => {
     assert.match(index, /app\.use\('\/api\/developer',\s*developerAuth,\s*developerRouter\)/);
   });
 
-  it('10. detail/disconnect use route salonId only (body cannot retarget)', () => {
+  it('10. detail/disconnect/start use route salonId only (body cannot retarget)', () => {
     assert.match(igRoutes, /req\.params\.salonId/);
-    assert.doesNotMatch(igRoutes, /req\.body\.salonId/);
+    assert.match(igRoutes, /salonId must not be provided in the request body/);
+    // Connect/start does not fabricate status=connected (callback/persist does after Meta verify).
     assert.doesNotMatch(igRoutes, /status:\s*'connected'/);
-    assert.doesNotMatch(igRoutes, /router\.post\(/);
+    assert.match(igRoutes, /router\.post\('\/:salonId\/connect\/start'/);
   });
 
   it('11. disconnect clears secrets and does not touch clients/appointments', () => {

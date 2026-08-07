@@ -1,7 +1,6 @@
 /**
- * Developer-cabinet Instagram connection APIs (IG-1).
- * Read/list + soft disconnect foundation only.
- * No Meta connect/verify in IG-1 — status='connected' is never fabricated here.
+ * Developer-cabinet Instagram connection APIs (IG-1 + IG-2 connect/start).
+ * OAuth callback lives outside this router (no developer Bearer on Meta redirect).
  * Mounted under /api/developer (requireDeveloperAuth). Salon cabinet has no access.
  */
 
@@ -16,6 +15,19 @@ import {
   type InstagramConnectionMetadataRow,
   type InstagramCredentialTripleRow,
 } from '../lib/instagramConnectionPublic.js';
+import {
+  assertInstagramCredentialsEncryptionKeyConfigured,
+  isInstagramCredentialCryptoError,
+} from '../lib/instagramCredentialsCrypto.js';
+import {
+  buildInstagramAuthorizeUrl,
+  isInstagramApiError,
+  loadInstagramAppConfig,
+} from '../lib/instagramApi.js';
+import {
+  createInstagramOAuthState,
+  InstagramOAuthStateError,
+} from '../lib/instagramOAuthState.js';
 
 const router = Router();
 const INSTAGRAM_PROVIDER = 'instagram' as const;
@@ -151,6 +163,77 @@ function handleRouteError(
 }
 
 /**
+ * POST /api/developer/integrations/instagram/:salonId/connect/start
+ * Developer-only OAuth start. Returns authorization URL. No Meta calls yet.
+ * Route salonId is authoritative — body salonId is ignored/rejected.
+ */
+router.post('/:salonId/connect/start', async (req, res) => {
+  const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
+
+  if (req.body && typeof req.body === 'object') {
+    const raw = req.body as Record<string, unknown>;
+    if ('salonId' in raw || 'salon_id' in raw) {
+      return res.status(400).json({
+        error: 'salonId must not be provided in the request body',
+        code: 'INSTAGRAM_INVALID_REQUEST',
+      });
+    }
+  }
+
+  try {
+    const salon = await requireActiveSalon(salonId);
+    if ('error' in salon) {
+      return res.status(404).json({ error: salon.error, code: 'INSTAGRAM_CONNECTION_NOT_FOUND' });
+    }
+
+    try {
+      assertInstagramCredentialsEncryptionKeyConfigured();
+    } catch (err) {
+      if (isInstagramCredentialCryptoError(err)) {
+        return res.status(503).json({
+          error: 'Instagram credential encryption is not configured',
+          code: 'INSTAGRAM_NOT_CONFIGURED',
+        });
+      }
+      throw err;
+    }
+
+    let config;
+    try {
+      config = loadInstagramAppConfig();
+    } catch (err) {
+      if (isInstagramApiError(err)) {
+        return res.status(err.httpStatus).json({ error: err.message, code: err.code });
+      }
+      throw err;
+    }
+
+    let state: string;
+    try {
+      state = createInstagramOAuthState(salon.id);
+    } catch (err) {
+      if (err instanceof InstagramOAuthStateError) {
+        return res.status(503).json({ error: err.message, code: err.code });
+      }
+      throw err;
+    }
+
+    const authorizationUrl = buildInstagramAuthorizeUrl({
+      appId: config.appId,
+      redirectUri: config.redirectUri,
+      state,
+    });
+
+    return res.json({
+      salonId: salon.id,
+      authorizationUrl,
+    });
+  } catch (err) {
+    return handleRouteError(res, err, salonId || null, 'connect_start');
+  }
+});
+
+/**
  * GET /api/developer/integrations/instagram
  * All active salons with per-salon Instagram public status (no secrets).
  */
@@ -232,6 +315,7 @@ router.delete('/:salonId/disconnect', async (req, res) => {
           status: 'not_connected',
           connected_at: null,
           last_error: null,
+          token_expires_at: null,
           updated_at: now,
         })
         .eq('salon_id', salon.id);
