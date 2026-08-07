@@ -1,13 +1,17 @@
 /**
- * IG-2: Signed short-lived OAuth state for Instagram connect.
- * Prevents CSRF and salon substitution. No durable state table.
+ * IG-2 / IG-ACTIVATE-1: Signed short-lived + durable single-use OAuth state.
+ * Prevents CSRF, salon substitution, and callback replay.
  *
- * Technical debt (IG-2A documented — not a commit blocker):
- * State is HMAC-signed with 10-minute TTL and a nonce, but is NOT single-use.
- * Must be hardened to single-use before production Instagram activation.
+ * Flow:
+ *   connect/start → persist nonce → sign state (HMAC)
+ *   callback → verify signature/TTL → atomic consume → THEN Meta token exchange
+ *
+ * Failed Meta exchange after consume does NOT restore the nonce (user restarts OAuth).
+ * Never stores access tokens / authorization codes / app secrets in the state table.
  */
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 const STATE_TTL_MS = 10 * 60 * 1000;
 const PURPOSE = 'ig_connect' as const;
@@ -23,7 +27,9 @@ export type InstagramOAuthStatePayload = {
 export type InstagramOAuthStateErrorCode =
   | 'INSTAGRAM_OAUTH_STATE_INVALID'
   | 'INSTAGRAM_OAUTH_STATE_EXPIRED'
-  | 'INSTAGRAM_OAUTH_NOT_CONFIGURED';
+  | 'INSTAGRAM_OAUTH_STATE_REPLAY'
+  | 'INSTAGRAM_OAUTH_NOT_CONFIGURED'
+  | 'INSTAGRAM_OAUTH_STATE_PERSIST_FAILED';
 
 export class InstagramOAuthStateError extends Error {
   readonly code: InstagramOAuthStateErrorCode;
@@ -65,13 +71,29 @@ function sign(secret: Buffer, payloadB64: string): string {
   return b64url(createHmac('sha256', secret).update(payloadB64).digest());
 }
 
-/** Create opaque state encoding salonId + expiry. */
-export function createInstagramOAuthState(salonId: string, nowMs = Date.now()): string {
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/** Create opaque signed state encoding salonId + nonce + expiry (no DB). */
+export function createInstagramOAuthState(
+  salonId: string,
+  nowMs = Date.now(),
+  nonce: string = randomBytes(16).toString('hex'),
+): string {
   const trimmed = salonId.trim();
   if (!trimmed) {
     throw new InstagramOAuthStateError(
       'INSTAGRAM_OAUTH_STATE_INVALID',
       'salonId is required for OAuth state',
+    );
+  }
+  const nonceTrimmed = nonce.trim();
+  if (!nonceTrimmed) {
+    throw new InstagramOAuthStateError(
+      'INSTAGRAM_OAUTH_STATE_INVALID',
+      'OAuth nonce is required',
     );
   }
 
@@ -80,18 +102,21 @@ export function createInstagramOAuthState(salonId: string, nowMs = Date.now()): 
     v: 1,
     purpose: PURPOSE,
     salonId: trimmed,
-    nonce: randomBytes(16).toString('hex'),
+    nonce: nonceTrimmed,
     exp: nowMs + STATE_TTL_MS,
   };
   const payloadB64 = b64url(Buffer.from(JSON.stringify(payload), 'utf8'));
   return `${payloadB64}.${sign(secret, payloadB64)}`;
 }
 
-/** Validate state and return salonId. Fail closed on tamper/expiry. */
+/**
+ * Validate signed state (signature + structure + TTL).
+ * Does NOT consume durable nonce — use consumeInstagramOAuthState for single-use.
+ */
 export function parseInstagramOAuthState(
   state: string,
   nowMs = Date.now(),
-): { salonId: string } {
+): { salonId: string; nonce: string; exp: number } {
   if (typeof state !== 'string' || !state.trim()) {
     throw new InstagramOAuthStateError(
       'INSTAGRAM_OAUTH_STATE_INVALID',
@@ -134,6 +159,8 @@ export function parseInstagramOAuthState(
     payload.purpose !== PURPOSE ||
     typeof payload.salonId !== 'string' ||
     !payload.salonId.trim() ||
+    typeof payload.nonce !== 'string' ||
+    !payload.nonce.trim() ||
     typeof payload.exp !== 'number'
   ) {
     throw new InstagramOAuthStateError(
@@ -149,9 +176,121 @@ export function parseInstagramOAuthState(
     );
   }
 
-  return { salonId: payload.salonId.trim() };
+  return {
+    salonId: payload.salonId.trim(),
+    nonce: payload.nonce.trim(),
+    exp: payload.exp,
+  };
 }
 
 export function getInstagramOAuthStateTtlMs(): number {
   return STATE_TTL_MS;
+}
+
+/**
+ * Persist pending nonce then return signed state (connect/start).
+ * Opaque random nonce — never tokens/secrets.
+ */
+export async function createPersistedInstagramOAuthState(params: {
+  db: SupabaseClient | any;
+  salonId: string;
+  nowMs?: number;
+}): Promise<string> {
+  const nowMs = params.nowMs ?? Date.now();
+  const salonId = params.salonId.trim();
+  if (!salonId) {
+    throw new InstagramOAuthStateError(
+      'INSTAGRAM_OAUTH_STATE_INVALID',
+      'salonId is required for OAuth state',
+    );
+  }
+
+  const nonce = randomBytes(16).toString('hex');
+  const expiresAt = new Date(nowMs + STATE_TTL_MS).toISOString();
+
+  const { data, error } = await params.db.rpc('create_instagram_oauth_state', {
+    p_salon_id: salonId,
+    p_nonce: nonce,
+    p_expires_at: expiresAt,
+  });
+
+  if (error) {
+    throw new InstagramOAuthStateError(
+      'INSTAGRAM_OAUTH_STATE_PERSIST_FAILED',
+      'OAuth state could not be persisted',
+    );
+  }
+  const row = asRecord(data);
+  if (!row || String(row.kind ?? '') !== 'created') {
+    throw new InstagramOAuthStateError(
+      'INSTAGRAM_OAUTH_STATE_PERSIST_FAILED',
+      'OAuth state could not be persisted',
+    );
+  }
+
+  return createInstagramOAuthState(salonId, nowMs, nonce);
+}
+
+/**
+ * Verify signed state then atomically consume durable nonce.
+ * Must run BEFORE Meta token exchange. Replay / concurrent loser → rejected.
+ */
+export async function consumeInstagramOAuthState(params: {
+  db: SupabaseClient | any;
+  state: string;
+  nowMs?: number;
+}): Promise<{ salonId: string; nonce: string }> {
+  const nowMs = params.nowMs ?? Date.now();
+  const parsed = parseInstagramOAuthState(params.state, nowMs);
+
+  const { data, error } = await params.db.rpc('consume_instagram_oauth_state', {
+    p_salon_id: parsed.salonId,
+    p_nonce: parsed.nonce,
+    p_now: new Date(nowMs).toISOString(),
+  });
+
+  if (error) {
+    throw new InstagramOAuthStateError(
+      'INSTAGRAM_OAUTH_STATE_INVALID',
+      'OAuth state could not be consumed',
+    );
+  }
+
+  const row = asRecord(data);
+  if (!row) {
+    throw new InstagramOAuthStateError(
+      'INSTAGRAM_OAUTH_STATE_INVALID',
+      'OAuth state could not be consumed',
+    );
+  }
+
+  const kind = String(row.kind ?? '');
+  if (kind === 'consumed') {
+    return { salonId: parsed.salonId, nonce: parsed.nonce };
+  }
+
+  const code = String(row.code ?? '');
+  if (code === 'expired') {
+    throw new InstagramOAuthStateError(
+      'INSTAGRAM_OAUTH_STATE_EXPIRED',
+      'OAuth state has expired',
+    );
+  }
+  if (code === 'already_consumed') {
+    throw new InstagramOAuthStateError(
+      'INSTAGRAM_OAUTH_STATE_REPLAY',
+      'OAuth state has already been used',
+    );
+  }
+  if (code === 'unknown_nonce' || code === 'salon_mismatch' || code === 'not_consumable') {
+    throw new InstagramOAuthStateError(
+      'INSTAGRAM_OAUTH_STATE_INVALID',
+      'OAuth state is invalid',
+    );
+  }
+
+  throw new InstagramOAuthStateError(
+    'INSTAGRAM_OAUTH_STATE_INVALID',
+    'OAuth state is invalid',
+  );
 }

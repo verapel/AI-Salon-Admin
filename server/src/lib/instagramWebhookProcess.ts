@@ -350,8 +350,11 @@ export async function processInstagramWebhookEvent(
     metadata.reason = 'missing_sender';
   }
 
-  // IG-7: durable outbound enqueue BEFORE receipt finalize (crash-safe dedupe).
+  // IG-7 / IG-ACTIVATE-1: durable outbound enqueue BEFORE receipt finalize.
   // No Meta Send API here — worker flushes asynchronously when enabled.
+  // If a response intent exists, enqueue is mandatory: injected deps may
+  // override, but omission falls back to enqueueInstagramOutboundOwned
+  // (never silently finalize without attempting durable enqueue).
   let outboundIntent: InstagramOutboundIntent | null = null;
   if (
     finalStatus === 'processed' &&
@@ -368,15 +371,20 @@ export async function processInstagramWebhookEvent(
     });
   }
 
-  // Production defaults always provide enqueueOutbound. Older IG-3…6 unit mocks
-  // may omit it — skip enqueue rather than hitting live RPC in those tests.
-  const pendingIntent =
-    outboundIntent && deps.enqueueOutbound ? outboundIntent : null;
+  const enqueueOutbound =
+    deps.enqueueOutbound ??
+    ((params: {
+      db: SupabaseClient | any;
+      salonId: string;
+      receiptId: string;
+      attemptCount: number;
+      intent: InstagramOutboundIntent;
+    }) => enqueueInstagramOutboundOwned(params));
 
   const gated = await enqueueInstagramOutboundThenFinalizeInbound({
-    pendingIntent,
+    pendingIntent: outboundIntent,
     enqueue: () =>
-      deps.enqueueOutbound!({
+      enqueueOutbound({
         db: deps.db ?? supabase,
         salonId,
         receiptId: claim.receiptId,

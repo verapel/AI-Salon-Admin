@@ -5,9 +5,8 @@
  * Instagram Professional Account IDs are opaque strings — never JSON numbers /
  * JS Number / BigInt coercion (IEEE-754 precision loss).
  *
- * Technical debt (document only — not single-use in IG-2A/B):
- * OAuth state is HMAC-signed with 10-minute TTL and nonce, but is NOT single-use.
- * Harden to single-use before production Instagram activation.
+ * IG-ACTIVATE-1: OAuth state is HMAC-signed with TTL + durable single-use nonce
+ * (see instagramOAuthState.ts / migration 00008). Consume before token exchange.
  */
 
 import { getPublicAppOrigin } from './publicAppUrl.js';

@@ -15,7 +15,7 @@ import {
 } from '../lib/instagramApi.js';
 import {
   InstagramOAuthStateError,
-  parseInstagramOAuthState,
+  consumeInstagramOAuthState,
 } from '../lib/instagramOAuthState.js';
 import { persistVerifiedInstagramConnection } from '../lib/instagramConnectionPersist.js';
 import { supabase } from '../lib/supabase.js';
@@ -43,6 +43,7 @@ function mapSafeErrorCode(code: string): string {
   switch (code) {
     case 'INSTAGRAM_OAUTH_STATE_INVALID':
     case 'INSTAGRAM_OAUTH_STATE_EXPIRED':
+    case 'INSTAGRAM_OAUTH_STATE_REPLAY':
       return 'invalid_state';
     case 'INSTAGRAM_MISSING_PERMISSION':
     case 'INSTAGRAM_PERMISSIONS_UNVERIFIED':
@@ -107,9 +108,16 @@ router.get('/callback', async (req, res) => {
   const state = typeof req.query.state === 'string' ? req.query.state : '';
   const codeRaw = typeof req.query.code === 'string' ? req.query.code : '';
 
+  // Consume durable single-use state BEFORE Meta token exchange.
+  // Replay/concurrent loser never reaches token exchange.
+  // If exchange fails after consume, user must restart OAuth (nonce not restored).
   let salonId: string;
   try {
-    salonId = parseInstagramOAuthState(state).salonId;
+    const consumed = await consumeInstagramOAuthState({
+      db: supabase as any,
+      state,
+    });
+    salonId = consumed.salonId;
   } catch (err) {
     if (err instanceof InstagramOAuthStateError) {
       console.error('[instagram] oauth callback state error', {

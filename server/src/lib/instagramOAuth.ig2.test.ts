@@ -956,9 +956,14 @@ describe('IG-2A/B persistence / reconnect / security (static + reasoned)', () =>
     assert.doesNotMatch(callback, /searchParams\.set\('code'/);
   });
 
-  it('OAuth state not single-use — documented debt', () => {
-    assert.match(stateSrc, /NOT single-use/);
-    assert.match(apiSrc, /NOT single-use/);
+  it('OAuth state is durable single-use; callback consumes before token verify', () => {
+    assert.ok(stateSrc.includes('createPersistedInstagramOAuthState'));
+    assert.ok(callback.includes('consumeInstagramOAuthState'));
+    // Compare call sites inside the route handler (imports list verify first).
+    const handler = callback.slice(callback.indexOf("router.get('/callback'"));
+    const consumeIdx = handler.indexOf('consumeInstagramOAuthState');
+    const verifyIdx = handler.indexOf('verifyInstagramOAuthConnection');
+    assert.ok(consumeIdx >= 0 && verifyIdx > consumeIdx);
   });
 
   it('connect/start developer-mounted; callback outside Bearer', () => {

@@ -25,7 +25,7 @@ import {
   loadInstagramAppConfig,
 } from '../lib/instagramApi.js';
 import {
-  createInstagramOAuthState,
+  createPersistedInstagramOAuthState,
   InstagramOAuthStateError,
 } from '../lib/instagramOAuthState.js';
 
@@ -210,10 +210,19 @@ router.post('/:salonId/connect/start', async (req, res) => {
 
     let state: string;
     try {
-      state = createInstagramOAuthState(salon.id);
+      // IG-ACTIVATE-1: durable single-use nonce before redirecting to Meta.
+      state = await createPersistedInstagramOAuthState({
+        db: supabase as any,
+        salonId: salon.id,
+      });
     } catch (err) {
       if (err instanceof InstagramOAuthStateError) {
-        return res.status(503).json({ error: err.message, code: err.code });
+        const status =
+          err.code === 'INSTAGRAM_OAUTH_NOT_CONFIGURED' ||
+          err.code === 'INSTAGRAM_OAUTH_STATE_PERSIST_FAILED'
+            ? 503
+            : 400;
+        return res.status(status).json({ error: err.message, code: err.code });
       }
       throw err;
     }
