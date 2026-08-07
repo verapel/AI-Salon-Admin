@@ -157,10 +157,12 @@ export interface AppleCalendarConnectRequest {
 export type WhatsAppCloudProvider = 'meta_cloud';
 
 /** Channel identity providers for client_channel_identities. */
-export type ClientChannelProvider = 'telegram' | 'whatsapp';
+export type ClientChannelProvider = 'telegram' | 'whatsapp' | 'instagram';
 
-/** Providers that may write channel_event_receipts / channel_conversations (WA-1: WhatsApp only). */
-/** channel_event_receipts: whatsapp + instagram (IG-3). Conversations remain WA-only until IG-4. */
+/**
+ * Providers for channel_event_receipts / channel_conversations.
+ * Receipts: whatsapp + instagram (IG-3). Conversations: whatsapp + instagram (IG-4).
+ */
 export type ChannelMessagingProvider = 'whatsapp' | 'instagram';
 
 export type ChannelEventProcessingStatus =

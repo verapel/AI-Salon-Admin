@@ -42,11 +42,11 @@ export type CalendarImportIssueStatus = 'open' | 'resolved' | 'dismissed';
 export type WhatsAppCloudProvider = 'meta_cloud';
 
 /** Channel identity providers for client_channel_identities. */
-export type ClientChannelProvider = 'telegram' | 'whatsapp';
+export type ClientChannelProvider = 'telegram' | 'whatsapp' | 'instagram';
 
 /**
- * Providers for channel_event_receipts (WA-1 WhatsApp; IG-3 Instagram receipts).
- * channel_conversations / client_channel_identities remain WhatsApp-only until IG-4.
+ * Providers for channel_event_receipts / channel_conversations
+ * (WA-1 WhatsApp; IG-3 Instagram receipts; IG-4 Instagram conversations).
  */
 export type ChannelMessagingProvider = 'whatsapp' | 'instagram';
 
@@ -973,7 +973,8 @@ export interface Database {
         Row: {
           id: string;
           salon_id: string;
-          client_id: string;
+          /** Nullable for Instagram IG-4 identities without a linked client. */
+          client_id: string | null;
           provider: ClientChannelProvider;
           external_user_id: string;
           normalized_address: string | null;
@@ -988,7 +989,7 @@ export interface Database {
         Insert: {
           id?: string;
           salon_id: string;
-          client_id: string;
+          client_id?: string | null;
           provider: ClientChannelProvider;
           external_user_id: string;
           normalized_address?: string | null;

@@ -52,6 +52,18 @@ const ENV_KEYS = [
 
 const previousEnv: Record<string, string | undefined> = {};
 
+const noopApplyIdentityConversation: InstagramProcessDeps['applyIdentityConversation'] =
+  async () => ({
+    kind: 'ok',
+    identityId: 'id-noop',
+    conversationId: 'conv-noop',
+    clientId: null,
+    advanced: true,
+    identityCreated: false,
+    conversationCreated: false,
+  });
+
+
 beforeEach(() => {
   for (const key of ENV_KEYS) {
     previousEnv[key] = process.env[key];
@@ -187,6 +199,7 @@ describe('IG-3 POST signature (executed)', () => {
       claim: async () => ({ kind: 'claimed', receiptId: 'r1', attemptCount: 1 }),
       finalize: async () => ({ ok: true, status: 'processed' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     });
     await withApp(async (_p, base) => {
       const body = Buffer.from(JSON.stringify(messagePayload({})), 'utf8');
@@ -214,6 +227,7 @@ describe('IG-3 POST signature (executed)', () => {
       },
       finalize: async () => ({ ok: true, status: 'processed' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     });
     await withApp(async (_p, base) => {
       const body = Buffer.from(JSON.stringify(messagePayload({})), 'utf8');
@@ -282,6 +296,7 @@ describe('IG-3 POST signature (executed)', () => {
       },
       finalize: async () => ({ ok: true, status: 'processed' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     });
     assert.equal(parseHubSignature256('sha1=' + 'ab'.repeat(32)), null);
     assert.equal(parseHubSignature256('sha256=' + 'gg'.repeat(32)), null);
@@ -330,6 +345,7 @@ describe('IG-3 POST signature (executed)', () => {
       },
       finalize: async () => ({ ok: true, status: 'processed' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     });
     await withApp(async (_p, base) => {
       const body = Buffer.from('{not-json', 'utf8');
@@ -468,6 +484,7 @@ describe('IG-3A postback identity + object contract (executed)', () => {
       },
       finalize: async () => ({ ok: true, status: 'processed' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     };
     const event = normalizeInstagramWebhookPayload(
       postbackPayload({ mid: 'mid.retry.same' }),
@@ -510,6 +527,7 @@ describe('IG-3A postback identity + object contract (executed)', () => {
       },
       finalize: async () => ({ ok: true, status: 'ignored' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     };
     const ra = await processInstagramWebhookEvent(a[0], deps);
     const rb = await processInstagramWebhookEvent(b[0], deps);
@@ -546,6 +564,7 @@ describe('IG-3A postback identity + object contract (executed)', () => {
       },
       finalize: async () => ({ ok: true, status: 'processed' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     });
     assert.ok(storedMeta);
     const blob = JSON.stringify(storedMeta);
@@ -579,6 +598,7 @@ describe('IG-3A postback identity + object contract (executed)', () => {
       },
       finalize: async () => ({ ok: true, status: 'processed' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     });
     await withApp(async (_p, base) => {
       const body = Buffer.from(
@@ -611,6 +631,7 @@ describe('IG-3A postback identity + object contract (executed)', () => {
       },
       finalize: async () => ({ ok: true, status: 'processed' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     });
     await withApp(async (_p, base) => {
       const body = Buffer.from(
@@ -644,6 +665,7 @@ describe('IG-3A postback identity + object contract (executed)', () => {
       },
       finalize: async () => ({ ok: true, status: 'processed' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     };
     const payload = {
       object: 'instagram',
@@ -709,6 +731,7 @@ describe('IG-3B no-id malformed → no receipt (executed)', () => {
       },
       finalize: async () => ({ ok: true, status: 'ignored' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     };
   }
 
@@ -867,6 +890,7 @@ describe('IG-3B no-id malformed → no receipt (executed)', () => {
       },
       finalize: async ({ finalStatus }) => ({ ok: true, status: finalStatus }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     };
 
     const msg = normalizeInstagramWebhookPayload(
@@ -920,6 +944,7 @@ describe('IG-3B no-id malformed → no receipt (executed)', () => {
       },
       finalize: async () => ({ ok: true, status: 'processed' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     };
     const payload = {
       object: 'instagram',
@@ -1340,6 +1365,7 @@ describe('IG-3 receipts (executed mocks)', () => {
       },
       finalize: async () => ({ ok: true, status: 'ignored' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     };
     const events = normalizeInstagramWebhookPayload(messagePayload({}));
     const unknown = await processInstagramWebhookEvent(events[0], unknownDeps);
@@ -1389,6 +1415,7 @@ describe('IG-3 process + multi-event (executed)', () => {
       },
       finalize: async () => ({ ok: true, status: 'processed' }),
       markFailed: async () => ({ ok: true }),
+      applyIdentityConversation: noopApplyIdentityConversation,
     };
 
     const payload = {

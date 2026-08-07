@@ -1,6 +1,7 @@
 /**
- * IG-3: Per-event Instagram webhook processing (route → claim → finalize).
- * No conversations, identities, booking, or outbound.
+ * IG-3 / IG-4: Per-event Instagram webhook processing.
+ * Route → claim → (IG-4) owned identity/conversation → finalize.
+ * No booking, outbound, or Meta profile lookups.
  */
 
 import type { ReceiptClaimResult } from './whatsappWebhookReceipts.js';
@@ -8,6 +9,11 @@ import {
   instagramReceiptPayloadHash,
   type NormalizedInstagramWebhookEvent,
 } from './instagramWebhookEvents.js';
+import {
+  applyInstagramInboundIdentityConversationOwned,
+  parseInstagramMessageTimestamp,
+  type InstagramIdentityConversationResult,
+} from './instagramIdentityConversation.js';
 import {
   claimInstagramEventReceipt,
   finalizeInstagramEventReceipt,
@@ -45,6 +51,18 @@ export type InstagramProcessDeps = {
     attemptCount: number;
     errorCode: string;
   }) => Promise<{ ok: true } | { ok: false; code: string }>;
+  /**
+   * IG-4 owned identity+conversation mutation.
+   * Only invoked for connected message/postback with sender id (never echo).
+   */
+  applyIdentityConversation: (params: {
+    salonId: string;
+    receiptId: string;
+    attemptCount: number;
+    externalUserId: string;
+    externalMessageId: string | null;
+    messageTimestampIso: string | null;
+  }) => Promise<InstagramIdentityConversationResult>;
 };
 
 export function createDefaultInstagramProcessDeps(
@@ -55,26 +73,40 @@ export function createDefaultInstagramProcessDeps(
     claim: (input) => claimInstagramEventReceipt(supabase as any, input),
     finalize: (params) => finalizeInstagramEventReceipt(supabase as any, params),
     markFailed: (params) => markInstagramEventReceiptFailed(supabase as any, params),
+    applyIdentityConversation: (params) =>
+      applyInstagramInboundIdentityConversationOwned({
+        db: supabase as any,
+        ...params,
+      }),
   };
+}
+
+function shouldTouchIdentityConversation(
+  event: NormalizedInstagramWebhookEvent,
+  routeKind: 'connected' | 'disconnected',
+): boolean {
+  if (routeKind !== 'connected') return false;
+  if (event.isEcho) return false;
+  if (event.kind !== 'message' && event.kind !== 'postback') return false;
+  if (!event.externalUserId || !event.externalUserId.trim()) return false;
+  return true;
 }
 
 /**
  * Process one normalized Instagram webhook event.
  *
- * Policy (IG-3B):
- * - no stable Meta mid (empty externalEventId) → ignore, no route, no receipt
- * - unknown account / invalid id → ignore, no receipt (permanent unroutable)
- * - disconnected / inactive → ignored receipt when salon_id known
- * - connected message/postback → claim + finalize processed (business logic deferred)
- * - unsupported echo with real mid → claim + finalize ignored
+ * Policy:
+ * - no stable Meta mid → ignore, no route, no receipt
+ * - unknown account → ignore, no receipt
+ * - disconnected / inactive → ignored receipt, no identity/conversation
+ * - echo with mid → ignored receipt, no identity/conversation
+ * - connected message/postback with sender → claim → owned mutation → finalize processed
  * - claim in_flight / failed_transient → retryable
  */
 export async function processInstagramWebhookEvent(
   event: NormalizedInstagramWebhookEvent,
   deps: InstagramProcessDeps = createDefaultInstagramProcessDeps(),
 ): Promise<InstagramEventProcessResult> {
-  // Durable receipt requires a stable provider-supplied Meta mid.
-  // Malformed / missing-mid / unrecognized → empty id → terminal ignore (no route/claim).
   if (!event.externalEventId.trim()) {
     return {
       outcome: 'ignored',
@@ -88,7 +120,6 @@ export async function processInstagramWebhookEvent(
   }
 
   if (route.kind === 'unknown') {
-    // Permanent: do not invent salon; no receipt write.
     return { outcome: 'ignored', reason: route.reason };
   }
 
@@ -99,8 +130,9 @@ export async function processInstagramWebhookEvent(
   let finalStatus: 'processed' | 'ignored';
   if (route.kind === 'disconnected') {
     finalStatus = 'ignored';
+  } else if (event.isEcho) {
+    finalStatus = 'ignored';
   } else if (event.kind === 'message' || event.kind === 'postback') {
-    // IG-3: recognized inbound, business processing not implemented yet.
     finalStatus = 'processed';
   } else {
     finalStatus = 'ignored';
@@ -109,7 +141,6 @@ export async function processInstagramWebhookEvent(
   const metadata: Record<string, string> = {
     ...event.receiptMetadata,
     routing: routingCode,
-    // Never include text/caption/username/raw payload.
   };
 
   const claim = await deps.claim({
@@ -134,6 +165,40 @@ export async function processInstagramWebhookEvent(
     return { outcome: 'failed_transient', code: 'cross_salon_conflict' };
   }
 
+  if (shouldTouchIdentityConversation(event, route.kind)) {
+    const touched = await deps.applyIdentityConversation({
+      salonId,
+      receiptId: claim.receiptId,
+      attemptCount: claim.attemptCount,
+      externalUserId: event.externalUserId!,
+      externalMessageId: event.externalMessageId,
+      messageTimestampIso: parseInstagramMessageTimestamp(event.timestampMs),
+    });
+
+    if (touched.kind === 'lost_ownership') {
+      // Do not finalize stale generation.
+      return { outcome: 'in_flight' };
+    }
+    if (touched.kind === 'error') {
+      await deps.markFailed({
+        salonId,
+        receiptId: claim.receiptId,
+        attemptCount: claim.attemptCount,
+        errorCode: touched.code,
+      });
+      return { outcome: 'failed_transient', code: touched.code };
+    }
+  } else if (
+    route.kind === 'connected' &&
+    (event.kind === 'message' || event.kind === 'postback') &&
+    !event.isEcho &&
+    !event.externalUserId?.trim()
+  ) {
+    // Recognized inbound without opaque sender — cannot form identity key.
+    finalStatus = 'ignored';
+    metadata.reason = 'missing_sender';
+  }
+
   const finalized = await deps.finalize({
     salonId,
     receiptId: claim.receiptId,
@@ -156,5 +221,5 @@ export async function processInstagramWebhookEvent(
 
   return finalStatus === 'processed'
     ? { outcome: 'processed' }
-    : { outcome: 'ignored', reason: routingCode };
+    : { outcome: 'ignored', reason: metadata.reason || routingCode };
 }
