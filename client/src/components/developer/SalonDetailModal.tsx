@@ -674,23 +674,29 @@ export default function SalonDetailModal({
                 ) : instagram ? (
                   <>
                     <p className="text-sm text-gray-200">
-                      {instagram.connected
-                        ? t('developer.integrations.status.connected')
-                        : instagram.connection?.status === 'error'
-                          ? t('developer.integrations.instagram.reconnectRequired')
-                          : t('developer.integrations.status.notConnected')}
+                      {instagram.integrationAdded === false
+                        ? t('developer.integrations.instagram.notAdded')
+                        : instagram.connected
+                          ? t('developer.integrations.status.connected')
+                          : instagram.connection?.status === 'error'
+                            ? t('developer.integrations.instagram.reconnectRequired')
+                            : t('developer.integrations.status.notConnected')}
                     </p>
-                    <p className="mt-2 text-xs text-gray-400">
-                      {t('developer.integrations.instagram.outbound')}:{' '}
-                      {instagram.outboundEnabled
-                        ? t('developer.integrations.instagram.outboundEnabled')
-                        : t('developer.integrations.instagram.outboundDisabled')}
-                    </p>
+                    {instagram.integrationAdded !== false ? (
+                      <p className="mt-2 text-xs text-gray-400">
+                        {t('developer.integrations.instagram.outbound')}:{' '}
+                        {instagram.outboundEnabled
+                          ? t('developer.integrations.instagram.outboundEnabled')
+                          : t('developer.integrations.instagram.outboundDisabled')}
+                      </p>
+                    ) : null}
                     <Link
                       to={`/developer/integrations?tab=instagram`}
                       className="mt-3 inline-flex rounded-lg bg-rose-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-rose-600"
                     >
-                      {t('developer.integrations.instagram.manageInIntegrations')}
+                      {instagram.integrationAdded === false
+                        ? t('developer.integrations.instagram.addInIntegrations')
+                        : t('developer.integrations.instagram.manageInIntegrations')}
                     </Link>
                   </>
                 ) : (

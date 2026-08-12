@@ -30,14 +30,43 @@ export type DeveloperInstagramIntegration = {
   salonId: string;
   salonName: string;
   slug: string;
+  /**
+   * True when Instagram is visible for this salon:
+   * salon_integrations(provider=instagram) exists OR a meaningful connection exists.
+   * Read-only derived; GET paths never write.
+   */
+  integrationAdded: boolean;
   connected: boolean;
   connection: InstagramBusinessConnectionPublic | null;
+  /**
+   * True when local token material is stored and remove would clear credentials.
+   * Used for explicit remove confirmation (connected OR error/reconnect with token).
+   * Never exposes token contents.
+   */
+  requiresRemoveConfirmation: boolean;
   /**
    * Read-only mirror of INSTAGRAM_OUTBOUND_ENABLED === "true".
    * Never a toggle — env-gated worker bootstrap only.
    */
   outboundEnabled: boolean;
 };
+
+/**
+ * Meaningful Instagram connection presence (non-mutating visibility helper).
+ * Soft-cleared not_connected rows with no token/user id are NOT meaningful.
+ */
+export function isMeaningfulInstagramConnectionPresence(
+  connection: InstagramBusinessConnectionPublic | null,
+  isAccessTokenStored: boolean,
+): boolean {
+  if (!connection) return false;
+  if (isAccessTokenStored) return true;
+  if (connection.status === 'connected' || connection.status === 'error') return true;
+  if (typeof connection.instagramUserId === 'string' && connection.instagramUserId.trim()) {
+    return true;
+  }
+  return false;
+}
 
 /** Metadata row — never includes credential ciphertext columns. */
 export type InstagramConnectionMetadataRow = {

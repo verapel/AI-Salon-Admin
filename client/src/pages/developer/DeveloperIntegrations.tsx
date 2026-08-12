@@ -12,6 +12,7 @@ import ComingSoonTab from '@/components/developer/ComingSoonTab';
 import AddIntegrationModal from '@/components/developer/AddIntegrationModal';
 import { useDeveloperTelegramConnect } from '@/hooks/useDeveloperTelegramConnect';
 import { useLanguage } from '@/context/LanguageContext';
+import { api } from '@/lib/api';
 
 const DEFAULT_TAB: IntegrationTabId = 'telegram';
 
@@ -24,6 +25,8 @@ export default function DeveloperIntegrations() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [instagramAdding, setInstagramAdding] = useState(false);
+  const [instagramAddError, setInstagramAddError] = useState('');
 
   const { connecting, connectError, connect, updateMetadata, clearConnectError } =
     useDeveloperTelegramConnect();
@@ -58,9 +61,36 @@ export default function DeveloperIntegrations() {
     return success;
   }
 
+  async function handleAddInstagram(salonId: string) {
+    setInstagramAdding(true);
+    setInstagramAddError('');
+    try {
+      await api.developer.prepareInstagram(salonId);
+      setRefreshKey((key) => key + 1);
+      if (activeTab !== 'instagram') {
+        setSearchParams({ tab: 'instagram' });
+      }
+      return true;
+    } catch {
+      setInstagramAddError(t('developer.integrations.instagram.genericError'));
+      return false;
+    } finally {
+      setInstagramAdding(false);
+    }
+  }
+
   function handleAddSuccess() {
     setRefreshKey((key) => key + 1);
   }
+
+  function clearErrors() {
+    clearConnectError();
+    setInstagramAddError('');
+  }
+
+  const modalBusy = connecting || instagramAdding;
+  const modalError = connectError || instagramAddError;
+  const initialChannel = activeTab === 'instagram' ? 'instagram' : 'telegram';
 
   return (
     <div className="w-full min-w-0 max-w-full space-y-4 overflow-x-clip animate-fade-in">
@@ -100,11 +130,13 @@ export default function DeveloperIntegrations() {
 
       <AddIntegrationModal
         open={addModalOpen}
+        initialChannel={initialChannel}
         onClose={() => setAddModalOpen(false)}
-        connecting={connecting}
-        connectError={connectError}
-        onConnect={handleCreateConnect}
-        onClearError={clearConnectError}
+        connecting={modalBusy}
+        connectError={modalError}
+        onConnectTelegram={handleCreateConnect}
+        onAddInstagram={handleAddInstagram}
+        onClearError={clearErrors}
         onSuccess={handleAddSuccess}
       />
     </div>

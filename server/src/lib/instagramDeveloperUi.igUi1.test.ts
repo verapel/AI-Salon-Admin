@@ -99,6 +99,8 @@ describe('IG-UI-1 Developer Instagram UI (static)', () => {
     assert.match(tab, /disconnectInstagram/);
     assert.match(api, /method: 'DELETE'/);
     assert.match(routes, /router\.delete\('\/:salonId\/disconnect'/);
+    // IG-UI-2: Disconnect is conditional — not shown when unconnected.
+    assert.match(card, /showDisconnect/);
   });
 
   it('9. status API is developer-mounted; public DTO forbids secrets', () => {

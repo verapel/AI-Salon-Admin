@@ -1,4 +1,4 @@
-import { Camera } from 'lucide-react';
+import { Camera, X } from 'lucide-react';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import type { DeveloperInstagramIntegration, InstagramConnectionStatus } from '@/types';
 
@@ -9,6 +9,7 @@ interface SalonInstagramCardProps {
   onConnect: () => void;
   onReconnect: () => void;
   onDisconnect: () => void;
+  onRemove: () => void;
 }
 
 const WEBHOOK_PATH = '/api/webhooks/instagram';
@@ -52,20 +53,31 @@ export default function SalonInstagramCard({
   onConnect,
   onReconnect,
   onDisconnect,
+  onRemove,
 }: SalonInstagramCardProps) {
   const { t } = useLanguage();
   const connection = integration.connection;
   const status = connection?.status ?? 'not_connected';
-  const canDisconnect =
-    Boolean(connection) && (status === 'connected' || status === 'error' || status === 'disabled');
-  const isConnected = integration.connected || status === 'connected';
+  const isConnected = integration.connected === true;
   const needsReconnect = status === 'error';
+  const showDisconnect = isConnected || needsReconnect;
   const outboundEnabled = integration.outboundEnabled === true;
   const webhookSeen = Boolean(connection?.lastWebhookAt);
 
   return (
-    <div className="card flex w-full min-w-0 max-w-full flex-col p-4 sm:p-5">
-      <div className="flex items-start justify-between gap-3">
+    <div className="card relative flex w-full min-w-0 max-w-full flex-col p-4 sm:p-5">
+      <button
+        type="button"
+        className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+        disabled={connecting}
+        onClick={onRemove}
+        aria-label={t('developer.integrations.instagram.removeAria')}
+        title={t('developer.integrations.instagram.remove')}
+      >
+        <X className="h-4 w-4" />
+      </button>
+
+      <div className="flex items-start justify-between gap-3 pr-8">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-rose-100 dark:bg-rose-950/50">
             <Camera className="h-5 w-5 text-rose-600 dark:text-rose-400" />
@@ -233,14 +245,16 @@ export default function SalonInstagramCard({
               : t('developer.integrations.instagram.connect')}
           </button>
         )}
-        <button
-          type="button"
-          className="btn-secondary w-full sm:w-auto"
-          disabled={!canDisconnect || connecting}
-          onClick={onDisconnect}
-        >
-          {t('developer.integrations.instagram.disconnect')}
-        </button>
+        {showDisconnect ? (
+          <button
+            type="button"
+            className="btn-secondary w-full sm:w-auto"
+            disabled={connecting}
+            onClick={onDisconnect}
+          >
+            {t('developer.integrations.instagram.disconnect')}
+          </button>
+        ) : null}
       </div>
     </div>
   );

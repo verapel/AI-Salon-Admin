@@ -261,6 +261,11 @@ export const api = {
       request<import('@/types').DeveloperInstagramIntegration>(
         `/developer/integrations/instagram/${salonId}`
       ),
+    prepareInstagram: (salonId: string) =>
+      request<import('@/types').DeveloperInstagramIntegration>(
+        `/developer/integrations/instagram/${salonId}/prepare`,
+        { method: 'POST', body: JSON.stringify({}) }
+      ),
     startInstagramConnect: (salonId: string) =>
       request<{ salonId: string; authorizationUrl: string }>(
         `/developer/integrations/instagram/${salonId}/connect/start`,
@@ -270,6 +275,16 @@ export const api = {
       request<import('@/types').DeveloperInstagramIntegration>(
         `/developer/integrations/instagram/${salonId}/disconnect`,
         { method: 'DELETE' }
+      ),
+    removeInstagram: (salonId: string, opts?: { confirmConnected?: boolean }) =>
+      request<import('@/types').DeveloperInstagramIntegration & { removed?: boolean }>(
+        `/developer/integrations/instagram/${salonId}/remove`,
+        {
+          method: 'DELETE',
+          body: JSON.stringify({
+            confirmConnected: opts?.confirmConnected === true,
+          }),
+        }
       ),
     connectTelegram: (body: {
       salonName?: string;

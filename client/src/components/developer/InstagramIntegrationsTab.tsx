@@ -83,6 +83,11 @@ export default function InstagramIntegrationsTab({
   const [disconnectSubmitting, setDisconnectSubmitting] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
 
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<DeveloperInstagramIntegration | null>(null);
+  const [removeSubmitting, setRemoveSubmitting] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+
   const [connectingSalonId, setConnectingSalonId] = useState<string | null>(null);
   const [connectErrors, setConnectErrors] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<{ tone: 'ok' | 'err' | 'info'; text: string } | null>(
@@ -118,7 +123,6 @@ export default function InstagramIntegrationsTab({
     next.delete('instagram_confirmation');
     if (!next.get('tab')) next.set('tab', 'instagram');
     setSearchParams(next, { replace: true });
-    // Refresh after any OAuth return marker so status matches backend.
     loadIntegrations();
   }, [searchParams, setSearchParams, t, loadIntegrations]);
 
@@ -135,7 +139,6 @@ export default function InstagramIntegrationsTab({
       if (!started.authorizationUrl) {
         throw new Error('missing authorizationUrl');
       }
-      // Full-page navigate to Meta — no token/credential fields in the browser.
       window.location.assign(started.authorizationUrl);
     } catch (err) {
       const code = err instanceof ApiError ? err.code : undefined;
@@ -160,6 +163,24 @@ export default function InstagramIntegrationsTab({
       setDisconnectError(t('developer.integrations.instagram.genericError'));
     } finally {
       setDisconnectSubmitting(false);
+    }
+  }
+
+  async function handleRemove() {
+    if (!removeTarget || removeSubmitting) return;
+    setRemoveSubmitting(true);
+    setRemoveError(null);
+    try {
+      await api.developer.removeInstagram(removeTarget.salonId, {
+        confirmConnected: removeTarget.requiresRemoveConfirmation === true,
+      });
+      setRemoveOpen(false);
+      setRemoveTarget(null);
+      loadIntegrations();
+    } catch {
+      setRemoveError(t('developer.integrations.instagram.genericError'));
+    } finally {
+      setRemoveSubmitting(false);
     }
   }
 
@@ -227,6 +248,11 @@ export default function InstagramIntegrationsTab({
               setDisconnectTarget(integration);
               setDisconnectOpen(true);
             }}
+            onRemove={() => {
+              setRemoveError(null);
+              setRemoveTarget(integration);
+              setRemoveOpen(true);
+            }}
           />
         ))}
       </div>
@@ -274,6 +300,56 @@ export default function InstagramIntegrationsTab({
             {disconnectSubmitting
               ? t('developer.integrations.instagram.disconnecting')
               : t('developer.integrations.instagram.disconnect')}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={removeOpen}
+        onClose={() => {
+          if (removeSubmitting) return;
+          setRemoveOpen(false);
+          setRemoveTarget(null);
+          setRemoveError(null);
+        }}
+        title={t('developer.integrations.instagram.remove')}
+      >
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          {t('developer.integrations.instagram.removeConfirm').replace(
+            '{salonName}',
+            removeTarget?.salonName ?? '',
+          )}
+        </p>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+          {removeTarget?.requiresRemoveConfirmation
+            ? t('developer.integrations.instagram.removeConfirmConnected')
+            : t('developer.integrations.instagram.removeConfirmHint')}
+        </p>
+        {removeError ? (
+          <p className="mt-3 text-sm text-red-600 dark:text-red-400">{removeError}</p>
+        ) : null}
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={removeSubmitting}
+            onClick={() => {
+              setRemoveOpen(false);
+              setRemoveTarget(null);
+              setRemoveError(null);
+            }}
+          >
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={removeSubmitting}
+            onClick={() => void handleRemove()}
+          >
+            {removeSubmitting
+              ? t('developer.integrations.instagram.removing')
+              : t('developer.integrations.instagram.removeAction')}
           </button>
         </div>
       </Modal>

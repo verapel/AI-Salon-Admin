@@ -18,6 +18,7 @@ import {
   INSTAGRAM_CONNECTION_PUBLIC_SELECT,
   INSTAGRAM_CREDENTIAL_PRESENCE_SELECT,
   isInstagramCredentialTripleStored,
+  isMeaningfulInstagramConnectionPresence,
   mapInstagramConnectionPublic,
   type DeveloperInstagramIntegration,
   type InstagramConnectionMetadataRow,
@@ -115,6 +116,15 @@ async function defaultLoadPublicIntegration(
 
   const salonRow = salon as { id: string; name: string; slug: string };
 
+  const { data: registry, error: registryError } = await supabase
+    .from('salon_integrations')
+    .select('id')
+    .eq('salon_id', salonId)
+    .eq('provider', INSTAGRAM_PROVIDER)
+    .maybeSingle();
+  if (registryError) throw new Error(registryError.message);
+  const registryPresent = Boolean(registry);
+
   const { data: meta, error: metaError } = await supabase
     .from('instagram_business_connections')
     .select(INSTAGRAM_CONNECTION_PUBLIC_SELECT)
@@ -128,8 +138,10 @@ async function defaultLoadPublicIntegration(
       salonId: salonRow.id,
       salonName: salonRow.name,
       slug: salonRow.slug,
+      integrationAdded: registryPresent,
       connected: false,
       connection: null,
+      requiresRemoveConfirmation: false,
       outboundEnabled: isInstagramOutboundEnabled(),
     };
   }
@@ -154,13 +166,16 @@ async function defaultLoadPublicIntegration(
     meta as unknown as InstagramConnectionMetadataRow,
     stored,
   );
+  const meaningful = isMeaningfulInstagramConnectionPresence(connection, stored);
 
   return {
     salonId: salonRow.id,
     salonName: salonRow.name,
     slug: salonRow.slug,
+    integrationAdded: registryPresent || meaningful,
     connected: connection.status === 'connected' && connection.isAccessTokenStored,
     connection,
+    requiresRemoveConfirmation: stored,
     outboundEnabled: isInstagramOutboundEnabled(),
   };
 }
@@ -175,7 +190,12 @@ function isUniqueViolation(err: { message?: string; code?: string } | null): boo
   );
 }
 
-async function ensureInstagramIntegrationRow(salonId: string): Promise<void> {
+/**
+ * Ensure salon_integrations row for Instagram exists (visibility / "added").
+ * Does NOT create instagram_business_connections or credentials.
+ * Idempotent — duplicate unique races are ignored.
+ */
+export async function ensureInstagramIntegrationRow(salonId: string): Promise<void> {
   const now = new Date().toISOString();
   const { data: existing, error: existingError } = await supabase
     .from('salon_integrations')

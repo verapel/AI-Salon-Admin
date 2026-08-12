@@ -252,8 +252,15 @@ export interface DeveloperInstagramIntegration {
   salonId: string;
   salonName: string;
   slug: string;
+  /**
+   * True when Instagram is visible:
+   * registry row OR meaningful connection (orphan-safe, non-mutating).
+   */
+  integrationAdded: boolean;
   connected: boolean;
   connection: InstagramBusinessConnectionPublic | null;
+  /** True when remove would clear stored credentials (needs explicit confirm). */
+  requiresRemoveConfirmation: boolean;
   /** Read-only mirror of INSTAGRAM_OUTBOUND_ENABLED === "true". */
   outboundEnabled: boolean;
 }

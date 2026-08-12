@@ -689,8 +689,9 @@ const en = {
     'Connect Instagram Professional Accounts for each salon via Meta Instagram Login. Secrets are never shown in the browser.',
   'developer.integrations.instagram.notConnectedHint':
     'Instagram Direct is not connected to this salon yet.',
-  'developer.integrations.instagram.emptyTitle': 'No salons',
-  'developer.integrations.instagram.emptyDesc': 'Create a salon first, then connect Instagram here.',
+  'developer.integrations.instagram.emptyTitle': 'No Instagram integrations',
+  'developer.integrations.instagram.emptyDesc':
+    'Use Add Integration to enable Instagram for a salon. The salon itself is never deleted.',
   'developer.integrations.instagram.username': 'Instagram username',
   'developer.integrations.instagram.professionalAccountId': 'Professional Account ID',
   'developer.integrations.instagram.lastWebhookAt': 'Last webhook',
@@ -741,6 +742,25 @@ const en = {
   'developer.integrations.instagram.manageInIntegrations': 'Manage in Integrations',
   'developer.integrations.instagram.salonDetailHint':
     'Instagram Login connection for this salon. Credentials stay on the server.',
+  'developer.integrations.instagram.notAdded': 'Instagram is not added',
+  'developer.integrations.instagram.addInIntegrations': 'Add in Integrations',
+  'developer.integrations.instagram.remove': 'Remove Instagram',
+  'developer.integrations.instagram.removeAria': 'Remove Instagram for this salon',
+  'developer.integrations.instagram.removeAction': 'Remove',
+  'developer.integrations.instagram.removing': 'Removing...',
+  'developer.integrations.instagram.removeConfirm':
+    'Remove Instagram for salon “{salonName}”?',
+  'developer.integrations.instagram.removeConfirmHint':
+    'The salon and its data will not be deleted. Instagram will disappear from the integrations list and can be added again later.',
+  'developer.integrations.instagram.removeConfirmConnected':
+    'Instagram is currently connected. This will disconnect it and remove it from the integrations list. The salon and its data will not be deleted.',
+  'developer.integrations.instagram.add': 'Add Instagram',
+  'developer.integrations.instagram.adding': 'Adding...',
+  'developer.integrations.instagram.selectSalon': 'Select a salon',
+  'developer.integrations.instagram.addHint':
+    'Adds Instagram to this salon’s integrations list. Connect Meta afterward.',
+  'developer.integrations.instagram.noEligibleSalons':
+    'Every active salon already has Instagram added.',
   'developer.health.title': 'Health',
   'developer.health.subtitle': 'API, database, and bot health',
   'developer.health.loading': 'Checking system health...',
@@ -1503,8 +1523,9 @@ const ru: Record<TranslationKey, string> = {
     'Подключайте Instagram Professional Account для каждого салона через Meta Instagram Login. Секреты в браузере не показываются.',
   'developer.integrations.instagram.notConnectedHint':
     'Instagram Direct ещё не подключён к этому салону.',
-  'developer.integrations.instagram.emptyTitle': 'Нет салонов',
-  'developer.integrations.instagram.emptyDesc': 'Сначала создайте салон, затем подключите Instagram здесь.',
+  'developer.integrations.instagram.emptyTitle': 'Нет интеграций Instagram',
+  'developer.integrations.instagram.emptyDesc':
+    'Используйте «Добавить интеграцию», чтобы включить Instagram для салона. Салон при этом не удаляется.',
   'developer.integrations.instagram.username': 'Имя пользователя Instagram',
   'developer.integrations.instagram.professionalAccountId': 'ID Professional Account',
   'developer.integrations.instagram.lastWebhookAt': 'Последний webhook',
@@ -1555,6 +1576,25 @@ const ru: Record<TranslationKey, string> = {
   'developer.integrations.instagram.manageInIntegrations': 'Управление в Integrations',
   'developer.integrations.instagram.salonDetailHint':
     'Подключение Instagram Login для этого салона. Секреты хранятся только на сервере.',
+  'developer.integrations.instagram.notAdded': 'Instagram не добавлен',
+  'developer.integrations.instagram.addInIntegrations': 'Добавить в Интеграциях',
+  'developer.integrations.instagram.remove': 'Убрать Instagram',
+  'developer.integrations.instagram.removeAria': 'Убрать Instagram для этого салона',
+  'developer.integrations.instagram.removeAction': 'Убрать',
+  'developer.integrations.instagram.removing': 'Убираем...',
+  'developer.integrations.instagram.removeConfirm':
+    'Убрать Instagram для салона «{salonName}»?',
+  'developer.integrations.instagram.removeConfirmHint':
+    'Салон и его данные не будут удалены. Instagram исчезнет из списка интеграций, и его можно будет добавить снова позже.',
+  'developer.integrations.instagram.removeConfirmConnected':
+    'Instagram сейчас подключён. Это отключит его и уберёт из списка интеграций. Салон и его данные не будут удалены.',
+  'developer.integrations.instagram.add': 'Добавить Instagram',
+  'developer.integrations.instagram.adding': 'Добавляем...',
+  'developer.integrations.instagram.selectSalon': 'Выберите салон',
+  'developer.integrations.instagram.addHint':
+    'Добавит Instagram в список интеграций салона. Подключение Meta — после этого.',
+  'developer.integrations.instagram.noEligibleSalons':
+    'У всех активных салонов Instagram уже добавлен.',
   'developer.health.title': 'Состояние',
   'developer.health.subtitle': 'API, база данных и боты',
   'developer.health.loading': 'Проверка состояния системы...',
@@ -2309,8 +2349,9 @@ const hy: Record<TranslationKey, string> = {
     'Միացրեք Instagram Professional Account-ը ըստ սրահի՝ Meta Instagram Login-ով։ Գաղտնիքները բրաուզերում չեն ցուցադրվում։',
   'developer.integrations.instagram.notConnectedHint':
     'Instagram Direct-ը դեռ միացված չէ այս սրահին։',
-  'developer.integrations.instagram.emptyTitle': 'Սրահներ չկան',
-  'developer.integrations.instagram.emptyDesc': 'Նախ ստեղծեք սրահ, ապա այստեղ միացրեք Instagram։',
+  'developer.integrations.instagram.emptyTitle': 'Instagram ինտեգրումներ չկան',
+  'developer.integrations.instagram.emptyDesc':
+    'Օգտագործեք «Ավելացնել ինտեգրում»՝ սրահի համար Instagram միացնելու համար։ Սրահը չի ջնջվում։',
   'developer.integrations.instagram.username': 'Instagram օգտանուն',
   'developer.integrations.instagram.professionalAccountId': 'Professional Account ID',
   'developer.integrations.instagram.lastWebhookAt': 'Վերջին webhook',
@@ -2361,6 +2402,25 @@ const hy: Record<TranslationKey, string> = {
   'developer.integrations.instagram.manageInIntegrations': 'Կառավարել Integrations-ում',
   'developer.integrations.instagram.salonDetailHint':
     'Instagram Login միացում այս սրահի համար։ Գաղտնիքները պահվում են միայն սերվերում։',
+  'developer.integrations.instagram.notAdded': 'Instagram-ը ավելացված չէ',
+  'developer.integrations.instagram.addInIntegrations': 'Ավելացնել Integrations-ում',
+  'developer.integrations.instagram.remove': 'Հանել Instagram',
+  'developer.integrations.instagram.removeAria': 'Հանել Instagram այս սրահի համար',
+  'developer.integrations.instagram.removeAction': 'Հանել',
+  'developer.integrations.instagram.removing': 'Հանվում է...',
+  'developer.integrations.instagram.removeConfirm':
+    'Հանե՞լ Instagram-ը «{salonName}» սրահի համար։',
+  'developer.integrations.instagram.removeConfirmHint':
+    'Սրահը և նրա տվյալները չեն ջնջվի։ Instagram-ը կանհետանա ինտեգրումների ցանկից և կարող է կրկին ավելացվել։',
+  'developer.integrations.instagram.removeConfirmConnected':
+    'Instagram-ը ներկայումս միացված է։ Սա կանջատի այն և կհանի ինտեգրումների ցանկից։ Սրահը և տվյալները չեն ջնջվի։',
+  'developer.integrations.instagram.add': 'Ավելացնել Instagram',
+  'developer.integrations.instagram.adding': 'Ավելացվում է...',
+  'developer.integrations.instagram.selectSalon': 'Ընտրեք սրահ',
+  'developer.integrations.instagram.addHint':
+    'Ավելացնում է Instagram այս սրահի ինտեգրումների ցանկում։ Meta միացումը՝ հետո։',
+  'developer.integrations.instagram.noEligibleSalons':
+    'Բոլոր ակտիվ սրահներն արդեն ունեն ավելացված Instagram։',
   'developer.salons.empty': 'No salons yet.',
   'developer.integrations.overviewHint': 'Connect and manage Telegram bots for each salon from this page.',
   'developer.health.title': 'Վիճակ',

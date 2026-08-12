@@ -10,6 +10,7 @@ import {
   INSTAGRAM_CONNECTION_PUBLIC_SELECT,
   INSTAGRAM_CREDENTIAL_PRESENCE_SELECT,
   isInstagramCredentialTripleStored,
+  isMeaningfulInstagramConnectionPresence,
   mapInstagramConnectionPublic,
   type DeveloperInstagramIntegration,
   type InstagramConnectionMetadataRow,
@@ -29,6 +30,7 @@ import {
   InstagramOAuthStateError,
 } from '../lib/instagramOAuthState.js';
 import { isInstagramOutboundEnabled } from '../lib/instagramOutboundWorker.js';
+import { ensureInstagramIntegrationRow } from '../lib/instagramConnectionPersist.js';
 
 const router = Router();
 const INSTAGRAM_PROVIDER = 'instagram' as const;
@@ -59,6 +61,17 @@ async function requireActiveSalon(salonId: string): Promise<SalonLookupRow | { e
     return { error: 'Salon not found' };
   }
   return data as SalonLookupRow;
+}
+
+async function hasInstagramIntegrationRow(salonId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('salon_integrations')
+    .select('id')
+    .eq('salon_id', salonId)
+    .eq('provider', INSTAGRAM_PROVIDER)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return Boolean(data);
 }
 
 async function loadCredentialStored(salonId: string): Promise<boolean> {
@@ -103,14 +116,17 @@ async function loadPublicIntegration(salonId: string): Promise<DeveloperInstagra
   }
 
   const outboundEnabled = isInstagramOutboundEnabled();
+  const registryPresent = await hasInstagramIntegrationRow(salon.id);
   const row = await loadConnectionMetadata(salon.id);
   if (!row) {
     return {
       salonId: salon.id,
       salonName: salon.name,
       slug: salon.slug,
+      integrationAdded: registryPresent,
       connected: false,
       connection: null,
+      requiresRemoveConfirmation: false,
       outboundEnabled,
     };
   }
@@ -118,15 +134,54 @@ async function loadPublicIntegration(salonId: string): Promise<DeveloperInstagra
   const isAccessTokenStored = await loadCredentialStored(salon.id);
   const connection = mapInstagramConnectionPublic(row, isAccessTokenStored);
   const connected = connection.status === 'connected' && connection.isAccessTokenStored;
+  const meaningful = isMeaningfulInstagramConnectionPresence(connection, isAccessTokenStored);
 
   return {
     salonId: salon.id,
     salonName: salon.name,
     slug: salon.slug,
+    integrationAdded: registryPresent || meaningful,
     connected,
     connection,
+    requiresRemoveConfirmation: isAccessTokenStored,
     outboundEnabled,
   };
+}
+
+/** Soft-clear Instagram connection secrets for salon. Never deletes salon/business data. */
+async function clearInstagramConnectionSecrets(salonId: string): Promise<void> {
+  const now = new Date().toISOString();
+  const { data: existing, error: existingError } = await supabase
+    .from('instagram_business_connections')
+    .select('id')
+    .eq('salon_id', salonId)
+    .maybeSingle();
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  if (!existing) return;
+
+  const { error: clearError } = await supabase
+    .from('instagram_business_connections')
+    .update({
+      access_token_ciphertext: null,
+      access_token_iv: null,
+      access_token_auth_tag: null,
+      instagram_user_id: null,
+      instagram_username: null,
+      status: 'not_connected',
+      connected_at: null,
+      last_error: null,
+      token_expires_at: null,
+      updated_at: now,
+    })
+    .eq('salon_id', salonId);
+
+  if (clearError) {
+    throw new Error(clearError.message);
+  }
 }
 
 async function markIntegrationNotConnected(salonId: string): Promise<void> {
@@ -248,13 +303,74 @@ router.post('/:salonId/connect/start', async (req, res) => {
 
 /**
  * GET /api/developer/integrations/instagram
- * All active salons with per-salon Instagram public status (no secrets).
+ * Active salons with Instagram registry OR a meaningful connection (orphan-safe).
  */
 router.get('/', async (_req, res) => {
   try {
+    const { data: registryRows, error: registryError } = await supabase
+      .from('salon_integrations')
+      .select('salon_id')
+      .eq('provider', INSTAGRAM_PROVIDER);
+
+    if (registryError) {
+      throw new Error(registryError.message);
+    }
+
+    const salonIdSet = new Set<string>(
+      ((registryRows ?? []) as Array<{ salon_id: string }>)
+        .map((row) => row.salon_id)
+        .filter((id) => typeof id === 'string' && id.trim().length > 0),
+    );
+
+    // Non-mutating orphan compatibility: include salons with meaningful connection rows.
+    const { data: connectionRows, error: connectionError } = await supabase
+      .from('instagram_business_connections')
+      .select(
+        [
+          'id',
+          'salon_id',
+          'instagram_user_id',
+          'instagram_username',
+          'status',
+          'connected_at',
+          'last_webhook_at',
+          'last_error',
+          'token_expires_at',
+          'created_at',
+          'updated_at',
+          'access_token_ciphertext',
+          'access_token_iv',
+          'access_token_auth_tag',
+        ].join(','),
+      );
+
+    if (connectionError) {
+      throw new Error(connectionError.message);
+    }
+
+    for (const raw of ((connectionRows ?? []) as unknown as Array<
+      InstagramConnectionMetadataRow & InstagramCredentialTripleRow
+    >)) {
+      const stored = isInstagramCredentialTripleStored(
+        raw.access_token_ciphertext,
+        raw.access_token_iv,
+        raw.access_token_auth_tag,
+      );
+      const connection = mapInstagramConnectionPublic(raw, stored);
+      if (isMeaningfulInstagramConnectionPresence(connection, stored)) {
+        salonIdSet.add(raw.salon_id);
+      }
+    }
+
+    const salonIds = [...salonIdSet];
+    if (salonIds.length === 0) {
+      return res.json([]);
+    }
+
     const { data: salons, error } = await supabase
       .from('salons')
       .select('id, name, slug, active')
+      .in('id', salonIds)
       .eq('active', true)
       .order('name');
 
@@ -276,6 +392,7 @@ router.get('/', async (_req, res) => {
 /**
  * GET /api/developer/integrations/instagram/:salonId
  * Route salonId only — request body cannot retarget.
+ * Returns integrationAdded=false when Instagram is not in salon_integrations.
  */
 router.get('/:salonId', async (req, res) => {
   const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
@@ -292,13 +409,23 @@ router.get('/:salonId', async (req, res) => {
 });
 
 /**
- * DELETE /api/developer/integrations/instagram/:salonId/disconnect
- * Soft disconnect: clear secrets + demote status. Does not delete clients/appointments.
- * No Meta calls.
+ * POST /api/developer/integrations/instagram/:salonId/prepare
+ * Add Instagram to salon Integrations list (salon_integrations only).
+ * No credentials, no Meta calls, no business-data mutation.
+ * Idempotent when already added.
  */
-router.delete('/:salonId/disconnect', async (req, res) => {
+router.post('/:salonId/prepare', async (req, res) => {
   const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
-  const now = new Date().toISOString();
+
+  if (req.body && typeof req.body === 'object') {
+    const raw = req.body as Record<string, unknown>;
+    if ('salonId' in raw || 'salon_id' in raw) {
+      return res.status(400).json({
+        error: 'salonId must not be provided in the request body',
+        code: 'INSTAGRAM_INVALID_REQUEST',
+      });
+    }
+  }
 
   try {
     const salon = await requireActiveSalon(salonId);
@@ -306,44 +433,93 @@ router.delete('/:salonId/disconnect', async (req, res) => {
       return res.status(404).json({ error: salon.error, code: 'INSTAGRAM_CONNECTION_NOT_FOUND' });
     }
 
-    const { data: existing, error: existingError } = await supabase
-      .from('instagram_business_connections')
-      .select('id')
-      .eq('salon_id', salon.id)
-      .maybeSingle();
+    await ensureInstagramIntegrationRow(salon.id);
+    const payload = await loadPublicIntegration(salon.id);
+    return res.json(payload);
+  } catch (err) {
+    return handleRouteError(res, err, salonId || null, 'prepare');
+  }
+});
 
-    if (existingError) {
-      throw new Error(existingError.message);
+/**
+ * DELETE /api/developer/integrations/instagram/:salonId/disconnect
+ * Soft disconnect: clear secrets + demote registry status. Keeps Instagram card.
+ * Does not delete clients/appointments/salon. No Meta calls.
+ */
+router.delete('/:salonId/disconnect', async (req, res) => {
+  const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
+
+  try {
+    const salon = await requireActiveSalon(salonId);
+    if ('error' in salon) {
+      return res.status(404).json({ error: salon.error, code: 'INSTAGRAM_CONNECTION_NOT_FOUND' });
     }
 
-    if (existing) {
-      const { error: clearError } = await supabase
-        .from('instagram_business_connections')
-        .update({
-          access_token_ciphertext: null,
-          access_token_iv: null,
-          access_token_auth_tag: null,
-          instagram_user_id: null,
-          instagram_username: null,
-          status: 'not_connected',
-          connected_at: null,
-          last_error: null,
-          token_expires_at: null,
-          updated_at: now,
-        })
-        .eq('salon_id', salon.id);
-
-      if (clearError) {
-        throw new Error(clearError.message);
-      }
-    }
-
+    await clearInstagramConnectionSecrets(salon.id);
     await markIntegrationNotConnected(salon.id);
 
     const payload = await loadPublicIntegration(salon.id);
     return res.json(payload);
   } catch (err) {
     return handleRouteError(res, err, salonId || null, 'disconnect');
+  }
+});
+
+/**
+ * DELETE /api/developer/integrations/instagram/:salonId/remove
+ * Atomic remove via remove_instagram_integration_owned RPC:
+ * - soft-clear Instagram credentials for this salon
+ * - delete salon_integrations row for provider=instagram
+ * NEVER deletes salon / clients / staff / services / appointments
+ * NEVER touches Telegram / WhatsApp / Apple
+ * Idempotent. No Meta calls.
+ * If stored credentials exist, requires confirmConnected=true.
+ */
+router.delete('/:salonId/remove', async (req, res) => {
+  const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
+  const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
+  if ('salonId' in body || 'salon_id' in body) {
+    return res.status(400).json({
+      error: 'salonId must not be provided in the request body',
+      code: 'INSTAGRAM_INVALID_REQUEST',
+    });
+  }
+
+  try {
+    const salon = await requireActiveSalon(salonId);
+    if ('error' in salon) {
+      return res.status(404).json({ error: salon.error, code: 'INSTAGRAM_CONNECTION_NOT_FOUND' });
+    }
+
+    const current = await loadPublicIntegration(salon.id);
+    if (current.requiresRemoveConfirmation && body.confirmConnected !== true) {
+      return res.status(409).json({
+        error: 'Confirm Instagram credential clear before removing the integration',
+        code: 'INSTAGRAM_REMOVE_REQUIRES_CONFIRM',
+      });
+    }
+
+    const db = supabase as any;
+    const { data: rpcData, error: rpcError } = await db.rpc(
+      'remove_instagram_integration_owned',
+      { p_salon_id: salon.id },
+    );
+
+    if (rpcError) {
+      throw new Error(rpcError.message);
+    }
+
+    // Never delete from `salons` or other providers.
+    const payload = await loadPublicIntegration(salon.id);
+    return res.json({
+      ...payload,
+      integrationAdded: false,
+      removed: true,
+      atomic: true,
+      rpc: rpcData ?? null,
+    });
+  } catch (err) {
+    return handleRouteError(res, err, salonId || null, 'remove');
   }
 });
 
