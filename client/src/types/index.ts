@@ -456,6 +456,8 @@ export interface DeveloperInstagramIntegration {
   slug: string;
   connected: boolean;
   connection: InstagramBusinessConnectionPublic | null;
+  /** Read-only: INSTAGRAM_OUTBOUND_ENABLED === "true". Not a client toggle. */
+  outboundEnabled?: boolean;
 }
 
 export interface WeeklyHoursInput {

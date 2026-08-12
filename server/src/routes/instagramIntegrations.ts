@@ -28,6 +28,7 @@ import {
   createPersistedInstagramOAuthState,
   InstagramOAuthStateError,
 } from '../lib/instagramOAuthState.js';
+import { isInstagramOutboundEnabled } from '../lib/instagramOutboundWorker.js';
 
 const router = Router();
 const INSTAGRAM_PROVIDER = 'instagram' as const;
@@ -101,6 +102,7 @@ async function loadPublicIntegration(salonId: string): Promise<DeveloperInstagra
     throw new Error(salon.error);
   }
 
+  const outboundEnabled = isInstagramOutboundEnabled();
   const row = await loadConnectionMetadata(salon.id);
   if (!row) {
     return {
@@ -109,6 +111,7 @@ async function loadPublicIntegration(salonId: string): Promise<DeveloperInstagra
       slug: salon.slug,
       connected: false,
       connection: null,
+      outboundEnabled,
     };
   }
 
@@ -122,6 +125,7 @@ async function loadPublicIntegration(salonId: string): Promise<DeveloperInstagra
     slug: salon.slug,
     connected,
     connection,
+    outboundEnabled,
   };
 }
 

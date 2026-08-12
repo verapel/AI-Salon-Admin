@@ -54,6 +54,12 @@ function mapOauthBanner(
         return { tone: 'err', text: t('developer.integrations.instagram.oauthNotProfessional') };
       case 'not_configured':
         return { tone: 'err', text: t('developer.integrations.instagram.notConfigured') };
+      case 'invalid_state':
+        return { tone: 'err', text: t('developer.integrations.instagram.oauthInvalidState') };
+      case 'identity_conflict':
+        return { tone: 'err', text: t('developer.integrations.instagram.oauthIdentityConflict') };
+      case 'provider_unavailable':
+        return { tone: 'err', text: t('developer.integrations.instagram.oauthProviderUnavailable') };
       default:
         return { tone: 'err', text: t('developer.integrations.instagram.oauthFailed') };
     }
@@ -112,9 +118,8 @@ export default function InstagramIntegrationsTab({
     next.delete('instagram_confirmation');
     if (!next.get('tab')) next.set('tab', 'instagram');
     setSearchParams(next, { replace: true });
-    if (result === 'connected') {
-      loadIntegrations();
-    }
+    // Refresh after any OAuth return marker so status matches backend.
+    loadIntegrations();
   }, [searchParams, setSearchParams, t, loadIntegrations]);
 
   async function startConnect(integration: DeveloperInstagramIntegration) {

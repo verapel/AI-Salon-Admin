@@ -27,6 +27,7 @@ import {
   InstagramApiError,
   type InstagramVerifiedAccount,
 } from './instagramApi.js';
+import { isInstagramOutboundEnabled } from './instagramOutboundWorker.js';
 
 const INSTAGRAM_PROVIDER = 'instagram' as const;
 
@@ -129,6 +130,7 @@ async function defaultLoadPublicIntegration(
       slug: salonRow.slug,
       connected: false,
       connection: null,
+      outboundEnabled: isInstagramOutboundEnabled(),
     };
   }
 
@@ -159,6 +161,7 @@ async function defaultLoadPublicIntegration(
     slug: salonRow.slug,
     connected: connection.status === 'connected' && connection.isAccessTokenStored,
     connection,
+    outboundEnabled: isInstagramOutboundEnabled(),
   };
 }
 

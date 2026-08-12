@@ -688,7 +688,7 @@ const en = {
   'developer.integrations.instagram.description':
     'Connect Instagram Professional Accounts for each salon via Meta Instagram Login. Secrets are never shown in the browser.',
   'developer.integrations.instagram.notConnectedHint':
-    'Connect this salon with Instagram Login. Messaging webhooks arrive in a later stage.',
+    'Instagram Direct is not connected to this salon yet.',
   'developer.integrations.instagram.emptyTitle': 'No salons',
   'developer.integrations.instagram.emptyDesc': 'Create a salon first, then connect Instagram here.',
   'developer.integrations.instagram.username': 'Instagram username',
@@ -696,7 +696,7 @@ const en = {
   'developer.integrations.instagram.lastWebhookAt': 'Last webhook',
   'developer.integrations.instagram.lastError': 'Last error',
   'developer.integrations.instagram.connect': 'Connect Instagram',
-  'developer.integrations.instagram.reconnect': 'Reconnect',
+  'developer.integrations.instagram.reconnect': 'Reconnect Instagram',
   'developer.integrations.instagram.connecting': 'Redirecting...',
   'developer.integrations.instagram.disconnect': 'Disconnect Instagram',
   'developer.integrations.instagram.disconnecting': 'Disconnecting...',
@@ -704,7 +704,7 @@ const en = {
     'Clear stored Instagram credentials for this salon? Clients and appointments are not deleted.',
   'developer.integrations.instagram.genericError': 'Could not update Instagram connection. Try again.',
   'developer.integrations.instagram.notConfigured':
-    'Instagram OAuth is not configured on the server yet.',
+    'Instagram is not configured on the server yet.',
   'developer.integrations.instagram.oauthConnected': 'Instagram connected successfully.',
   'developer.integrations.instagram.oauthConnectedPending':
     'Instagram connected. Status refresh may take a moment.',
@@ -716,6 +716,31 @@ const en = {
     'This Instagram Professional Account is already connected to another salon.',
   'developer.integrations.instagram.oauthNotProfessional':
     'The Instagram account must be a Professional Account.',
+  'developer.integrations.instagram.title': 'Instagram',
+  'developer.integrations.instagram.reconnectRequired': 'Reconnect required',
+  'developer.integrations.instagram.updatedAt': 'Updated',
+  'developer.integrations.instagram.tokenExpires': 'Token expiry',
+  'developer.integrations.instagram.tokenExpiryUnknown': 'Unknown',
+  'developer.integrations.instagram.tokenExpired': 'Expired',
+  'developer.integrations.instagram.messagingSection': 'Messaging',
+  'developer.integrations.instagram.technicalSection': 'Technical',
+  'developer.integrations.instagram.outbound': 'Instagram outbound replies',
+  'developer.integrations.instagram.outboundDisabled': 'Disabled',
+  'developer.integrations.instagram.outboundEnabled': 'Enabled',
+  'developer.integrations.instagram.outboundDisabledHint':
+    'Sending replies will be enabled after a test connection and webhook verification.',
+  'developer.integrations.instagram.webhook': 'Webhook',
+  'developer.integrations.instagram.webhookReady': 'Ready for setup',
+  'developer.integrations.instagram.webhookActivitySeen': 'Activity seen',
+  'developer.integrations.instagram.oauthInvalidState':
+    'Instagram connection link expired or was already used. Start Connect again.',
+  'developer.integrations.instagram.oauthIdentityConflict':
+    'Instagram account identity conflict. Start Connect again.',
+  'developer.integrations.instagram.oauthProviderUnavailable':
+    'Instagram provider is temporarily unavailable. Try again later.',
+  'developer.integrations.instagram.manageInIntegrations': 'Manage in Integrations',
+  'developer.integrations.instagram.salonDetailHint':
+    'Instagram Login connection for this salon. Credentials stay on the server.',
   'developer.health.title': 'Health',
   'developer.health.subtitle': 'API, database, and bot health',
   'developer.health.loading': 'Checking system health...',
@@ -1477,7 +1502,7 @@ const ru: Record<TranslationKey, string> = {
   'developer.integrations.instagram.description':
     'Подключайте Instagram Professional Account для каждого салона через Meta Instagram Login. Секреты в браузере не показываются.',
   'developer.integrations.instagram.notConnectedHint':
-    'Подключите салон через Instagram Login. Messaging webhook появится позже.',
+    'Instagram Direct ещё не подключён к этому салону.',
   'developer.integrations.instagram.emptyTitle': 'Нет салонов',
   'developer.integrations.instagram.emptyDesc': 'Сначала создайте салон, затем подключите Instagram здесь.',
   'developer.integrations.instagram.username': 'Имя пользователя Instagram',
@@ -1485,7 +1510,7 @@ const ru: Record<TranslationKey, string> = {
   'developer.integrations.instagram.lastWebhookAt': 'Последний webhook',
   'developer.integrations.instagram.lastError': 'Последняя ошибка',
   'developer.integrations.instagram.connect': 'Подключить Instagram',
-  'developer.integrations.instagram.reconnect': 'Переподключить',
+  'developer.integrations.instagram.reconnect': 'Переподключить Instagram',
   'developer.integrations.instagram.connecting': 'Перенаправление...',
   'developer.integrations.instagram.disconnect': 'Отключить Instagram',
   'developer.integrations.instagram.disconnecting': 'Отключение...',
@@ -1493,7 +1518,7 @@ const ru: Record<TranslationKey, string> = {
     'Очистить сохранённые данные Instagram для этого салона? Клиенты и записи не удаляются.',
   'developer.integrations.instagram.genericError': 'Не удалось обновить подключение Instagram. Попробуйте снова.',
   'developer.integrations.instagram.notConfigured':
-    'Instagram OAuth ещё не настроен на сервере.',
+    'Instagram пока не настроен на сервере.',
   'developer.integrations.instagram.oauthConnected': 'Instagram успешно подключён.',
   'developer.integrations.instagram.oauthConnectedPending':
     'Instagram подключён. Обновление статуса может занять немного времени.',
@@ -1505,6 +1530,31 @@ const ru: Record<TranslationKey, string> = {
     'Этот Instagram Professional Account уже подключён к другому салону.',
   'developer.integrations.instagram.oauthNotProfessional':
     'Аккаунт Instagram должен быть Professional Account.',
+  'developer.integrations.instagram.title': 'Instagram',
+  'developer.integrations.instagram.reconnectRequired': 'Требуется переподключение',
+  'developer.integrations.instagram.updatedAt': 'Обновлено',
+  'developer.integrations.instagram.tokenExpires': 'Срок токена',
+  'developer.integrations.instagram.tokenExpiryUnknown': 'Неизвестно',
+  'developer.integrations.instagram.tokenExpired': 'Истёк',
+  'developer.integrations.instagram.messagingSection': 'Сообщения',
+  'developer.integrations.instagram.technicalSection': 'Техническое',
+  'developer.integrations.instagram.outbound': 'Исходящие ответы Instagram',
+  'developer.integrations.instagram.outboundDisabled': 'Выключены',
+  'developer.integrations.instagram.outboundEnabled': 'Включены',
+  'developer.integrations.instagram.outboundDisabledHint':
+    'Отправка ответов будет включена после тестового подключения и проверки webhook.',
+  'developer.integrations.instagram.webhook': 'Webhook',
+  'developer.integrations.instagram.webhookReady': 'Готов к настройке',
+  'developer.integrations.instagram.webhookActivitySeen': 'Есть активность',
+  'developer.integrations.instagram.oauthInvalidState':
+    'Ссылка подключения Instagram устарела или уже использована. Начните Connect снова.',
+  'developer.integrations.instagram.oauthIdentityConflict':
+    'Конфликт идентичности Instagram. Начните Connect снова.',
+  'developer.integrations.instagram.oauthProviderUnavailable':
+    'Провайдер Instagram временно недоступен. Попробуйте позже.',
+  'developer.integrations.instagram.manageInIntegrations': 'Управление в Integrations',
+  'developer.integrations.instagram.salonDetailHint':
+    'Подключение Instagram Login для этого салона. Секреты хранятся только на сервере.',
   'developer.health.title': 'Состояние',
   'developer.health.subtitle': 'API, база данных и боты',
   'developer.health.loading': 'Проверка состояния системы...',
@@ -2258,7 +2308,7 @@ const hy: Record<TranslationKey, string> = {
   'developer.integrations.instagram.description':
     'Միացրեք Instagram Professional Account-ը ըստ սրահի՝ Meta Instagram Login-ով։ Գաղտնիքները բրաուզերում չեն ցուցադրվում։',
   'developer.integrations.instagram.notConnectedHint':
-    'Միացրեք այս սրահը Instagram Login-ով։ Messaging webhook-ը կավելանա հետագայում։',
+    'Instagram Direct-ը դեռ միացված չէ այս սրահին։',
   'developer.integrations.instagram.emptyTitle': 'Սրահներ չկան',
   'developer.integrations.instagram.emptyDesc': 'Նախ ստեղծեք սրահ, ապա այստեղ միացրեք Instagram։',
   'developer.integrations.instagram.username': 'Instagram օգտանուն',
@@ -2266,7 +2316,7 @@ const hy: Record<TranslationKey, string> = {
   'developer.integrations.instagram.lastWebhookAt': 'Վերջին webhook',
   'developer.integrations.instagram.lastError': 'Վերջին սխալ',
   'developer.integrations.instagram.connect': 'Միացնել Instagram',
-  'developer.integrations.instagram.reconnect': 'Վերամիացնել',
+  'developer.integrations.instagram.reconnect': 'Վերամիացնել Instagram',
   'developer.integrations.instagram.connecting': 'Վերահղվում է...',
   'developer.integrations.instagram.disconnect': 'Անջատել Instagram',
   'developer.integrations.instagram.disconnecting': 'Անջատվում է...',
@@ -2274,7 +2324,7 @@ const hy: Record<TranslationKey, string> = {
     'Մաքրե՞լ այս սրահի պահված Instagram տվյալները։ Հաճախորդները և գրանցումները չեն ջնջվում։',
   'developer.integrations.instagram.genericError': 'Չհաջողվեց թարմացնել Instagram միացումը։ Փորձեք կրկին։',
   'developer.integrations.instagram.notConfigured':
-    'Instagram OAuth-ը սերվերում դեռ կարգավորված չէ։',
+    'Instagram-ը սերվերում դեռ կարգավորված չէ։',
   'developer.integrations.instagram.oauthConnected': 'Instagram-ը հաջողությամբ միացվեց։',
   'developer.integrations.instagram.oauthConnectedPending':
     'Instagram-ը միացված է։ Կարգավիճակի թարմացումը կարող է մի պահ տևել։',
@@ -2286,6 +2336,31 @@ const hy: Record<TranslationKey, string> = {
     'Այս Instagram Professional Account-ն արդեն միացված է այլ սրահի։',
   'developer.integrations.instagram.oauthNotProfessional':
     'Instagram հաշիվը պետք է լինի Professional Account։',
+  'developer.integrations.instagram.title': 'Instagram',
+  'developer.integrations.instagram.reconnectRequired': 'Պահանջվում է վերամիացում',
+  'developer.integrations.instagram.updatedAt': 'Թարմացված է',
+  'developer.integrations.instagram.tokenExpires': 'Token-ի ժամկետ',
+  'developer.integrations.instagram.tokenExpiryUnknown': 'Անհայտ',
+  'developer.integrations.instagram.tokenExpired': 'Ժամկետանց',
+  'developer.integrations.instagram.messagingSection': 'Հաղորդագրություններ',
+  'developer.integrations.instagram.technicalSection': 'Տեխնիկական',
+  'developer.integrations.instagram.outbound': 'Instagram ելքային պատասխաններ',
+  'developer.integrations.instagram.outboundDisabled': 'Անջատված է',
+  'developer.integrations.instagram.outboundEnabled': 'Միացված է',
+  'developer.integrations.instagram.outboundDisabledHint':
+    'Պատասխանների ուղարկումը կմիացվի թեստային միացումից և webhook ստուգումից հետո։',
+  'developer.integrations.instagram.webhook': 'Webhook',
+  'developer.integrations.instagram.webhookReady': 'Պատրաստ է կարգավորման',
+  'developer.integrations.instagram.webhookActivitySeen': 'Կա ակտիվություն',
+  'developer.integrations.instagram.oauthInvalidState':
+    'Instagram միացման հղումը ժամկետանց է կամ արդեն օգտագործված է։ Սկսեք Connect նորից։',
+  'developer.integrations.instagram.oauthIdentityConflict':
+    'Instagram ինքնության կոնֆլիկտ։ Սկսեք Connect նորից։',
+  'developer.integrations.instagram.oauthProviderUnavailable':
+    'Instagram մատակարարը ժամանակավորապես անհասանելի է։ Փորձեք ավելի ուշ։',
+  'developer.integrations.instagram.manageInIntegrations': 'Կառավարել Integrations-ում',
+  'developer.integrations.instagram.salonDetailHint':
+    'Instagram Login միացում այս սրահի համար։ Գաղտնիքները պահվում են միայն սերվերում։',
   'developer.salons.empty': 'No salons yet.',
   'developer.integrations.overviewHint': 'Connect and manage Telegram bots for each salon from this page.',
   'developer.health.title': 'Վիճակ',

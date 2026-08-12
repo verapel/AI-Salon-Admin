@@ -11,6 +11,8 @@ interface SalonInstagramCardProps {
   onDisconnect: () => void;
 }
 
+const WEBHOOK_PATH = '/api/webhooks/instagram';
+
 function maskInstagramUserId(userId: string | null | undefined): string {
   if (typeof userId !== 'string') return '—';
   const trimmed = userId.trim();
@@ -24,12 +26,23 @@ function statusLabelKey(status: InstagramConnectionStatus | undefined): Translat
     case 'connected':
       return 'developer.integrations.status.connected';
     case 'error':
-      return 'developer.integrations.status.error';
+      return 'developer.integrations.instagram.reconnectRequired';
     case 'disabled':
       return 'developer.integrations.status.disabled';
     default:
       return 'developer.integrations.status.notConnected';
   }
+}
+
+function formatTokenExpiry(
+  expiresAt: string | null | undefined,
+  t: (key: TranslationKey) => string,
+): string {
+  if (!expiresAt) return t('developer.integrations.instagram.tokenExpiryUnknown');
+  const ms = Date.parse(expiresAt);
+  if (Number.isNaN(ms)) return t('developer.integrations.instagram.tokenExpiryUnknown');
+  if (ms <= Date.now()) return t('developer.integrations.instagram.tokenExpired');
+  return new Date(ms).toLocaleString();
 }
 
 export default function SalonInstagramCard({
@@ -46,6 +59,9 @@ export default function SalonInstagramCard({
   const canDisconnect =
     Boolean(connection) && (status === 'connected' || status === 'error' || status === 'disabled');
   const isConnected = integration.connected || status === 'connected';
+  const needsReconnect = status === 'error';
+  const outboundEnabled = integration.outboundEnabled === true;
+  const webhookSeen = Boolean(connection?.lastWebhookAt);
 
   return (
     <div className="card flex w-full min-w-0 max-w-full flex-col p-4 sm:p-5">
@@ -55,6 +71,9 @@ export default function SalonInstagramCard({
             <Camera className="h-5 w-5 text-rose-600 dark:text-rose-400" />
           </div>
           <div className="min-w-0">
+            <p className="text-xs font-medium uppercase tracking-wide text-rose-700 dark:text-rose-300">
+              {t('developer.integrations.instagram.title')}
+            </p>
             <h3 className="truncate text-base font-semibold text-gray-900 dark:text-white">
               {integration.salonName}
             </h3>
@@ -76,7 +95,7 @@ export default function SalonInstagramCard({
         </span>
       </div>
 
-      {connection && isConnected ? (
+      {connection && (isConnected || needsReconnect) ? (
         <dl className="mt-4 grid gap-3 text-sm">
           <div className="flex min-w-0 justify-between gap-3">
             <dt className="shrink-0 text-gray-500 dark:text-gray-400">
@@ -106,12 +125,20 @@ export default function SalonInstagramCard({
           </div>
           <div className="flex min-w-0 justify-between gap-3">
             <dt className="shrink-0 text-gray-500 dark:text-gray-400">
-              {t('developer.integrations.instagram.lastWebhookAt')}
+              {t('developer.integrations.instagram.updatedAt')}
             </dt>
             <dd className="truncate text-right font-medium text-gray-900 dark:text-gray-200">
-              {connection.lastWebhookAt
-                ? new Date(connection.lastWebhookAt).toLocaleString()
+              {connection.updatedAt
+                ? new Date(connection.updatedAt).toLocaleString()
                 : '—'}
+            </dd>
+          </div>
+          <div className="flex min-w-0 justify-between gap-3">
+            <dt className="shrink-0 text-gray-500 dark:text-gray-400">
+              {t('developer.integrations.instagram.tokenExpires')}
+            </dt>
+            <dd className="truncate text-right font-medium text-gray-900 dark:text-gray-200">
+              {formatTokenExpiry(connection.tokenExpiresAt, t)}
             </dd>
           </div>
           {connection.lastError ? (
@@ -131,12 +158,59 @@ export default function SalonInstagramCard({
         </p>
       )}
 
+      <div className="mt-4 space-y-3 rounded-lg border border-gray-100 bg-gray-50 p-3 text-sm dark:border-gray-800 dark:bg-gray-900/40">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            {t('developer.integrations.instagram.messagingSection')}
+          </p>
+          <div className="mt-2 flex min-w-0 justify-between gap-3">
+            <span className="text-gray-500 dark:text-gray-400">
+              {t('developer.integrations.instagram.outbound')}
+            </span>
+            <span className="font-medium text-gray-900 dark:text-gray-200">
+              {outboundEnabled
+                ? t('developer.integrations.instagram.outboundEnabled')
+                : t('developer.integrations.instagram.outboundDisabled')}
+            </span>
+          </div>
+          {!outboundEnabled ? (
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {t('developer.integrations.instagram.outboundDisabledHint')}
+            </p>
+          ) : null}
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            {t('developer.integrations.instagram.technicalSection')}
+          </p>
+          <div className="mt-2 flex min-w-0 justify-between gap-3">
+            <span className="text-gray-500 dark:text-gray-400">
+              {t('developer.integrations.instagram.webhook')}
+            </span>
+            <span className="text-right font-medium text-gray-900 dark:text-gray-200">
+              {webhookSeen
+                ? t('developer.integrations.instagram.webhookActivitySeen')
+                : t('developer.integrations.instagram.webhookReady')}
+            </span>
+          </div>
+          <p className="mt-1 break-all font-mono text-xs text-gray-500 dark:text-gray-400">
+            {WEBHOOK_PATH}
+          </p>
+          {webhookSeen && connection?.lastWebhookAt ? (
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {t('developer.integrations.instagram.lastWebhookAt')}:{' '}
+              {new Date(connection.lastWebhookAt).toLocaleString()}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
       {connectError ? (
         <p className="mt-3 text-sm text-red-600 dark:text-red-400">{connectError}</p>
       ) : null}
 
       <div className="mt-auto flex flex-wrap gap-2 border-t border-gray-100 pt-4 dark:border-gray-800">
-        {isConnected ? (
+        {isConnected || needsReconnect ? (
           <button
             type="button"
             className="btn-secondary w-full sm:w-auto"

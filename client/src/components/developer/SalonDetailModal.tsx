@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useLanguage } from '@/context/LanguageContext';
 import ConnectSalonTelegramModal from '@/components/developer/ConnectSalonTelegramModal';
 import DeleteSalonModal from '@/components/developer/DeleteSalonModal';
@@ -7,6 +8,7 @@ import IntegrationHealthBadge from '@/components/developer/IntegrationHealthBadg
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { api } from '@/lib/api';
 import type {
+  DeveloperInstagramIntegration,
   DeveloperSalonDetail,
   SalonPermanentDeleteResponse,
   TelegramAdminChatCandidateResponse,
@@ -76,6 +78,8 @@ export default function SalonDetailModal({
     useState<TelegramAdminChatCandidateResponse | null>(null);
   const [adminChatCandidateError, setAdminChatCandidateError] = useState('');
   const [adminChatCandidateSuccess, setAdminChatCandidateSuccess] = useState('');
+  const [instagram, setInstagram] = useState<DeveloperInstagramIntegration | null>(null);
+  const [instagramError, setInstagramError] = useState(false);
 
   const [name, setName] = useState('');
   const [active, setActive] = useState(true);
@@ -130,6 +134,37 @@ export default function SalonDetailModal({
     setAdminChatCandidateSuccess('');
     loadDetail();
   }, [isOpen, salonId, loadDetail]);
+
+  // IG-UI-1A: Instagram status loads independently so it cannot delay salon details.
+  // Cleanup cancelled flag ignores stale A→B / closed-modal responses.
+  useEffect(() => {
+    if (!isOpen || !salonId) {
+      setInstagram(null);
+      setInstagramError(false);
+      return;
+    }
+
+    let cancelled = false;
+    setInstagram(null);
+    setInstagramError(false);
+
+    void api.developer
+      .getInstagramIntegration(salonId)
+      .then((ig) => {
+        if (cancelled) return;
+        setInstagram(ig);
+        setInstagramError(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setInstagram(null);
+        setInstagramError(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, salonId]);
 
   if (!isOpen) return null;
 
@@ -622,6 +657,44 @@ export default function SalonDetailModal({
                       </div>
                     </div>
                   </>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+                <h4 className="mb-2 text-sm font-semibold text-white">
+                  {t('developer.integrations.instagram.title')}
+                </h4>
+                <p className="mb-3 text-xs text-gray-400">
+                  {t('developer.integrations.instagram.salonDetailHint')}
+                </p>
+                {instagramError ? (
+                  <p className="text-sm text-red-400">
+                    {t('developer.integrations.instagram.genericError')}
+                  </p>
+                ) : instagram ? (
+                  <>
+                    <p className="text-sm text-gray-200">
+                      {instagram.connected
+                        ? t('developer.integrations.status.connected')
+                        : instagram.connection?.status === 'error'
+                          ? t('developer.integrations.instagram.reconnectRequired')
+                          : t('developer.integrations.status.notConnected')}
+                    </p>
+                    <p className="mt-2 text-xs text-gray-400">
+                      {t('developer.integrations.instagram.outbound')}:{' '}
+                      {instagram.outboundEnabled
+                        ? t('developer.integrations.instagram.outboundEnabled')
+                        : t('developer.integrations.instagram.outboundDisabled')}
+                    </p>
+                    <Link
+                      to={`/developer/integrations?tab=instagram`}
+                      className="mt-3 inline-flex rounded-lg bg-rose-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-rose-600"
+                    >
+                      {t('developer.integrations.instagram.manageInIntegrations')}
+                    </Link>
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-400">{t('developer.integrations.loading')}</p>
                 )}
               </div>
 

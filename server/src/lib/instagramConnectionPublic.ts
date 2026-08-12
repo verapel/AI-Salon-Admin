@@ -32,6 +32,11 @@ export type DeveloperInstagramIntegration = {
   slug: string;
   connected: boolean;
   connection: InstagramBusinessConnectionPublic | null;
+  /**
+   * Read-only mirror of INSTAGRAM_OUTBOUND_ENABLED === "true".
+   * Never a toggle — env-gated worker bootstrap only.
+   */
+  outboundEnabled: boolean;
 };
 
 /** Metadata row — never includes credential ciphertext columns. */

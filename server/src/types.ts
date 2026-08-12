@@ -254,6 +254,8 @@ export interface DeveloperInstagramIntegration {
   slug: string;
   connected: boolean;
   connection: InstagramBusinessConnectionPublic | null;
+  /** Read-only mirror of INSTAGRAM_OUTBOUND_ENABLED === "true". */
+  outboundEnabled: boolean;
 }
 
 export interface ClientChannelIdentity {
