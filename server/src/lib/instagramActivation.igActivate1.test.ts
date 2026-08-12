@@ -413,12 +413,14 @@ describe('IG-ACTIVATE-1 OAuth single-use (executed mocks)', () => {
     );
     // Compare call sites inside the route handler (skip import lines).
     const handler = callback.slice(callback.indexOf("router.get('/callback'"));
-    const consumeIdx = handler.indexOf('consumeInstagramOAuthState');
-    const verifyIdx = handler.indexOf('verifyInstagramOAuthConnection');
+    const consumeIdx = handler.indexOf('callbackDeps.consumeState');
+    const verifyIdx = handler.indexOf('callbackDeps.verifyConnection');
     assert.ok(consumeIdx >= 0, 'consume call missing in callback handler');
     assert.ok(verifyIdx > consumeIdx, 'token exchange must follow consume');
     assert.equal(callback.includes('unconsume'), false);
     assert.equal(callback.includes('restoreOAuth'), false);
+    // IG-ACTIVATE-1A: cancel/error with state also burns after consume.
+    assert.ok(handler.indexOf('if (oauthError)') > consumeIdx);
     const sql = mig08();
     assert.ok(sql.includes('Never cleared on Meta failure'));
   });

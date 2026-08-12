@@ -961,9 +961,11 @@ describe('IG-2A/B persistence / reconnect / security (static + reasoned)', () =>
     assert.ok(callback.includes('consumeInstagramOAuthState'));
     // Compare call sites inside the route handler (imports list verify first).
     const handler = callback.slice(callback.indexOf("router.get('/callback'"));
-    const consumeIdx = handler.indexOf('consumeInstagramOAuthState');
-    const verifyIdx = handler.indexOf('verifyInstagramOAuthConnection');
+    const consumeIdx = handler.indexOf('callbackDeps.consumeState');
+    const verifyIdx = handler.indexOf('callbackDeps.verifyConnection');
     assert.ok(consumeIdx >= 0 && verifyIdx > consumeIdx);
+    // Cancel/error with state burns via the same consume (IG-ACTIVATE-1A).
+    assert.ok(handler.indexOf('if (oauthError)') > consumeIdx);
   });
 
   it('connect/start developer-mounted; callback outside Bearer', () => {

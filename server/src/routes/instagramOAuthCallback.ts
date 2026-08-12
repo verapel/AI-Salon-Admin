@@ -1,7 +1,11 @@
 /**
- * IG-2: Instagram OAuth callback (Meta browser redirect).
+ * IG-2 / IG-ACTIVATE-1A: Instagram OAuth callback (Meta browser redirect).
  * NOT under /api/developer — no Bearer auth. Security = validated OAuth state.
  * No messaging webhook here.
+ *
+ * IG-ACTIVATE-1A: any callback that presents a valid signed state burns it once
+ * (success, cancel/error, or missing code) BEFORE Meta token exchange / redirect.
+ * Failed Meta exchange after consume does NOT restore the nonce.
  */
 
 import { Router } from 'express';
@@ -11,13 +15,18 @@ import {
   loadInstagramAppConfig,
   verifyInstagramOAuthConnection,
   type InstagramApiErrorCode,
+  type InstagramAppConfig,
   type InstagramFetch,
+  type InstagramVerifiedAccount,
 } from '../lib/instagramApi.js';
 import {
   InstagramOAuthStateError,
   consumeInstagramOAuthState,
 } from '../lib/instagramOAuthState.js';
-import { persistVerifiedInstagramConnection } from '../lib/instagramConnectionPersist.js';
+import {
+  persistVerifiedInstagramConnection,
+  type PersistInstagramConnectionResult,
+} from '../lib/instagramConnectionPersist.js';
 import { supabase } from '../lib/supabase.js';
 
 const router = Router();
@@ -27,6 +36,51 @@ export let instagramOAuthFetch: InstagramFetch = fetch;
 
 export function setInstagramOAuthFetchForTests(fetchImpl: InstagramFetch | null): void {
   instagramOAuthFetch = fetchImpl ?? fetch;
+}
+
+export type InstagramOAuthCallbackDeps = {
+  consumeState: (params: {
+    state: string;
+  }) => Promise<{ salonId: string; nonce: string }>;
+  requireActiveSalon: (salonId: string) => Promise<boolean>;
+  loadConfig: () => InstagramAppConfig;
+  verifyConnection: (input: {
+    code: string;
+    appId: string;
+    appSecret: string;
+    redirectUri: string;
+  }) => Promise<InstagramVerifiedAccount>;
+  persistConnection: (
+    salonId: string,
+    verified: InstagramVerifiedAccount,
+  ) => Promise<PersistInstagramConnectionResult>;
+};
+
+function createDefaultInstagramOAuthCallbackDeps(): InstagramOAuthCallbackDeps {
+  return {
+    consumeState: ({ state }) =>
+      consumeInstagramOAuthState({
+        db: supabase as any,
+        state,
+      }),
+    requireActiveSalon: requireActiveSalonId,
+    loadConfig: loadInstagramAppConfig,
+    verifyConnection: (input) =>
+      verifyInstagramOAuthConnection(input, instagramOAuthFetch),
+    persistConnection: persistVerifiedInstagramConnection,
+  };
+}
+
+let callbackDeps: InstagramOAuthCallbackDeps =
+  createDefaultInstagramOAuthCallbackDeps();
+
+/** Test-only dependency injection. Pass null to restore production defaults. */
+export function setInstagramOAuthCallbackDepsForTests(
+  deps: Partial<InstagramOAuthCallbackDeps> | null,
+): void {
+  callbackDeps = deps
+    ? { ...createDefaultInstagramOAuthCallbackDeps(), ...deps }
+    : createDefaultInstagramOAuthCallbackDeps();
 }
 
 function frontendIntegrationsUrl(params: Record<string, string>): string {
@@ -94,39 +148,53 @@ async function requireActiveSalonId(salonId: string): Promise<boolean> {
 
 /**
  * GET /api/integrations/instagram/callback
+ *
+ * Order (IG-ACTIVATE-1A):
+ *   1) If state present → durable consume exactly once (sig/TTL/CAS)
+ *   2) If Meta error/cancel → safe redirect (no token exchange)
+ *   3) If missing code → safe error (already consumed when state present)
+ *   4) Else Meta exchange → verify → persist
  */
 router.get('/callback', async (req, res) => {
   const oauthError =
     typeof req.query.error === 'string' ? req.query.error.trim() : '';
+  const state = typeof req.query.state === 'string' ? req.query.state.trim() : '';
+  const codeRaw = typeof req.query.code === 'string' ? req.query.code : '';
+
+  let salonId: string | null = null;
+
+  if (state) {
+    // Burn valid signed state once before any cancel/error/success terminal handling.
+    try {
+      const consumed = await callbackDeps.consumeState({ state });
+      salonId = consumed.salonId;
+    } catch (err) {
+      if (err instanceof InstagramOAuthStateError) {
+        console.error('[instagram] oauth callback state error', {
+          operation: 'oauth_callback_state',
+          code: err.code,
+        });
+        return redirectError(res, err.code);
+      }
+      return redirectError(res, 'INSTAGRAM_OAUTH_STATE_INVALID');
+    }
+  } else if (oauthError) {
+    // Cancel/error without state: no durable consume to attempt.
+    if (oauthError === 'access_denied') {
+      return redirectError(res, 'INSTAGRAM_OAUTH_DENIED');
+    }
+    return redirectError(res, 'INSTAGRAM_PROVIDER_4XX');
+  } else {
+    // Success-shaped callback requires state.
+    return redirectError(res, 'INSTAGRAM_OAUTH_STATE_INVALID');
+  }
+
+  // State was present and consumed. Handle Meta cancel/error without token exchange.
   if (oauthError) {
     if (oauthError === 'access_denied') {
       return redirectError(res, 'INSTAGRAM_OAUTH_DENIED');
     }
     return redirectError(res, 'INSTAGRAM_PROVIDER_4XX');
-  }
-
-  const state = typeof req.query.state === 'string' ? req.query.state : '';
-  const codeRaw = typeof req.query.code === 'string' ? req.query.code : '';
-
-  // Consume durable single-use state BEFORE Meta token exchange.
-  // Replay/concurrent loser never reaches token exchange.
-  // If exchange fails after consume, user must restart OAuth (nonce not restored).
-  let salonId: string;
-  try {
-    const consumed = await consumeInstagramOAuthState({
-      db: supabase as any,
-      state,
-    });
-    salonId = consumed.salonId;
-  } catch (err) {
-    if (err instanceof InstagramOAuthStateError) {
-      console.error('[instagram] oauth callback state error', {
-        operation: 'oauth_callback_state',
-        code: err.code,
-      });
-      return redirectError(res, err.code);
-    }
-    return redirectError(res, 'INSTAGRAM_OAUTH_STATE_INVALID');
   }
 
   if (!codeRaw.trim()) {
@@ -138,23 +206,20 @@ router.get('/callback', async (req, res) => {
   }
 
   try {
-    const active = await requireActiveSalonId(salonId);
+    const active = await callbackDeps.requireActiveSalon(salonId!);
     if (!active) {
       return redirectError(res, 'INSTAGRAM_PROVIDER_4XX');
     }
 
-    const config = loadInstagramAppConfig();
-    const verified = await verifyInstagramOAuthConnection(
-      {
-        code: codeRaw,
-        appId: config.appId,
-        appSecret: config.appSecret,
-        redirectUri: config.redirectUri,
-      },
-      instagramOAuthFetch,
-    );
+    const config = callbackDeps.loadConfig();
+    const verified = await callbackDeps.verifyConnection({
+      code: codeRaw,
+      appId: config.appId,
+      appSecret: config.appSecret,
+      redirectUri: config.redirectUri,
+    });
 
-    const persisted = await persistVerifiedInstagramConnection(salonId, verified);
+    const persisted = await callbackDeps.persistConnection(salonId!, verified);
     if (!persisted.ok) {
       console.error('[instagram] oauth persist failed', {
         operation: 'oauth_callback_persist',

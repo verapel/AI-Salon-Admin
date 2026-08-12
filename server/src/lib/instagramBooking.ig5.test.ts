@@ -28,6 +28,14 @@ const SALON = '11111111-1111-1111-1111-111111111111';
 const SENDER = '17841400000000099';
 const LARGE_IG_ID = '17841400000000001';
 
+/**
+ * Deterministic future appointment dates for FSM past-date checks.
+ * Independent of wall-clock "today" (dateStrInTimezone). Do not use Date.now().
+ */
+const FIXTURE_APPT_DATE = '2027-08-10';
+const FIXTURE_APPT_DATE_NEXT = '2027-08-11';
+const FIXTURE_APPT_DATE_ALT = '2027-08-20';
+
 const SERVICES = [
   { id: 'svc-1', name: 'Стрижка', duration: 60, category: 'hair' },
   { id: 'svc-2', name: 'Окрашивание', duration: 90, category: 'hair' },
@@ -56,7 +64,7 @@ function fsmDeps(overrides: Partial<InstagramBookingFsmDeps> = {}): InstagramBoo
       name === 'Стрижка' ? [STAFF[0]] : name === 'Окрашивание' ? STAFF : [STAFF[0]],
     getActiveStaffById: async (_s, id) => STAFF.find((x) => x.id === id) ?? null,
     computeAvailableSlots: async () => ['10:00', '11:00', '12:00'],
-    findNextAvailableDates: async () => ['2026-08-10', '2026-08-11'],
+    findNextAvailableDates: async () => [FIXTURE_APPT_DATE, FIXTURE_APPT_DATE_NEXT],
     getSalonTimezone: async () => 'Europe/Moscow',
     loadSnapshot: async () => ({
       kind: 'ok',
@@ -133,7 +141,7 @@ describe('IG-5 state helpers (executed)', () => {
       serviceName: 'Стрижка',
       staffId: 'st-1',
       staffName: 'Анна',
-      date: '2026-08-20',
+      date: FIXTURE_APPT_DATE_ALT,
       time: '14:00',
       name: 'Anna',
       phone: '+37499111222',
@@ -270,7 +278,7 @@ describe('IG-5 service/staff/date/time/name/phone (executed mocks)', () => {
     const steps: Array<{ text: string; mid: string }> = [
       { text: 'hi', mid: 'm1' },
       { text: 'Стрижка', mid: 'm2' },
-      { text: '2026-08-10', mid: 'm3' },
+      { text: FIXTURE_APPT_DATE, mid: 'm3' },
       { text: '10:00', mid: 'm4' },
       { text: 'Иван', mid: 'm5' },
       { text: '+79991234567', mid: 'm6' },
@@ -298,7 +306,7 @@ describe('IG-5 service/staff/date/time/name/phone (executed mocks)', () => {
       assert.equal(last.state.serviceName, 'Стрижка');
       assert.equal(last.state.staffId, 'st-1');
       assert.equal(last.state.staffName, 'Анна');
-      assert.equal(last.state.date, '2026-08-10');
+      assert.equal(last.state.date, FIXTURE_APPT_DATE);
       assert.equal(last.state.time, '10:00');
       assert.equal(last.state.name, 'Иван');
       assert.equal(last.state.phone, '+79991234567');
@@ -320,7 +328,7 @@ describe('IG-5 service/staff/date/time/name/phone (executed mocks)', () => {
     for (const [text, mid] of [
       ['x', 't1'],
       ['Стрижка', 't2'],
-      ['2026-08-10', 't3'],
+      [FIXTURE_APPT_DATE, 't3'],
     ] as const) {
       await processInstagramBookingFsm(
         {
@@ -359,7 +367,7 @@ describe('IG-5 service/staff/date/time/name/phone (executed mocks)', () => {
     for (const [text, mid] of [
       ['x', 'n1'],
       ['Стрижка', 'n2'],
-      ['2026-08-10', 'n3'],
+      [FIXTURE_APPT_DATE, 'n3'],
       ['10:00', 'n4'],
     ] as const) {
       await processInstagramBookingFsm(
@@ -448,7 +456,7 @@ describe('IG-5 service/staff/date/time/name/phone (executed mocks)', () => {
         serviceName: 'Стрижка',
         staffId: 'st-1',
         staffName: 'Анна',
-        date: '2026-08-10',
+        date: FIXTURE_APPT_DATE,
         time: '10:00',
         name: 'Иван',
       };
@@ -515,7 +523,7 @@ describe('IG-5 service/staff/date/time/name/phone (executed mocks)', () => {
               serviceName: 'Стрижка',
               staffId: 'st-1',
               staffName: 'Анна',
-              date: '2026-08-10',
+              date: FIXTURE_APPT_DATE,
               time: '10:00',
               name: 'Иван',
             }),
@@ -559,7 +567,7 @@ describe('IG-5 service/staff/date/time/name/phone (executed mocks)', () => {
               serviceName: 'Стрижка',
               staffId: 'st-1',
               staffName: 'Анна',
-              date: '2026-08-10',
+              date: FIXTURE_APPT_DATE,
               time: '10:00',
               name: 'Иван',
             }),
@@ -624,7 +632,7 @@ describe('IG-5 service/staff/date/time/name/phone (executed mocks)', () => {
       serviceName: 'Стрижка',
       staffId: 'st-1',
       staffName: 'Анна',
-      date: '2026-08-10',
+      date: FIXTURE_APPT_DATE,
       time: '10:00',
       name: 'Иван',
       phone: '+79991234567',
@@ -673,7 +681,7 @@ describe('IG-5 service/staff/date/time/name/phone (executed mocks)', () => {
     for (const [text, mid] of [
       ['hi', 'r1'],
       ['Стрижка', 'r2'],
-      ['2026-08-10', 'r3'],
+      [FIXTURE_APPT_DATE, 'r3'],
       ['10:00', 'r4'],
       ['Иван', 'r5'],
     ] as const) {
