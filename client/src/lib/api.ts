@@ -253,6 +253,18 @@ export const api = {
         `/developer/integrations/whatsapp/${salonId}/disconnect`,
         { method: 'DELETE' }
       ),
+    removeWhatsApp: (salonId: string, opts?: { confirmConnected?: boolean }) =>
+      request<
+        import('@/types').DeveloperWhatsAppIntegration & {
+          removed?: boolean;
+          atomic?: boolean;
+        }
+      >(`/developer/integrations/whatsapp/${salonId}/remove`, {
+        method: 'DELETE',
+        body: JSON.stringify({
+          confirmConnected: opts?.confirmConnected === true,
+        }),
+      }),
     getInstagramIntegrations: () =>
       request<import('@/types').DeveloperInstagramIntegration[]>(
         '/developer/integrations/instagram'

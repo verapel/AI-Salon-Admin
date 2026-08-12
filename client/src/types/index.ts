@@ -376,7 +376,8 @@ export type WhatsAppCloudProvider = 'meta_cloud';
 export interface WhatsAppBusinessConnectionPublic {
   id: string;
   salonId: string;
-  integrationId: string;
+  /** Null when connection shell is detached from registry after remove. */
+  integrationId: string | null;
   provider: WhatsAppCloudProvider;
   businessAccountId: string | null;
   phoneNumberId: string | null;
@@ -418,8 +419,15 @@ export interface DeveloperWhatsAppIntegration {
   salonId: string;
   salonName: string;
   slug: string;
+  /**
+   * True when WhatsApp is visible:
+   * registry row OR meaningful connection (orphan-safe).
+   */
+  integrationAdded?: boolean;
   connected: boolean;
   connection: WhatsAppBusinessConnectionPublic | null;
+  /** True when remove would clear stored credentials (needs explicit confirm). */
+  requiresRemoveConfirmation?: boolean;
 }
 
 /** IG-1 Instagram connection status (connection table). */

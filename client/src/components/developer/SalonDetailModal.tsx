@@ -10,6 +10,7 @@ import { api } from '@/lib/api';
 import type {
   DeveloperInstagramIntegration,
   DeveloperSalonDetail,
+  DeveloperWhatsAppIntegration,
   SalonPermanentDeleteResponse,
   TelegramAdminChatCandidateResponse,
 } from '@/types';
@@ -80,6 +81,8 @@ export default function SalonDetailModal({
   const [adminChatCandidateSuccess, setAdminChatCandidateSuccess] = useState('');
   const [instagram, setInstagram] = useState<DeveloperInstagramIntegration | null>(null);
   const [instagramError, setInstagramError] = useState(false);
+  const [whatsapp, setWhatsapp] = useState<DeveloperWhatsAppIntegration | null>(null);
+  const [whatsappError, setWhatsappError] = useState(false);
 
   const [name, setName] = useState('');
   const [active, setActive] = useState(true);
@@ -159,6 +162,36 @@ export default function SalonDetailModal({
         if (cancelled) return;
         setInstagram(null);
         setInstagramError(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, salonId]);
+
+  // WA-UI-1: WhatsApp status loads independently (same stale A→B protection).
+  useEffect(() => {
+    if (!isOpen || !salonId) {
+      setWhatsapp(null);
+      setWhatsappError(false);
+      return;
+    }
+
+    let cancelled = false;
+    setWhatsapp(null);
+    setWhatsappError(false);
+
+    void api.developer
+      .getWhatsAppIntegration(salonId)
+      .then((wa) => {
+        if (cancelled) return;
+        setWhatsapp(wa);
+        setWhatsappError(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setWhatsapp(null);
+        setWhatsappError(true);
       });
 
     return () => {
@@ -697,6 +730,40 @@ export default function SalonDetailModal({
                       {instagram.integrationAdded === false
                         ? t('developer.integrations.instagram.addInIntegrations')
                         : t('developer.integrations.instagram.manageInIntegrations')}
+                    </Link>
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-400">{t('developer.integrations.loading')}</p>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+                <h4 className="mb-2 text-sm font-semibold text-white">
+                  {t('integrations.whatsapp.title')}
+                </h4>
+                <p className="mb-3 text-xs text-gray-400">
+                  {t('developer.integrations.whatsapp.salonDetailHint')}
+                </p>
+                {whatsappError ? (
+                  <p className="text-sm text-red-400">
+                    {t('integrations.whatsapp.genericError')}
+                  </p>
+                ) : whatsapp ? (
+                  <>
+                    <p className="text-sm text-gray-200">
+                      {whatsapp.integrationAdded === false
+                        ? t('developer.integrations.whatsapp.notAdded')
+                        : whatsapp.connected
+                          ? t('developer.integrations.status.connected')
+                          : t('developer.integrations.status.notConnected')}
+                    </p>
+                    <Link
+                      to={`/developer/integrations?tab=whatsapp`}
+                      className="mt-3 inline-flex rounded-lg bg-violet-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-violet-600"
+                    >
+                      {whatsapp.integrationAdded === false
+                        ? t('developer.integrations.whatsapp.addInIntegrations')
+                        : t('developer.integrations.whatsapp.manageInIntegrations')}
                     </Link>
                   </>
                 ) : (

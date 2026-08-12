@@ -28,6 +28,8 @@ function mapWhatsAppErrorCode(
       return t('integrations.whatsapp.wabaMismatch');
     case 'WHATSAPP_PHONE_NUMBER_IN_USE':
       return t('integrations.whatsapp.phoneNumberInUse');
+    case 'WHATSAPP_REMOVE_REQUIRES_CONFIRM':
+      return t('developer.integrations.whatsapp.removeConfirmConnected');
     default:
       return t('integrations.whatsapp.genericError');
   }
@@ -55,6 +57,11 @@ export default function WhatsAppIntegrationsTab({ refreshKey = 0 }: WhatsAppInte
   );
   const [disconnectSubmitting, setDisconnectSubmitting] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
+
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<DeveloperWhatsAppIntegration | null>(null);
+  const [removeSubmitting, setRemoveSubmitting] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   const [preparingSalonId, setPreparingSalonId] = useState<string | null>(null);
   const [prepareErrors, setPrepareErrors] = useState<Record<string, string>>({});
@@ -119,6 +126,28 @@ export default function WhatsAppIntegrationsTab({ refreshKey = 0 }: WhatsAppInte
       }
     } finally {
       setDisconnectSubmitting(false);
+    }
+  }
+
+  async function handleRemove() {
+    if (!removeTarget || removeSubmitting) return;
+    setRemoveSubmitting(true);
+    setRemoveError(null);
+    try {
+      await api.developer.removeWhatsApp(removeTarget.salonId, {
+        confirmConnected: removeTarget.requiresRemoveConfirmation === true,
+      });
+      setRemoveOpen(false);
+      setRemoveTarget(null);
+      loadIntegrations();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setRemoveError(mapWhatsAppErrorCode(err.code, t));
+      } else {
+        setRemoveError(t('integrations.whatsapp.genericError'));
+      }
+    } finally {
+      setRemoveSubmitting(false);
     }
   }
 
@@ -198,6 +227,11 @@ export default function WhatsAppIntegrationsTab({ refreshKey = 0 }: WhatsAppInte
               setDisconnectTarget(integration);
               setDisconnectOpen(true);
             }}
+            onRemove={() => {
+              setRemoveError(null);
+              setRemoveTarget(integration);
+              setRemoveOpen(true);
+            }}
           />
         ))}
       </div>
@@ -257,6 +291,56 @@ export default function WhatsAppIntegrationsTab({ refreshKey = 0 }: WhatsAppInte
               {t('integrations.whatsapp.disconnect')}
             </button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={removeOpen}
+        onClose={() => {
+          if (removeSubmitting) return;
+          setRemoveOpen(false);
+          setRemoveTarget(null);
+          setRemoveError(null);
+        }}
+        title={t('developer.integrations.whatsapp.remove')}
+      >
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          {t('developer.integrations.whatsapp.removeConfirm').replace(
+            '{salonName}',
+            removeTarget?.salonName ?? '',
+          )}
+        </p>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+          {removeTarget?.requiresRemoveConfirmation
+            ? t('developer.integrations.whatsapp.removeConfirmConnected')
+            : t('developer.integrations.whatsapp.removeConfirmHint')}
+        </p>
+        {removeError ? (
+          <p className="mt-3 text-sm text-red-600 dark:text-red-400">{removeError}</p>
+        ) : null}
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={removeSubmitting}
+            onClick={() => {
+              setRemoveOpen(false);
+              setRemoveTarget(null);
+              setRemoveError(null);
+            }}
+          >
+            {t('common.cancel')}
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={removeSubmitting}
+            onClick={() => void handleRemove()}
+          >
+            {removeSubmitting
+              ? t('developer.integrations.whatsapp.removing')
+              : t('developer.integrations.whatsapp.removeAction')}
+          </button>
         </div>
       </Modal>
     </>

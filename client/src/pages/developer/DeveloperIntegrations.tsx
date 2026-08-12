@@ -27,6 +27,8 @@ export default function DeveloperIntegrations() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [instagramAdding, setInstagramAdding] = useState(false);
   const [instagramAddError, setInstagramAddError] = useState('');
+  const [whatsappAdding, setWhatsappAdding] = useState(false);
+  const [whatsappAddError, setWhatsappAddError] = useState('');
 
   const { connecting, connectError, connect, updateMetadata, clearConnectError } =
     useDeveloperTelegramConnect();
@@ -79,6 +81,24 @@ export default function DeveloperIntegrations() {
     }
   }
 
+  async function handleAddWhatsApp(salonId: string) {
+    setWhatsappAdding(true);
+    setWhatsappAddError('');
+    try {
+      await api.developer.prepareWhatsApp(salonId);
+      setRefreshKey((key) => key + 1);
+      if (activeTab !== 'whatsapp') {
+        setSearchParams({ tab: 'whatsapp' });
+      }
+      return true;
+    } catch {
+      setWhatsappAddError(t('integrations.whatsapp.genericError'));
+      return false;
+    } finally {
+      setWhatsappAdding(false);
+    }
+  }
+
   function handleAddSuccess() {
     setRefreshKey((key) => key + 1);
   }
@@ -86,11 +106,13 @@ export default function DeveloperIntegrations() {
   function clearErrors() {
     clearConnectError();
     setInstagramAddError('');
+    setWhatsappAddError('');
   }
 
-  const modalBusy = connecting || instagramAdding;
-  const modalError = connectError || instagramAddError;
-  const initialChannel = activeTab === 'instagram' ? 'instagram' : 'telegram';
+  const modalBusy = connecting || instagramAdding || whatsappAdding;
+  const modalError = connectError || instagramAddError || whatsappAddError;
+  const initialChannel =
+    activeTab === 'instagram' ? 'instagram' : activeTab === 'whatsapp' ? 'whatsapp' : 'telegram';
 
   return (
     <div className="w-full min-w-0 max-w-full space-y-4 overflow-x-clip animate-fade-in">
@@ -136,6 +158,7 @@ export default function DeveloperIntegrations() {
         connectError={modalError}
         onConnectTelegram={handleCreateConnect}
         onAddInstagram={handleAddInstagram}
+        onAddWhatsApp={handleAddWhatsApp}
         onClearError={clearErrors}
         onSuccess={handleAddSuccess}
       />

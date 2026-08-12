@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
-import type { DeveloperInstagramIntegration, DeveloperSalon } from '@/types';
+import type {
+  DeveloperInstagramIntegration,
+  DeveloperSalon,
+  DeveloperWhatsAppIntegration,
+} from '@/types';
 
-type AddChannel = 'telegram' | 'instagram';
+type AddChannel = 'telegram' | 'instagram' | 'whatsapp';
 
 interface AddIntegrationModalProps {
   open: boolean;
@@ -17,6 +21,7 @@ interface AddIntegrationModalProps {
     token: string;
   }) => Promise<boolean>;
   onAddInstagram: (salonId: string) => Promise<boolean>;
+  onAddWhatsApp: (salonId: string) => Promise<boolean>;
   onClearError: () => void;
   onSuccess: () => void;
 }
@@ -29,6 +34,7 @@ export default function AddIntegrationModal({
   connectError,
   onConnectTelegram,
   onAddInstagram,
+  onAddWhatsApp,
   onClearError,
   onSuccess,
 }: AddIntegrationModalProps) {
@@ -40,6 +46,9 @@ export default function AddIntegrationModal({
   const [salons, setSalons] = useState<DeveloperSalon[]>([]);
   const [instagramIntegrations, setInstagramIntegrations] = useState<
     DeveloperInstagramIntegration[]
+  >([]);
+  const [whatsappIntegrations, setWhatsappIntegrations] = useState<
+    DeveloperWhatsAppIntegration[]
   >([]);
   const [selectedSalonId, setSelectedSalonId] = useState('');
   const [loadingSalons, setLoadingSalons] = useState(false);
@@ -57,19 +66,34 @@ export default function AddIntegrationModal({
   }, [open, initialChannel, onClearError]);
 
   useEffect(() => {
-    if (!open || channel !== 'instagram') return;
+    if (!open || (channel !== 'instagram' && channel !== 'whatsapp')) return;
     let cancelled = false;
     setLoadingSalons(true);
     setLocalError('');
-    Promise.all([api.developer.getSalons(), api.developer.getInstagramIntegrations()])
-      .then(([salonRows, igRows]) => {
+    setSelectedSalonId('');
+
+    const load =
+      channel === 'instagram'
+        ? Promise.all([api.developer.getSalons(), api.developer.getInstagramIntegrations()])
+        : Promise.all([api.developer.getSalons(), api.developer.getWhatsAppIntegrations()]);
+
+    load
+      .then(([salonRows, integrationRows]) => {
         if (cancelled) return;
         setSalons(salonRows.filter((s) => s.active));
-        setInstagramIntegrations(igRows);
+        if (channel === 'instagram') {
+          setInstagramIntegrations(integrationRows as DeveloperInstagramIntegration[]);
+        } else {
+          setWhatsappIntegrations(integrationRows as DeveloperWhatsAppIntegration[]);
+        }
       })
       .catch(() => {
         if (cancelled) return;
-        setLocalError(t('developer.integrations.instagram.genericError'));
+        setLocalError(
+          channel === 'instagram'
+            ? t('developer.integrations.instagram.genericError')
+            : t('integrations.whatsapp.genericError'),
+        );
       })
       .finally(() => {
         if (!cancelled) setLoadingSalons(false);
@@ -80,17 +104,31 @@ export default function AddIntegrationModal({
   }, [open, channel, t]);
 
   const eligibleSalons = useMemo(() => {
-    const added = new Set(
-      instagramIntegrations
-        .filter((row) => row.integrationAdded !== false)
-        .map((row) => row.salonId),
-    );
-    // List API only returns added salons; treat all returned as added.
-    for (const row of instagramIntegrations) {
-      added.add(row.salonId);
+    if (channel === 'instagram') {
+      const added = new Set(
+        instagramIntegrations
+          .filter((row) => row.integrationAdded !== false)
+          .map((row) => row.salonId),
+      );
+      // List API only returns added salons; treat all returned as added.
+      for (const row of instagramIntegrations) {
+        added.add(row.salonId);
+      }
+      return salons.filter((salon) => !added.has(salon.id));
     }
-    return salons.filter((salon) => !added.has(salon.id));
-  }, [salons, instagramIntegrations]);
+    if (channel === 'whatsapp') {
+      const added = new Set(
+        whatsappIntegrations
+          .filter((row) => row.integrationAdded !== false)
+          .map((row) => row.salonId),
+      );
+      for (const row of whatsappIntegrations) {
+        added.add(row.salonId);
+      }
+      return salons.filter((salon) => !added.has(salon.id));
+    }
+    return [];
+  }, [channel, salons, instagramIntegrations, whatsappIntegrations]);
 
   if (!open) return null;
 
@@ -117,7 +155,10 @@ export default function AddIntegrationModal({
     }
 
     if (!selectedSalonId) return;
-    const success = await onAddInstagram(selectedSalonId);
+    const success =
+      channel === 'instagram'
+        ? await onAddInstagram(selectedSalonId)
+        : await onAddWhatsApp(selectedSalonId);
     if (success) {
       setSelectedSalonId('');
       onSuccess();
@@ -126,9 +167,35 @@ export default function AddIntegrationModal({
   }
 
   const telegramReady = salonName.trim().length > 0 && token.trim().length > 0;
-  const instagramReady = selectedSalonId.length > 0 && !loadingSalons;
+  const salonPickerReady = selectedSalonId.length > 0 && !loadingSalons;
   const submitDisabled =
-    connecting || (channel === 'telegram' ? !telegramReady : !instagramReady);
+    connecting ||
+    (channel === 'telegram' ? !telegramReady : !salonPickerReady);
+
+  const pickerSelectLabel =
+    channel === 'whatsapp'
+      ? t('developer.integrations.whatsapp.selectSalon')
+      : t('developer.integrations.instagram.selectSalon');
+  const pickerEmptyHint =
+    channel === 'whatsapp'
+      ? t('developer.integrations.whatsapp.noEligibleSalons')
+      : t('developer.integrations.instagram.noEligibleSalons');
+  const pickerHint =
+    channel === 'whatsapp'
+      ? t('developer.integrations.whatsapp.addHint')
+      : t('developer.integrations.instagram.addHint');
+  const submitLabel =
+    channel === 'instagram'
+      ? t('developer.integrations.instagram.add')
+      : channel === 'whatsapp'
+        ? t('developer.integrations.whatsapp.add')
+        : t('common.connect');
+  const submittingLabel =
+    channel === 'instagram'
+      ? t('developer.integrations.instagram.adding')
+      : channel === 'whatsapp'
+        ? t('developer.integrations.whatsapp.adding')
+        : t('common.connecting');
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
@@ -155,6 +222,7 @@ export default function AddIntegrationModal({
             >
               <option value="telegram">{t('developer.integrations.tabs.telegram')}</option>
               <option value="instagram">{t('developer.integrations.tabs.instagram')}</option>
+              <option value="whatsapp">{t('developer.integrations.tabs.whatsapp')}</option>
             </select>
           </div>
 
@@ -230,9 +298,7 @@ export default function AddIntegrationModal({
                 required
               >
                 <option value="">
-                  {loadingSalons
-                    ? t('developer.integrations.loading')
-                    : t('developer.integrations.instagram.selectSalon')}
+                  {loadingSalons ? t('developer.integrations.loading') : pickerSelectLabel}
                 </option>
                 {eligibleSalons.map((salon) => (
                   <option key={salon.id} value={salon.id}>
@@ -241,13 +307,9 @@ export default function AddIntegrationModal({
                 ))}
               </select>
               {!loadingSalons && eligibleSalons.length === 0 ? (
-                <p className="mt-1.5 text-xs text-gray-500">
-                  {t('developer.integrations.instagram.noEligibleSalons')}
-                </p>
+                <p className="mt-1.5 text-xs text-gray-500">{pickerEmptyHint}</p>
               ) : (
-                <p className="mt-1.5 text-xs text-gray-500">
-                  {t('developer.integrations.instagram.addHint')}
-                </p>
+                <p className="mt-1.5 text-xs text-gray-500">{pickerHint}</p>
               )}
             </div>
           )}
@@ -271,13 +333,7 @@ export default function AddIntegrationModal({
               disabled={submitDisabled}
               className="w-full min-h-[40px] rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
             >
-              {connecting
-                ? channel === 'instagram'
-                  ? t('developer.integrations.instagram.adding')
-                  : t('common.connecting')
-                : channel === 'instagram'
-                  ? t('developer.integrations.instagram.add')
-                  : t('common.connect')}
+              {connecting ? submittingLabel : submitLabel}
             </button>
           </div>
         </form>

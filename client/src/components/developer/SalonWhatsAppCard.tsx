@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MessageCircle } from 'lucide-react';
+import { MessageCircle, X } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
 import type { DeveloperWhatsAppIntegration } from '@/types';
 
@@ -8,6 +8,7 @@ interface SalonWhatsAppCardProps {
   onConnect: () => void;
   onReconnect: () => void;
   onDisconnect: () => void;
+  onRemove: () => void;
   onPrepare: () => Promise<boolean>;
   preparing?: boolean;
   prepareError?: string | null;
@@ -18,6 +19,7 @@ export default function SalonWhatsAppCard({
   onConnect,
   onReconnect,
   onDisconnect,
+  onRemove,
   onPrepare,
   preparing = false,
   prepareError = null,
@@ -28,6 +30,7 @@ export default function SalonWhatsAppCard({
   const webhookCallbackUrl = connection?.webhookCallbackUrl?.trim() || null;
   const webhookKey = connection?.webhookKey?.trim() || null;
   const needsPrepare = !connection;
+  const showDisconnect = connected === true;
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
 
   async function handleCopyWebhookUrl() {
@@ -51,8 +54,19 @@ export default function SalonWhatsAppCard({
   }
 
   return (
-    <div className="card flex w-full min-w-0 max-w-full flex-col p-4 sm:p-5">
-      <div className="flex items-start justify-between gap-3">
+    <div className="card relative flex w-full min-w-0 max-w-full flex-col p-4 sm:p-5">
+      <button
+        type="button"
+        className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+        disabled={preparing}
+        onClick={onRemove}
+        aria-label={t('developer.integrations.whatsapp.removeAria')}
+        title={t('developer.integrations.whatsapp.remove')}
+      >
+        <X className="h-4 w-4" />
+      </button>
+
+      <div className="flex items-start justify-between gap-3 pr-8">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-950/50">
             <MessageCircle className="h-5 w-5 text-violet-600 dark:text-violet-400" />
@@ -179,14 +193,16 @@ export default function SalonWhatsAppCard({
             >
               {t('integrations.whatsapp.reconnect')}
             </button>
-            <button
-              type="button"
-              className="btn-secondary w-full sm:w-auto"
-              disabled={preparing}
-              onClick={onDisconnect}
-            >
-              {t('integrations.whatsapp.disconnect')}
-            </button>
+            {showDisconnect ? (
+              <button
+                type="button"
+                className="btn-secondary w-full sm:w-auto"
+                disabled={preparing}
+                onClick={onDisconnect}
+              >
+                {t('integrations.whatsapp.disconnect')}
+              </button>
+            ) : null}
           </>
         ) : (
           <>

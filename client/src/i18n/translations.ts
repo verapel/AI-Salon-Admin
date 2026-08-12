@@ -669,8 +669,9 @@ const en = {
     'Manage Meta WhatsApp Cloud API credentials for each salon. Secrets are never shown after save.',
   'developer.integrations.whatsapp.notConnectedHint':
     'Connect Meta Cloud API credentials for this salon.',
-  'developer.integrations.whatsapp.emptyTitle': 'No salons',
-  'developer.integrations.whatsapp.emptyDesc': 'Create a salon first, then connect WhatsApp.',
+  'developer.integrations.whatsapp.emptyTitle': 'No WhatsApp integrations',
+  'developer.integrations.whatsapp.emptyDesc':
+    'Use Add Integration to enable WhatsApp for a salon. The salon itself is never deleted.',
   'developer.integrations.whatsapp.webhookCallbackUrl': 'Webhook callback URL',
   'developer.integrations.whatsapp.webhookCopy': 'Copy',
   'developer.integrations.whatsapp.webhookCopied': 'Copied',
@@ -685,6 +686,28 @@ const en = {
   'developer.integrations.whatsapp.preparing': 'Preparing...',
   'developer.integrations.whatsapp.prepared': 'WhatsApp prepared',
   'developer.integrations.whatsapp.prepareFailed': 'Failed to prepare WhatsApp',
+  'developer.integrations.whatsapp.manageInIntegrations': 'Manage in Integrations',
+  'developer.integrations.whatsapp.salonDetailHint':
+    'WhatsApp Cloud connection for this salon. Credentials stay on the server.',
+  'developer.integrations.whatsapp.notAdded': 'WhatsApp is not added',
+  'developer.integrations.whatsapp.addInIntegrations': 'Add in Integrations',
+  'developer.integrations.whatsapp.remove': 'Remove WhatsApp',
+  'developer.integrations.whatsapp.removeAria': 'Remove WhatsApp for this salon',
+  'developer.integrations.whatsapp.removeAction': 'Remove',
+  'developer.integrations.whatsapp.removing': 'Removing...',
+  'developer.integrations.whatsapp.removeConfirm':
+    'Remove WhatsApp for salon “{salonName}”?',
+  'developer.integrations.whatsapp.removeConfirmHint':
+    'This removes WhatsApp integration from this salon. The salon is not deleted. Clients, staff, services, appointments, and reminders are not deleted. You can add WhatsApp again later.',
+  'developer.integrations.whatsapp.removeConfirmConnected':
+    'WhatsApp has stored credentials. This will clear local WhatsApp credentials and remove WhatsApp from the integrations list. The salon, clients, staff, services, appointments, and reminders are not deleted. You can add WhatsApp again later.',
+  'developer.integrations.whatsapp.add': 'Add WhatsApp',
+  'developer.integrations.whatsapp.adding': 'Adding...',
+  'developer.integrations.whatsapp.selectSalon': 'Select a salon',
+  'developer.integrations.whatsapp.addHint':
+    'Adds WhatsApp to this salon’s integrations list. Connect Meta credentials afterward.',
+  'developer.integrations.whatsapp.noEligibleSalons':
+    'Every active salon already has WhatsApp added.',
   'developer.integrations.instagram.description':
     'Connect Instagram Professional Accounts for each salon via Meta Instagram Login. Secrets are never shown in the browser.',
   'developer.integrations.instagram.notConnectedHint':
@@ -1503,8 +1526,9 @@ const ru: Record<TranslationKey, string> = {
     'Управляйте учётными данными Meta WhatsApp Cloud API для каждого салона. Секреты после сохранения не показываются.',
   'developer.integrations.whatsapp.notConnectedHint':
     'Подключите учётные данные Meta Cloud API для этого салона.',
-  'developer.integrations.whatsapp.emptyTitle': 'Нет салонов',
-  'developer.integrations.whatsapp.emptyDesc': 'Сначала создайте салон, затем подключите WhatsApp.',
+  'developer.integrations.whatsapp.emptyTitle': 'Нет интеграций WhatsApp',
+  'developer.integrations.whatsapp.emptyDesc':
+    'Используйте «Добавить интеграцию», чтобы включить WhatsApp для салона. Салон при этом не удаляется.',
   'developer.integrations.whatsapp.webhookCallbackUrl': 'Webhook callback URL',
   'developer.integrations.whatsapp.webhookCopy': 'Копировать',
   'developer.integrations.whatsapp.webhookCopied': 'Скопировано',
@@ -1519,6 +1543,28 @@ const ru: Record<TranslationKey, string> = {
   'developer.integrations.whatsapp.preparing': 'Подготовка...',
   'developer.integrations.whatsapp.prepared': 'WhatsApp подготовлен',
   'developer.integrations.whatsapp.prepareFailed': 'Не удалось подготовить WhatsApp',
+  'developer.integrations.whatsapp.manageInIntegrations': 'Управление в Integrations',
+  'developer.integrations.whatsapp.salonDetailHint':
+    'Подключение WhatsApp Cloud для этого салона. Секреты хранятся только на сервере.',
+  'developer.integrations.whatsapp.notAdded': 'WhatsApp не добавлен',
+  'developer.integrations.whatsapp.addInIntegrations': 'Добавить в Интеграциях',
+  'developer.integrations.whatsapp.remove': 'Убрать WhatsApp',
+  'developer.integrations.whatsapp.removeAria': 'Убрать WhatsApp для этого салона',
+  'developer.integrations.whatsapp.removeAction': 'Убрать',
+  'developer.integrations.whatsapp.removing': 'Убираем...',
+  'developer.integrations.whatsapp.removeConfirm':
+    'Убрать WhatsApp для салона «{salonName}»?',
+  'developer.integrations.whatsapp.removeConfirmHint':
+    'Это убирает интеграцию WhatsApp у салона. Салон не удаляется. Клиенты, сотрудники, услуги, записи и напоминания не удаляются. WhatsApp можно добавить снова позже.',
+  'developer.integrations.whatsapp.removeConfirmConnected':
+    'Для WhatsApp сохранены учётные данные. Это очистит локальные данные WhatsApp и уберёт его из списка интеграций. Салон, клиенты, сотрудники, услуги, записи и напоминания не удаляются. WhatsApp можно добавить снова позже.',
+  'developer.integrations.whatsapp.add': 'Добавить WhatsApp',
+  'developer.integrations.whatsapp.adding': 'Добавляем...',
+  'developer.integrations.whatsapp.selectSalon': 'Выберите салон',
+  'developer.integrations.whatsapp.addHint':
+    'Добавляет WhatsApp в список интеграций салона. Подключите учётные данные Meta после этого.',
+  'developer.integrations.whatsapp.noEligibleSalons':
+    'У всех активных салонов WhatsApp уже добавлен.',
   'developer.integrations.instagram.description':
     'Подключайте Instagram Professional Account для каждого салона через Meta Instagram Login. Секреты в браузере не показываются.',
   'developer.integrations.instagram.notConnectedHint':
@@ -2329,8 +2375,9 @@ const hy: Record<TranslationKey, string> = {
     'Կառավարեք Meta WhatsApp Cloud API տվյալները յուրաքանչյուր սրահի համար։ Գաղտնիքները պահելուց հետո չեն ցուցադրվում։',
   'developer.integrations.whatsapp.notConnectedHint':
     'Միացրեք Meta Cloud API տվյալները այս սրահի համար։',
-  'developer.integrations.whatsapp.emptyTitle': 'Սրահներ չկան',
-  'developer.integrations.whatsapp.emptyDesc': 'Նախ ստեղծեք սրահ, ապա միացրեք WhatsApp։',
+  'developer.integrations.whatsapp.emptyTitle': 'WhatsApp ինտեգրումներ չկան',
+  'developer.integrations.whatsapp.emptyDesc':
+    'Օգտագործեք «Ավելացնել ինտեգրում»՝ սրահի համար WhatsApp միացնելու համար։ Սրահը չի ջնջվում։',
   'developer.integrations.whatsapp.webhookCallbackUrl': 'Webhook callback URL',
   'developer.integrations.whatsapp.webhookCopy': 'Պատճենել',
   'developer.integrations.whatsapp.webhookCopied': 'Պատճենված է',
@@ -2345,6 +2392,28 @@ const hy: Record<TranslationKey, string> = {
   'developer.integrations.whatsapp.preparing': 'Պատրաստվում է...',
   'developer.integrations.whatsapp.prepared': 'WhatsApp-ը պատրաստ է',
   'developer.integrations.whatsapp.prepareFailed': 'Չհաջողվեց պատրաստել WhatsApp',
+  'developer.integrations.whatsapp.manageInIntegrations': 'Կառավարել Integrations-ում',
+  'developer.integrations.whatsapp.salonDetailHint':
+    'WhatsApp Cloud միացում այս սրահի համար։ Գաղտնիքները պահվում են միայն սերվերում։',
+  'developer.integrations.whatsapp.notAdded': 'WhatsApp-ը ավելացված չէ',
+  'developer.integrations.whatsapp.addInIntegrations': 'Ավելացնել Integrations-ում',
+  'developer.integrations.whatsapp.remove': 'Հանել WhatsApp',
+  'developer.integrations.whatsapp.removeAria': 'Հանել WhatsApp այս սրահի համար',
+  'developer.integrations.whatsapp.removeAction': 'Հանել',
+  'developer.integrations.whatsapp.removing': 'Հանվում է...',
+  'developer.integrations.whatsapp.removeConfirm':
+    'Հանե՞լ WhatsApp-ը «{salonName}» սրահի համար։',
+  'developer.integrations.whatsapp.removeConfirmHint':
+    'Սա հանում է WhatsApp ինտեգրումը այս սրահից։ Սրահը չի ջնջվում։ Հաճախորդները, աշխատակիցները, ծառայությունները, գրանցումները և հիշեցումները չեն ջնջվում։ WhatsApp-ը կարող եք կրկին ավելացնել։',
+  'developer.integrations.whatsapp.removeConfirmConnected':
+    'WhatsApp-ի համար պահված են տվյալներ։ Սա կմաքրի տեղական WhatsApp տվյալները և կհանի այն ինտեգրումների ցանկից։ Սրահը, հաճախորդները, աշխատակիցները, ծառայությունները, գրանցումները և հիշեցումները չեն ջնջվում։ WhatsApp-ը կարող եք կրկին ավելացնել։',
+  'developer.integrations.whatsapp.add': 'Ավելացնել WhatsApp',
+  'developer.integrations.whatsapp.adding': 'Ավելացվում է...',
+  'developer.integrations.whatsapp.selectSalon': 'Ընտրեք սրահ',
+  'developer.integrations.whatsapp.addHint':
+    'Ավելացնում է WhatsApp-ը սրահի ինտեգրումների ցանկում։ Meta տվյալները միացրեք հետո։',
+  'developer.integrations.whatsapp.noEligibleSalons':
+    'Բոլոր ակտիվ սրահներն արդեն ունեն WhatsApp։',
   'developer.integrations.instagram.description':
     'Միացրեք Instagram Professional Account-ը ըստ սրահի՝ Meta Instagram Login-ով։ Գաղտնիքները բրաուզերում չեն ցուցադրվում։',
   'developer.integrations.instagram.notConnectedHint':

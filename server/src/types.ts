@@ -180,7 +180,8 @@ export type ChannelEventProcessingStatus =
 export interface WhatsAppBusinessConnectionPublic {
   id: string;
   salonId: string;
-  integrationId: string;
+  /** Null when connection shell is detached from registry after remove. */
+  integrationId: string | null;
   provider: WhatsAppCloudProvider;
   businessAccountId: string | null;
   phoneNumberId: string | null;
@@ -218,6 +219,16 @@ export interface WhatsAppConnectRequest {
 export interface WhatsAppIntegrationResponse {
   connected: boolean;
   connection: WhatsAppBusinessConnectionPublic | null;
+  /**
+   * True when WhatsApp is visible for this salon:
+   * salon_integrations(provider=whatsapp) OR meaningful connection (orphan-safe).
+   */
+  integrationAdded: boolean;
+  /**
+   * True when any local credential material is stored and remove would clear it.
+   * Conservative (complete or partial triples). Never exposes contents.
+   */
+  requiresRemoveConfirmation: boolean;
 }
 
 /** IG-1 Instagram connection status (connection table). */

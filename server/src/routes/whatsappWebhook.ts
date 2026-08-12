@@ -49,7 +49,8 @@ const UUID_RE =
 type ConnectionRow = {
   id: string;
   salon_id: string;
-  integration_id: string;
+  /** Null when shell is detached after WhatsApp remove (WA-UI-1A). */
+  integration_id: string | null;
   phone_number_id: string | null;
   webhook_key: string;
   app_secret_ciphertext: string | null;
@@ -124,6 +125,14 @@ async function loadRoutedConnection(webhookKey: string): Promise<RoutedConnectio
   if (!connection) return null;
 
   const conn = connection as ConnectionRow;
+
+  // Detached shell (registry removed): fail closed — do not route webhooks.
+  if (
+    typeof conn.integration_id !== 'string' ||
+    conn.integration_id.trim().length === 0
+  ) {
+    return null;
+  }
 
   const { data: integration, error: integrationError } = await (supabase as any)
     .from('salon_integrations')

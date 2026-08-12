@@ -24,6 +24,10 @@ import type {
   WhatsAppIntegrationResponse,
 } from '../types.js';
 import { buildWhatsAppWebhookCallbackUrl } from '../lib/publicAppUrl.js';
+import {
+  hasAnyWhatsAppCredentialMaterial,
+  isMeaningfulWhatsAppConnectionPresence,
+} from '../lib/whatsappDeveloperVisibility.js';
 
 const router = Router();
 
@@ -88,7 +92,7 @@ const CONNECTION_METADATA_SELECT = `
 type ConnectionMetadataRow = {
   id: string;
   salon_id: string;
-  integration_id: string;
+  integration_id: string | null;
   provider: WhatsAppCloudProvider;
   business_account_id: string | null;
   phone_number_id: string | null;
@@ -295,6 +299,7 @@ async function loadCredentialFlags(salonId: string): Promise<{
   isAccessTokenStored: boolean;
   isAppSecretStored: boolean;
   isVerifyTokenStored: boolean;
+  hasAnyCredentialMaterial: boolean;
 }> {
   const { data, error } = await supabase
     .from('whatsapp_business_connections')
@@ -324,6 +329,7 @@ async function loadCredentialFlags(salonId: string): Promise<{
       isAccessTokenStored: false,
       isAppSecretStored: false,
       isVerifyTokenStored: false,
+      hasAnyCredentialMaterial: false,
     };
   }
 
@@ -343,7 +349,34 @@ async function loadCredentialFlags(salonId: string): Promise<{
       row.verify_token_iv,
       row.verify_token_auth_tag
     ),
+    hasAnyCredentialMaterial: hasAnyWhatsAppCredentialMaterial(row),
   };
+}
+
+function toDeveloperWhatsAppPayload(
+  salon: SalonLookupRow,
+  payload: WhatsAppIntegrationResponse,
+) {
+  return {
+    salonId: salon.id,
+    salonName: salon.name,
+    slug: salon.slug,
+    connected: payload.connected,
+    connection: payload.connection,
+    integrationAdded: payload.integrationAdded,
+    requiresRemoveConfirmation: payload.requiresRemoveConfirmation,
+  };
+}
+
+async function hasWhatsAppIntegrationRow(salonId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('salon_integrations')
+    .select('id')
+    .eq('salon_id', salonId)
+    .eq('provider', WHATSAPP_PROVIDER)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return Boolean(data);
 }
 
 async function loadIntegrationStatus(salonId: string): Promise<string | null> {
@@ -362,6 +395,8 @@ async function loadIntegrationStatus(salonId: string): Promise<string | null> {
 }
 
 async function loadPublicIntegration(salonId: string): Promise<WhatsAppIntegrationResponse> {
+  const registryPresent = await hasWhatsAppIntegrationRow(salonId);
+
   const { data, error } = await supabase
     .from('whatsapp_business_connections')
     .select(CONNECTION_METADATA_SELECT)
@@ -373,20 +408,34 @@ async function loadPublicIntegration(salonId: string): Promise<WhatsAppIntegrati
   }
 
   if (!data) {
-    return { connected: false, connection: null };
+    return {
+      connected: false,
+      connection: null,
+      integrationAdded: registryPresent,
+      requiresRemoveConfirmation: false,
+    };
   }
 
   const row = data as unknown as ConnectionMetadataRow;
   const flags = await loadCredentialFlags(salonId);
-  const integrationStatus = await loadIntegrationStatus(salonId);
   const connection = mapConnectionPublic(row, flags);
+  const integrationStatus = await loadIntegrationStatus(salonId);
   const connected =
     integrationStatus === 'connected' &&
     flags.isAccessTokenStored &&
     flags.isAppSecretStored &&
     flags.isVerifyTokenStored;
+  const meaningful = isMeaningfulWhatsAppConnectionPresence(
+    connection,
+    flags.hasAnyCredentialMaterial,
+  );
 
-  return { connected, connection };
+  return {
+    connected,
+    connection,
+    integrationAdded: registryPresent || meaningful,
+    requiresRemoveConfirmation: flags.hasAnyCredentialMaterial,
+  };
 }
 
 /**
@@ -568,13 +617,71 @@ async function capturePriorConnectionState(salonId: string): Promise<{
 
 /**
  * GET /api/developer/integrations/whatsapp
- * All active salons with per-salon WhatsApp public status (no secrets).
+ * Active salons with WhatsApp registry OR a meaningful connection (orphan-safe).
+ * Non-mutating. Does not force every salon.
  */
 router.get('/', async (_req, res) => {
   try {
+    const { data: registryRows, error: registryError } = await supabase
+      .from('salon_integrations')
+      .select('salon_id')
+      .eq('provider', WHATSAPP_PROVIDER);
+
+    if (registryError) {
+      throw new Error(registryError.message);
+    }
+
+    const salonIdSet = new Set<string>(
+      ((registryRows ?? []) as Array<{ salon_id: string }>).map((r) => r.salon_id),
+    );
+
+    // Non-mutating orphan compatibility: include salons with meaningful connection rows.
+    const { data: connMeta, error: connMetaError } = await supabase
+      .from('whatsapp_business_connections')
+      .select(
+        `${CONNECTION_METADATA_SELECT}, access_token_ciphertext, access_token_iv, access_token_auth_tag, app_secret_ciphertext, app_secret_iv, app_secret_auth_tag, verify_token_ciphertext, verify_token_iv, verify_token_auth_tag`,
+      );
+
+    if (connMetaError) {
+      throw new Error(connMetaError.message);
+    }
+
+    for (const raw of ((connMeta ?? []) as unknown as Array<
+      ConnectionMetadataRow & CredentialTripleRow
+    >)) {
+      const hasMaterial = hasAnyWhatsAppCredentialMaterial(raw);
+      const flags = {
+        isAccessTokenStored: isCredentialTripleStored(
+          raw.access_token_ciphertext,
+          raw.access_token_iv,
+          raw.access_token_auth_tag,
+        ),
+        isAppSecretStored: isCredentialTripleStored(
+          raw.app_secret_ciphertext,
+          raw.app_secret_iv,
+          raw.app_secret_auth_tag,
+        ),
+        isVerifyTokenStored: isCredentialTripleStored(
+          raw.verify_token_ciphertext,
+          raw.verify_token_iv,
+          raw.verify_token_auth_tag,
+        ),
+      };
+      const connection = mapConnectionPublic(raw, flags);
+      if (isMeaningfulWhatsAppConnectionPresence(connection, hasMaterial)) {
+        salonIdSet.add(raw.salon_id);
+      }
+    }
+
+    const salonIds = [...salonIdSet];
+    if (salonIds.length === 0) {
+      return res.json([]);
+    }
+
     const { data: salons, error } = await supabase
       .from('salons')
       .select('id, name, slug, active')
+      .in('id', salonIds)
       .eq('active', true)
       .order('name');
 
@@ -592,6 +699,8 @@ router.get('/', async (_req, res) => {
         slug: salon.slug,
         connected: payload.connected,
         connection: payload.connection,
+        integrationAdded: payload.integrationAdded,
+        requiresRemoveConfirmation: payload.requiresRemoveConfirmation,
       });
     }
     return res.json(result);
@@ -617,6 +726,8 @@ router.get('/:salonId', async (req, res) => {
       slug: salon.slug,
       connected: payload.connected,
       connection: payload.connection,
+      integrationAdded: payload.integrationAdded,
+      requiresRemoveConfirmation: payload.requiresRemoveConfirmation,
     });
   } catch (err) {
     return handleRouteError(res, err, salonId || null, 'developer_get');
@@ -629,7 +740,8 @@ router.get('/:salonId', async (req, res) => {
  * Create minimal not_connected WhatsApp connection row so webhook_key / callback URL
  * exist before Meta credentials are available. No secrets, no Meta calls, no connect.
  *
- * INSERT-only when missing. Never upsert null credentials. Idempotent.
+ * INSERT when missing; reattach existing shell after remove (preserve webhook_key).
+ * Never upsert null credentials. Idempotent. No Meta.
  */
 router.post('/:salonId/prepare', async (req, res) => {
   const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
@@ -649,7 +761,7 @@ router.post('/:salonId/prepare', async (req, res) => {
 
     const { data: existing, error: existingError } = await supabase
       .from('whatsapp_business_connections')
-      .select('id')
+      .select('id, integration_id, webhook_key')
       .eq('salon_id', salon.id)
       .maybeSingle();
 
@@ -657,8 +769,9 @@ router.post('/:salonId/prepare', async (req, res) => {
       throw new Error(existingError.message);
     }
 
+    const now = new Date().toISOString();
+
     if (!existing) {
-      const now = new Date().toISOString();
       // Minimal INSERT only — DB defaults generate id + webhook_key.
       // Do NOT write null credential/Meta columns (never wipe via upsert).
       const { error: insertError } = await supabase.from('whatsapp_business_connections').insert({
@@ -673,10 +786,10 @@ router.post('/:salonId/prepare', async (req, res) => {
           throw new Error(insertError.message);
         }
 
-        // Concurrent prepare won the insert — re-read same-salon row only.
+        // Concurrent prepare won the insert — reattach same-salon row only.
         const { data: raced, error: raceError } = await supabase
           .from('whatsapp_business_connections')
-          .select('id')
+          .select('id, integration_id')
           .eq('salon_id', salon.id)
           .maybeSingle();
 
@@ -695,6 +808,41 @@ router.post('/:salonId/prepare', async (req, res) => {
             'WhatsApp connection storage is unavailable'
           );
         }
+
+        const racedRow = raced as { id: string; integration_id: string | null };
+        if (racedRow.integration_id !== integration.id) {
+          const { error: reattachRaceError } = await supabase
+            .from('whatsapp_business_connections')
+            .update({
+              integration_id: integration.id,
+              updated_at: now,
+            })
+            .eq('salon_id', salon.id)
+            .eq('id', racedRow.id);
+          if (reattachRaceError) {
+            throw new Error(reattachRaceError.message);
+          }
+        }
+      }
+    } else {
+      // WA-UI-1A: Remove→Add reattach — keep same shell + webhook_key; never rotate key.
+      const shell = existing as {
+        id: string;
+        integration_id: string | null;
+        webhook_key: string | null;
+      };
+      if (shell.integration_id !== integration.id) {
+        const { error: reattachError } = await supabase
+          .from('whatsapp_business_connections')
+          .update({
+            integration_id: integration.id,
+            updated_at: now,
+          })
+          .eq('salon_id', salon.id)
+          .eq('id', shell.id);
+        if (reattachError) {
+          throw new Error(reattachError.message);
+        }
       }
     }
 
@@ -712,13 +860,7 @@ router.post('/:salonId/prepare', async (req, res) => {
       );
     }
 
-    return res.status(200).json({
-      salonId: salon.id,
-      salonName: salon.name,
-      slug: salon.slug,
-      connected: payload.connected,
-      connection: payload.connection,
-    });
+    return res.status(200).json(toDeveloperWhatsAppPayload(salon, payload));
   } catch (err) {
     return handleRouteError(res, err, salonId || null, 'prepare');
   }
@@ -862,13 +1004,7 @@ router.post('/:salonId/connect', async (req, res) => {
     }
 
     if (payload?.connected && payload.connection) {
-      return res.status(200).json({
-        salonId: salon.id,
-        salonName: salon.name,
-        slug: salon.slug,
-        connected: payload.connected,
-        connection: payload.connection,
-      });
+      return res.status(200).json(toDeveloperWhatsAppPayload(salon, payload));
     }
 
     console.error('[whatsapp] public load unconfirmed after write; not demoting', {
@@ -944,15 +1080,72 @@ router.delete('/:salonId/disconnect', async (req, res) => {
     await markIntegrationNotConnected(salon.id);
 
     const payload = await loadPublicIntegration(salon.id);
-    return res.json({
-      salonId: salon.id,
-      salonName: salon.name,
-      slug: salon.slug,
-      connected: payload.connected,
-      connection: payload.connection,
-    });
+    return res.json(toDeveloperWhatsAppPayload(salon, payload));
   } catch (err) {
     return handleRouteError(res, err, salonId || null, 'disconnect');
+  }
+});
+
+/**
+ * DELETE /api/developer/integrations/whatsapp/:salonId/remove
+ * Atomic remove via remove_whatsapp_integration_owned RPC:
+ * - soft-clear WhatsApp credentials for this salon (disconnect-equivalent)
+ * - delete salon_integrations row for provider=whatsapp
+ * Keeps connection shell (webhook_key). Detaches integration_id before registry delete
+ * so ON DELETE CASCADE cannot destroy the shell (WA-UI-1A).
+ * Never deletes salon/business/messaging history.
+ * NEVER deletes salon / clients / staff / services / appointments / reminders
+ * NEVER touches Telegram / Instagram / Apple
+ * Idempotent. No Meta calls.
+ * If any credential material exists, requires confirmConnected=true.
+ */
+router.delete('/:salonId/remove', async (req, res) => {
+  const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
+  const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
+  if ('salonId' in body || 'salon_id' in body) {
+    return res.status(400).json({
+      error: 'salonId must not be provided in the request body',
+      code: 'WHATSAPP_INVALID_REQUEST',
+    });
+  }
+
+  try {
+    const salon = await requireActiveSalon(salonId);
+    if ('error' in salon) {
+      return res.status(404).json({ error: salon.error, code: 'WHATSAPP_CONNECTION_NOT_FOUND' });
+    }
+
+    const current = await loadPublicIntegration(salon.id);
+    if (current.requiresRemoveConfirmation && body.confirmConnected !== true) {
+      return res.status(409).json({
+        error: 'Confirm WhatsApp credential clear before removing the integration',
+        code: 'WHATSAPP_REMOVE_REQUIRES_CONFIRM',
+      });
+    }
+
+    const db = supabase as any;
+    const { data: rpcData, error: rpcError } = await db.rpc('remove_whatsapp_integration_owned', {
+      p_salon_id: salon.id,
+    });
+
+    if (rpcError) {
+      throw new Error(rpcError.message);
+    }
+
+    // Never delete from `salons` or other providers.
+    const payload = await loadPublicIntegration(salon.id);
+    return res.json({
+      ...toDeveloperWhatsAppPayload(salon, {
+        ...payload,
+        integrationAdded: false,
+        requiresRemoveConfirmation: false,
+      }),
+      removed: true,
+      atomic: true,
+      rpc: rpcData ?? null,
+    });
+  } catch (err) {
+    return handleRouteError(res, err, salonId || null, 'remove');
   }
 });
 
