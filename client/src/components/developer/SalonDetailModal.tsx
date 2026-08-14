@@ -5,16 +5,17 @@ import ConnectSalonTelegramModal from '@/components/developer/ConnectSalonTelegr
 import DeleteSalonModal from '@/components/developer/DeleteSalonModal';
 import IntegrationStatusBadge from '@/components/developer/IntegrationStatusBadge';
 import IntegrationHealthBadge from '@/components/developer/IntegrationHealthBadge';
-import SalonSubscriptionSection from '@/components/developer/SalonSubscriptionSection';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { api } from '@/lib/api';
 import type {
   DeveloperInstagramIntegration,
   DeveloperSalonDetail,
+  DeveloperSalonSubscription,
   DeveloperWhatsAppIntegration,
   SalonPermanentDeleteResponse,
   TelegramAdminChatCandidateResponse,
 } from '@/types';
+import type { TranslationKey } from '@/i18n/translations';
 
 interface SalonDetailModalProps {
   salonId: string | null;
@@ -84,6 +85,8 @@ export default function SalonDetailModal({
   const [instagramError, setInstagramError] = useState(false);
   const [whatsapp, setWhatsapp] = useState<DeveloperWhatsAppIntegration | null>(null);
   const [whatsappError, setWhatsappError] = useState(false);
+  const [subscription, setSubscription] = useState<DeveloperSalonSubscription | null>(null);
+  const [subscriptionError, setSubscriptionError] = useState(false);
 
   const [name, setName] = useState('');
   const [active, setActive] = useState(true);
@@ -193,6 +196,36 @@ export default function SalonDetailModal({
         if (cancelled) return;
         setWhatsapp(null);
         setWhatsappError(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, salonId]);
+
+  // SUB-1C2: Compact subscription summary only (full editor on /developer/subscriptions).
+  useEffect(() => {
+    if (!isOpen || !salonId) {
+      setSubscription(null);
+      setSubscriptionError(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSubscription(null);
+    setSubscriptionError(false);
+
+    void api.developer
+      .getSalonSubscription(salonId)
+      .then((sub) => {
+        if (cancelled) return;
+        setSubscription(sub);
+        setSubscriptionError(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSubscription(null);
+        setSubscriptionError(true);
       });
 
     return () => {
@@ -527,7 +560,50 @@ export default function SalonDetailModal({
               </div>
 
               {salonId && (
-                <SalonSubscriptionSection salonId={salonId} isOpen={isOpen} />
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+                  <h4 className="mb-3 text-sm font-semibold text-white">
+                    {t('developer.salons.subscription.title')}
+                  </h4>
+                  {subscriptionError ? (
+                    <p className="text-sm text-red-400">
+                      {t('developer.salons.subscription.loadError')}
+                    </p>
+                  ) : !subscription ? (
+                    <p className="text-sm text-gray-400">
+                      {t('developer.salons.subscription.loading')}
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-sm text-gray-200">
+                        {t('developer.salons.subscription.plan.standard')}
+                        {' · '}
+                        {t(
+                          `developer.salons.subscription.status.${subscription.status}` as TranslationKey
+                        )}
+                      </p>
+                      <p className="text-sm text-gray-300">
+                        {t('developer.salons.subscription.aiAutomation')}:{' '}
+                        {subscription.aiAutomationAllowed
+                          ? t('developer.salons.subscription.aiAllowed')
+                          : t('developer.salons.subscription.aiSuspended')}
+                      </p>
+                      {subscription.denyReason && (
+                        <p className="text-xs text-amber-300">
+                          {t(
+                            `developer.salons.subscription.deny.${subscription.denyReason}` as TranslationKey
+                          )}
+                        </p>
+                      )}
+                      <Link
+                        to={`/developer/subscriptions?salonId=${encodeURIComponent(salonId)}`}
+                        onClick={onClose}
+                        className="inline-flex w-full items-center justify-center rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-purple-500 sm:w-auto"
+                      >
+                        {t('developer.subscriptions.manage')}
+                      </Link>
+                    </div>
+                  )}
+                </div>
               )}
 
               <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">

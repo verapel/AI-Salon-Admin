@@ -18,6 +18,7 @@ import SetPassword from '@/pages/SetPassword';
 import Login from '@/pages/Login';
 import DeveloperHome from '@/pages/developer/DeveloperHome';
 import DeveloperSalons from '@/pages/developer/DeveloperSalons';
+import DeveloperSubscriptions from '@/pages/developer/DeveloperSubscriptions';
 import DeveloperIntegrations from '@/pages/developer/DeveloperIntegrations';
 import DeveloperHealth from '@/pages/developer/DeveloperHealth';
 
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="/developer" element={<DeveloperLayout />}>
           <Route index element={<DeveloperHome />} />
           <Route path="salons" element={<DeveloperSalons />} />
+          <Route path="subscriptions" element={<DeveloperSubscriptions />} />
           <Route path="integrations" element={<DeveloperIntegrations />} />
           <Route path="health" element={<DeveloperHealth />} />
         </Route>

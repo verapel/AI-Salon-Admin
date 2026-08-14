@@ -18,6 +18,10 @@ import type {
 interface SalonSubscriptionSectionProps {
   salonId: string;
   isOpen: boolean;
+  /** Called after a successful PATCH with the refreshed subscription snapshot. */
+  onUpdated?: (subscription: DeveloperSalonSubscription) => void;
+  /** When true, omit outer card chrome (parent provides container). */
+  embedded?: boolean;
 }
 
 const STATUS_OPTIONS: SalonSubscriptionStatus[] = [
@@ -77,6 +81,8 @@ function denyReasonKey(reason: SalonEntitlementDenyReason): TranslationKey {
 export default function SalonSubscriptionSection({
   salonId,
   isOpen,
+  onUpdated,
+  embedded = false,
 }: SalonSubscriptionSectionProps) {
   const { t } = useLanguage();
   const activeSalonIdRef = useRef(salonId);
@@ -188,6 +194,7 @@ export default function SalonSubscriptionSection({
       }
       populate(result.subscription);
       setSuccessMessage(t('developer.salons.subscription.updated'));
+      onUpdated?.(result.subscription);
     } catch (err) {
       if (activeSalonIdRef.current !== requestSalonId) return;
       setSaveError(
@@ -204,36 +211,53 @@ export default function SalonSubscriptionSection({
     'w-full rounded-lg border border-slate-600 bg-slate-800 px-3.5 py-2.5 text-sm text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20';
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-sm font-semibold text-white">
-          {t('developer.salons.subscription.title')}
-        </h4>
-        {subscription && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${statusBadgeClass(subscription.status)}`}
-            >
-              {t(`developer.salons.subscription.status.${subscription.status}` as TranslationKey)}
-            </span>
-            <span
-              className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                subscription.aiAutomationAllowed
-                  ? 'bg-green-900/60 text-green-300'
-                  : 'bg-amber-900/60 text-amber-300'
-              }`}
-            >
-              {subscription.aiAutomationAllowed
-                ? t('developer.salons.subscription.aiAllowed')
-                : t('developer.salons.subscription.aiSuspended')}
-            </span>
+    <div
+      className={
+        embedded
+          ? undefined
+          : 'rounded-lg border border-slate-700 bg-slate-800/50 p-4'
+      }
+    >
+      {!embedded && (
+        <>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-white">
+              {t('developer.salons.subscription.title')}
+            </h4>
+            {subscription && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${statusBadgeClass(subscription.status)}`}
+                >
+                  {t(
+                    `developer.salons.subscription.status.${subscription.status}` as TranslationKey
+                  )}
+                </span>
+                <span
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                    subscription.aiAutomationAllowed
+                      ? 'bg-green-900/60 text-green-300'
+                      : 'bg-amber-900/60 text-amber-300'
+                  }`}
+                >
+                  {subscription.aiAutomationAllowed
+                    ? t('developer.salons.subscription.aiAllowed')
+                    : t('developer.salons.subscription.aiSuspended')}
+                </span>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+          <p className="mb-4 text-xs leading-relaxed text-gray-400">
+            {t('developer.salons.subscription.explanation')}
+          </p>
+        </>
+      )}
 
-      <p className="mb-4 text-xs leading-relaxed text-gray-400">
-        {t('developer.salons.subscription.explanation')}
-      </p>
+      {embedded && (
+        <p className="mb-4 text-xs leading-relaxed text-gray-400">
+          {t('developer.salons.subscription.explanation')}
+        </p>
+      )}
 
       {loading && (
         <p className="text-sm text-gray-400">{t('developer.salons.subscription.loading')}</p>

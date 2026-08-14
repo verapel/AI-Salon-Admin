@@ -216,6 +216,15 @@ export interface UpdateDeveloperSalonSubscriptionResponse {
   code?: string;
 }
 
+/** SUB-1C2: Batch list row for developer subscriptions page. */
+export interface DeveloperSalonSubscriptionListItem {
+  salonId: string;
+  salonName: string;
+  salonActive: boolean;
+  subscription: DeveloperSalonSubscription | null;
+  loadError: boolean;
+}
+
 export interface SalonDeleteCounts {
   clients: number;
   staff: number;

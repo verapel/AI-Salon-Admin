@@ -17,6 +17,7 @@ import {
   getDeveloperSalonSubscription,
   isDeveloperSalonSubscriptionValidationError,
   isSalonEntitlementNotFoundError,
+  listDeveloperSalonSubscriptions,
   updateDeveloperSalonSubscription,
 } from '../lib/developerSalonSubscription.js';
 import type {
@@ -474,6 +475,26 @@ router.get('/salons', async (_req, res) => {
   );
 
   res.json(rows);
+});
+
+/**
+ * GET /api/developer/subscriptions
+ * SUB-1C2: All salons with safe subscription + entitlement snapshots.
+ * Per-salon load failures are isolated (loadError on that row).
+ */
+router.get('/subscriptions', async (_req, res) => {
+  try {
+    const rows = await listDeveloperSalonSubscriptions();
+    return res.json(rows);
+  } catch (err) {
+    console.error(
+      '[developer] list subscriptions error:',
+      err instanceof Error ? err.message : err,
+    );
+    return res
+      .status(500)
+      .json({ error: 'Could not load salon subscriptions', code: 'INTERNAL_ERROR' });
+  }
 });
 
 router.get('/salons/:id', async (req, res) => {

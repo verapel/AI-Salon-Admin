@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Building2, Plug, Activity, Sparkles, X } from 'lucide-react';
+import { LayoutDashboard, Building2, CreditCard, Plug, Activity, Sparkles, X } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { cn } from '@/lib/utils';
@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 const navItems: { to: string; icon: typeof LayoutDashboard; labelKey: TranslationKey; end?: boolean }[] = [
   { to: '/developer', icon: LayoutDashboard, labelKey: 'developer.nav.overview', end: true },
   { to: '/developer/salons', icon: Building2, labelKey: 'developer.nav.salons' },
+  { to: '/developer/subscriptions', icon: CreditCard, labelKey: 'developer.nav.subscriptions' },
   { to: '/developer/integrations', icon: Plug, labelKey: 'developer.nav.integrations' },
   { to: '/developer/health', icon: Activity, labelKey: 'developer.nav.health' },
 ];
@@ -15,6 +16,10 @@ const navItems: { to: string; icon: typeof LayoutDashboard; labelKey: Translatio
 const pageKeys: Record<string, { title: TranslationKey; subtitle: TranslationKey }> = {
   '/developer': { title: 'developer.home.title', subtitle: 'developer.home.subtitle' },
   '/developer/salons': { title: 'developer.salons.title', subtitle: 'developer.salons.subtitle' },
+  '/developer/subscriptions': {
+    title: 'developer.subscriptions.title',
+    subtitle: 'developer.subscriptions.subtitle',
+  },
   '/developer/integrations': { title: 'developer.integrations.title', subtitle: 'developer.integrations.subtitle' },
   '/developer/health': { title: 'developer.health.title', subtitle: 'developer.health.subtitle' },
 };

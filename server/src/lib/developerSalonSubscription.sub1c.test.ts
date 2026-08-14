@@ -226,11 +226,15 @@ describe('SUB-1C developer subscription (static source contracts)', () => {
     assert.doesNotMatch(index, /getSalonEntitlements|evaluateSalonEntitlement/);
   });
 
-  it('16. subscription UI exists in developer salon detail', () => {
-    assert.match(modal, /SalonSubscriptionSection/);
+  it('16. subscription editor exists; salon detail keeps compact summary (SUB-1C2)', () => {
+    // Full editor lives in SalonSubscriptionSection (opened from Subscriptions page).
     assert.match(section, /developer\.salons\.subscription\.title/);
     assert.match(section, /manualAiSuspension/);
     assert.match(section, /developerSuspended/);
+    // Salon detail shows compact summary + manage link, not the full editor.
+    assert.doesNotMatch(modal, /SalonSubscriptionSection/);
+    assert.match(modal, /developer\.subscriptions\.manage/);
+    assert.match(modal, /\/developer\/subscriptions\?salonId=/);
   });
 
   it('17. all deny reasons localized RU/EN/HY', () => {
@@ -250,9 +254,9 @@ describe('SUB-1C developer subscription (static source contracts)', () => {
     assert.match(translations, /Ручная приостановка ИИ/);
     assert.match(translations, /Would allow|Would deny|Messengers are not blocked/);
     assert.doesNotMatch(section, /Delete salon|Deactivate salon/);
-    // Salon active toggle remains on modal; subscription has its own suspension control
+    // Salon active toggle remains on modal; subscription editor has its own suspension control
     assert.match(modal, /developer\.salons\.active/);
-    assert.match(modal, /SalonSubscriptionSection/);
+    assert.match(section, /developerSuspended/);
   });
 
   it('19/20. no provider IDs in client DTO; exact salonId used', () => {

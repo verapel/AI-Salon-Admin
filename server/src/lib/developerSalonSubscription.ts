@@ -345,6 +345,62 @@ export async function updateDeveloperSalonSubscription(
   return toDeveloperSalonSubscriptionApiResponse(entitlements, updatedAt);
 }
 
+export type DeveloperSalonSubscriptionListItem = {
+  salonId: string;
+  salonName: string;
+  salonActive: boolean;
+  subscription: DeveloperSalonSubscriptionApiResponse | null;
+  loadError: boolean;
+};
+
+/**
+ * SUB-1C2: List all salons with safe subscription/entitlement snapshots.
+ * Per-salon failures become row.loadError=true (do not fail the whole list).
+ * Reuses getDeveloperSalonSubscription — no duplicated entitlement logic.
+ */
+export async function listDeveloperSalonSubscriptions(): Promise<
+  DeveloperSalonSubscriptionListItem[]
+> {
+  const { data, error } = await (supabase as any)
+    .from('salons')
+    .select('id, name, active')
+    .order('name');
+
+  if (error) {
+    console.error('[subscription] list salons failed', {
+      operation: 'developer_subscriptions_list',
+    });
+    throw new Error('Could not load salon subscriptions');
+  }
+
+  const salons = (data ?? []) as { id: string; name: string; active: boolean }[];
+
+  const rows = await Promise.all(
+    salons.map(async (salon): Promise<DeveloperSalonSubscriptionListItem> => {
+      try {
+        const subscription = await getDeveloperSalonSubscription(salon.id);
+        return {
+          salonId: salon.id,
+          salonName: salon.name,
+          salonActive: salon.active === true,
+          subscription,
+          loadError: false,
+        };
+      } catch {
+        return {
+          salonId: salon.id,
+          salonName: salon.name,
+          salonActive: salon.active === true,
+          subscription: null,
+          loadError: true,
+        };
+      }
+    }),
+  );
+
+  return rows;
+}
+
 export {
   isSalonEntitlementNotFoundError,
   SalonEntitlementNotFoundError,

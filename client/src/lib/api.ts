@@ -217,6 +217,10 @@ export const api = {
       request<import('@/types').DeveloperSalonSubscription>(
         `/developer/salons/${salonId}/subscription`
       ),
+    getSalonSubscriptions: () =>
+      request<import('@/types').DeveloperSalonSubscriptionListItem[]>(
+        '/developer/subscriptions'
+      ),
     updateSalonSubscription: (
       salonId: string,
       body: import('@/types').UpdateDeveloperSalonSubscriptionRequest
