@@ -1,6 +1,7 @@
 /**
  * SUB-1A: Neutral salon subscription read helper.
- * Does NOT enforce entitlements or gate messengers (that is SUB-1B / SUB-1D).
+ * Entitlement decisions live in salonEntitlement.ts (SUB-1B).
+ * Does NOT gate messengers (enforcement is a later stage).
  */
 
 import { supabase } from './supabase.js';

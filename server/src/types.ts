@@ -383,3 +383,64 @@ export interface DeveloperSalonSubscriptionPublic {
   lastPaymentStatus: string | null;
   usedMissingRowFallback: boolean;
 }
+
+/** SUB-1B: Explicit entitlement deny reasons (null when AI automation allowed). */
+export type SalonEntitlementDenyReason =
+  | 'salon_inactive'
+  | 'developer_suspended'
+  | 'trial_expired'
+  | 'subscription_past_due'
+  | 'subscription_expired'
+  | 'subscription_cancelled';
+
+export const SALON_ENTITLEMENT_DENY_REASONS: readonly SalonEntitlementDenyReason[] = [
+  'salon_inactive',
+  'developer_suspended',
+  'trial_expired',
+  'subscription_past_due',
+  'subscription_expired',
+  'subscription_cancelled',
+] as const;
+
+/**
+ * SUB-1B: Central AI / subscription entitlement snapshot.
+ * Derived in application code — not stored as ai_automation_enabled.
+ * No payment-provider identifiers.
+ */
+export interface SalonEntitlements {
+  salonId: string;
+  salonActive: boolean;
+  plan: string;
+  subscriptionStatus: SalonSubscriptionStatus;
+  trialEndsAt: string | null;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  developerSuspended: boolean;
+  aiAutomationAllowed: boolean;
+  denyReason: SalonEntitlementDenyReason | null;
+  usedMissingSubscriptionFallback: boolean;
+  /** Subscription table read failed; legacy active snapshot used (fail-safe). */
+  usedSubscriptionReadFailureFallback: boolean;
+  /** Salon table read failed; salonActive assumed true (fail-safe; not the same as not-found). */
+  usedSalonReadFailureFallback: boolean;
+}
+
+/**
+ * Safe developer DTO for subscription + derived entitlement (no provider linkage ids).
+ * Not wired to UI in SUB-1B.
+ */
+export interface DeveloperSalonEntitlementPublic {
+  salonId: string;
+  salonActive: boolean;
+  plan: string;
+  status: SalonSubscriptionStatus;
+  trialEndsAt: string | null;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  developerSuspended: boolean;
+  aiAutomationAllowed: boolean;
+  denyReason: SalonEntitlementDenyReason | null;
+  usedMissingSubscriptionFallback: boolean;
+}
