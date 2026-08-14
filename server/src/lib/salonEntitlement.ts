@@ -1,8 +1,9 @@
 /**
  * SUB-1B: Central salon subscription / AI entitlement helper.
  *
- * Pure evaluator + DB loader. NOT wired into Telegram / WhatsApp / Instagram /
- * Apple / reminders / appointment routes in this stage.
+ * Pure evaluator + DB loader.
+ * SUB-1D1: Telegram inbound uses getSalonEntitlements via telegramSubscriptionGate.
+ * Still NOT wired into WhatsApp / Instagram / Apple / reminders / appointment routes.
  */
 
 import { supabase } from './supabase.js';

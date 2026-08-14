@@ -210,7 +210,7 @@ describe('SUB-1C developer subscription (static source contracts)', () => {
     assert.doesNotMatch(section, /stripe|paddle|paypal/i);
   });
 
-  it('14. static: no runtime messenger / apple / reminder / appointment enforcement', () => {
+  it('14. static: no WhatsApp / Instagram / Apple / reminder / appointment enforcement (Telegram gated in SUB-1D1)', () => {
     const patterns = /getSalonEntitlements|evaluateSalonEntitlement|developerSalonSubscription|aiAutomationAllowed|developer_suspended/;
     assert.doesNotMatch(telegramBooking, patterns);
     assert.doesNotMatch(telegramBotManager, patterns);
@@ -222,8 +222,9 @@ describe('SUB-1C developer subscription (static source contracts)', () => {
     assert.doesNotMatch(reminders, patterns);
     assert.doesNotMatch(appointmentReminders, patterns);
     assert.doesNotMatch(appointments, /getSalonEntitlements|developerSalonSubscription/);
-    // index may import developer router only — must not call entitlement for bootstrap enforcement
-    assert.doesNotMatch(index, /getSalonEntitlements|evaluateSalonEntitlement/);
+    // Telegram inbound may call central entitlement via telegramSubscriptionGate only.
+    assert.match(index, /enforceTelegramAiAutomationGate|telegramSubscriptionGate/);
+    assert.doesNotMatch(index, /evaluateSalonEntitlement/);
   });
 
   it('16. subscription editor exists; salon detail keeps compact summary (SUB-1C2)', () => {

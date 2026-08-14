@@ -75,6 +75,7 @@ import {
   skipPendingRemindersForAppointment,
   syncAppointmentReminder,
 } from './lib/appointmentReminders.js';
+import { enforceTelegramAiAutomationGate } from './lib/telegramSubscriptionGate.js';
 
 const app = express();
 
@@ -1464,6 +1465,36 @@ registerTelegramPollingRestarter(restartTelegramPolling);
 
 async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Promise<void> {
         const botToken = resolveTelegramBotToken(ctx);
+
+        // SUB-1D1: salon-scoped AI automation gate (after ctx.salonId known).
+        // Blocks callbacks + booking FSM + OpenRouter + appointment mutations.
+        // Does NOT clear bookingState / manageState / birthdayState.
+        const inboundChatId: number | undefined =
+          update.callback_query?.message?.chat?.id ?? update.message?.chat?.id;
+        const inboundLanguageCode: string | undefined =
+          update.callback_query?.from?.language_code ?? update.message?.from?.language_code;
+        if (inboundChatId != null) {
+          const gate = await enforceTelegramAiAutomationGate({
+            salonId: ctx.salonId,
+            chatId: inboundChatId,
+            languageCode: inboundLanguageCode,
+            hasCallbackQuery: Boolean(update.callback_query),
+          });
+          if (!gate.proceed) {
+            if (update.callback_query?.id) {
+              await answerCallbackQuery(update.callback_query.id, botToken);
+            }
+            if (gate.sendCustomerMessage) {
+              await sendTelegramMessage(inboundChatId, gate.customerMessage, botToken);
+            }
+            return;
+          }
+        } else if (update.callback_query?.id) {
+          // Spinner safety even when chat id is missing (no entitlement / mutation).
+          await answerCallbackQuery(update.callback_query.id, botToken);
+          return;
+        }
+
         // Нажатие на inline-кнопку (услуга / дата / время)
         if (update.callback_query) {
           const cq = update.callback_query;
