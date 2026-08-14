@@ -323,3 +323,63 @@ export interface ChannelConversation {
   createdAt: string;
   updatedAt: string;
 }
+
+/** SUB-1A: Internal subscription lifecycle (distinct from salons.active). */
+export type SalonSubscriptionStatus =
+  | 'trial'
+  | 'active'
+  | 'past_due'
+  | 'expired'
+  | 'cancelled';
+
+export const SALON_SUBSCRIPTION_STATUSES: readonly SalonSubscriptionStatus[] = [
+  'trial',
+  'active',
+  'past_due',
+  'expired',
+  'cancelled',
+] as const;
+
+/** Internal DB row shape for salon_subscriptions (server-only). */
+export interface SalonSubscriptionRecord {
+  salonId: string;
+  plan: string;
+  status: SalonSubscriptionStatus;
+  trialEndsAt: string | null;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  developerSuspended: boolean;
+  /** Opaque provider name (e.g. future stripe). Not a secret. */
+  provider: string | null;
+  /** Server-only linkage; never send to owner/staff clients. */
+  providerCustomerId: string | null;
+  /** Server-only linkage; never send to owner/staff clients. */
+  providerSubscriptionId: string | null;
+  lastPaymentStatus: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /**
+   * True when no DB row existed and a legacy-safe active fallback was synthesized.
+   * SUB-1A: must not disable the salon. SUB-1B defines final entitlement.
+   */
+  usedMissingRowFallback: boolean;
+}
+
+/**
+ * Safe developer-facing subscription metadata (no payment secrets).
+ * Omits provider_customer_id / provider_subscription_id until SUB-1C needs them behind developer auth.
+ */
+export interface DeveloperSalonSubscriptionPublic {
+  salonId: string;
+  plan: string;
+  status: SalonSubscriptionStatus;
+  trialEndsAt: string | null;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  developerSuspended: boolean;
+  provider: string | null;
+  lastPaymentStatus: string | null;
+  usedMissingRowFallback: boolean;
+}
