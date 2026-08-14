@@ -112,14 +112,16 @@ describe('SUB-1A salon_subscriptions foundation (static + helpers)', () => {
     assert.doesNotMatch(helper, /aiAutomationAllowed|canUseAiAutomation/);
   });
 
-  it('7. developer public DTO omits provider linkage ids; no owner/staff/developer mutation APIs', () => {
+  it('7. developer public DTO omits provider linkage ids; no payment-provider mutation APIs', () => {
     const pub = toDeveloperSalonSubscriptionPublic(
       buildLegacyActiveSubscriptionFallback('s1'),
     );
     assert.equal('providerCustomerId' in pub, false);
     assert.equal('providerSubscriptionId' in pub, false);
     assert.match(helper, /toDeveloperSalonSubscriptionPublic/);
-    assert.doesNotMatch(developer, /router\.(post|patch|put|delete)\([^\)]*subscription/);
+    // SUB-1C adds developer salon subscription PATCH; payment-provider mutation stays forbidden.
+    assert.match(developer, /\/salons\/:salonId\/subscription/);
+    assert.doesNotMatch(developer, /stripe|paddle|paypal|billingPortal|checkout\.session/i);
     assert.doesNotMatch(helper, /router\.(post|patch|put|delete)/);
   });
 

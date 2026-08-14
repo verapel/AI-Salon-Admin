@@ -13,6 +13,12 @@ import {
   evaluateSalonDeleteProtection,
   isSalonUuid,
 } from '../lib/salonDelete.js';
+import {
+  getDeveloperSalonSubscription,
+  isDeveloperSalonSubscriptionValidationError,
+  isSalonEntitlementNotFoundError,
+  updateDeveloperSalonSubscription,
+} from '../lib/developerSalonSubscription.js';
 import type {
   IntegrationHealth,
   IntegrationStatus,
@@ -508,6 +514,79 @@ router.get('/salons/:id', async (req, res) => {
     owner,
     telegram: mapTelegramSummary((integrationRes.data as IntegrationRow | null) ?? null, row.slug),
   });
+});
+
+/**
+ * GET /api/developer/salons/:salonId/subscription
+ * SUB-1C: Safe subscription + derived entitlement (no provider linkage ids).
+ * Does not enforce messengers.
+ */
+router.get('/salons/:salonId/subscription', async (req, res) => {
+  const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
+  if (!salonId || !isSalonUuid(salonId)) {
+    return res.status(400).json({ error: 'Valid salon id is required', code: 'BAD_REQUEST' });
+  }
+
+  try {
+    const payload = await getDeveloperSalonSubscription(salonId);
+    return res.json(payload);
+  } catch (err) {
+    if (isSalonEntitlementNotFoundError(err)) {
+      return res.status(404).json({ error: 'Salon not found', code: 'SALON_NOT_FOUND' });
+    }
+    console.error(
+      '[developer] get subscription error:',
+      err instanceof Error ? err.message : err,
+    );
+    return res
+      .status(500)
+      .json({ error: 'Could not load salon subscription', code: 'INTERNAL_ERROR' });
+  }
+});
+
+/**
+ * PATCH /api/developer/salons/:salonId/subscription
+ * SUB-1C: Developer mutation of subscription fields. Recomputes entitlement via SUB-1B.
+ * Does not change salons.active. Does not enforce messengers.
+ */
+router.patch('/salons/:salonId/subscription', async (req, res) => {
+  const salonId = typeof req.params.salonId === 'string' ? req.params.salonId.trim() : '';
+  if (!salonId || !isSalonUuid(salonId)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Valid salon id is required',
+      code: 'BAD_REQUEST',
+    });
+  }
+
+  try {
+    const payload = await updateDeveloperSalonSubscription(salonId, req.body);
+    return res.json({ success: true, subscription: payload });
+  } catch (err) {
+    if (isDeveloperSalonSubscriptionValidationError(err)) {
+      return res.status(400).json({
+        success: false,
+        error: err.message,
+        code: 'VALIDATION_ERROR',
+      });
+    }
+    if (isSalonEntitlementNotFoundError(err)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Salon not found',
+        code: 'SALON_NOT_FOUND',
+      });
+    }
+    console.error(
+      '[developer] patch subscription error:',
+      err instanceof Error ? err.message : err,
+    );
+    return res.status(500).json({
+      success: false,
+      error: 'Could not update salon subscription',
+      code: 'INTERNAL_ERROR',
+    });
+  }
 });
 
 /**

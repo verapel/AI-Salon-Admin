@@ -5,6 +5,7 @@ import ConnectSalonTelegramModal from '@/components/developer/ConnectSalonTelegr
 import DeleteSalonModal from '@/components/developer/DeleteSalonModal';
 import IntegrationStatusBadge from '@/components/developer/IntegrationStatusBadge';
 import IntegrationHealthBadge from '@/components/developer/IntegrationHealthBadge';
+import SalonSubscriptionSection from '@/components/developer/SalonSubscriptionSection';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { api } from '@/lib/api';
 import type {
@@ -524,6 +525,10 @@ export default function SalonDetailModal({
                   <p className="mt-1 text-lg font-semibold text-white">{detail.counts.staff}</p>
                 </div>
               </div>
+
+              {salonId && (
+                <SalonSubscriptionSection salonId={salonId} isOpen={isOpen} />
+              )}
 
               <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
                 <h4 className="mb-3 text-sm font-semibold text-white">{t('developer.salons.telegramStatus')}</h4>

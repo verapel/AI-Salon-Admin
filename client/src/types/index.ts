@@ -165,6 +165,57 @@ export interface DeveloperSalonDetail {
   telegram: DeveloperSalonTelegramSummary;
 }
 
+/** SUB-1C: Subscription lifecycle statuses (matches server). */
+export type SalonSubscriptionStatus =
+  | 'trial'
+  | 'active'
+  | 'past_due'
+  | 'expired'
+  | 'cancelled';
+
+export type SalonEntitlementDenyReason =
+  | 'salon_inactive'
+  | 'developer_suspended'
+  | 'trial_expired'
+  | 'subscription_past_due'
+  | 'subscription_expired'
+  | 'subscription_cancelled';
+
+/** Browser-safe developer subscription + entitlement (no provider linkage ids). */
+export interface DeveloperSalonSubscription {
+  salonId: string;
+  plan: string;
+  status: SalonSubscriptionStatus;
+  trialEndsAt: string | null;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  developerSuspended: boolean;
+  aiAutomationAllowed: boolean;
+  denyReason: SalonEntitlementDenyReason | null;
+  usedMissingSubscriptionFallback: boolean;
+  usedSubscriptionReadFailureFallback: boolean;
+  usedSalonReadFailureFallback: boolean;
+  updatedAt: string | null;
+}
+
+export interface UpdateDeveloperSalonSubscriptionRequest {
+  plan?: 'standard';
+  status?: SalonSubscriptionStatus;
+  trialEndsAt?: string | null;
+  currentPeriodStart?: string | null;
+  currentPeriodEnd?: string | null;
+  cancelAtPeriodEnd?: boolean;
+  developerSuspended?: boolean;
+}
+
+export interface UpdateDeveloperSalonSubscriptionResponse {
+  success: boolean;
+  subscription: DeveloperSalonSubscription;
+  error?: string;
+  code?: string;
+}
+
 export interface SalonDeleteCounts {
   clients: number;
   staff: number;

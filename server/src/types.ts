@@ -444,3 +444,50 @@ export interface DeveloperSalonEntitlementPublic {
   denyReason: SalonEntitlementDenyReason | null;
   usedMissingSubscriptionFallback: boolean;
 }
+
+/**
+ * SUB-1C: Developer GET/PATCH `/subscription` response (browser-safe).
+ * Includes entitlement diagnostics; omits provider linkage ids and secrets.
+ */
+export interface DeveloperSalonSubscriptionApiResponse {
+  salonId: string;
+  plan: string;
+  status: SalonSubscriptionStatus;
+  trialEndsAt: string | null;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  developerSuspended: boolean;
+  aiAutomationAllowed: boolean;
+  denyReason: SalonEntitlementDenyReason | null;
+  usedMissingSubscriptionFallback: boolean;
+  usedSubscriptionReadFailureFallback: boolean;
+  usedSalonReadFailureFallback: boolean;
+  updatedAt: string | null;
+}
+
+/** SUB-1C: Allowed mutable fields for developer subscription PATCH. */
+export interface DeveloperSalonSubscriptionUpdateRequest {
+  plan?: string;
+  status?: SalonSubscriptionStatus;
+  trialEndsAt?: string | null;
+  currentPeriodStart?: string | null;
+  currentPeriodEnd?: string | null;
+  cancelAtPeriodEnd?: boolean;
+  developerSuspended?: boolean;
+}
+
+/** Current product plan catalog for SUB-1C (no invented tiers). */
+export const DEVELOPER_SALON_SUBSCRIPTION_PLANS = ['standard'] as const;
+export type DeveloperSalonSubscriptionPlan =
+  (typeof DEVELOPER_SALON_SUBSCRIPTION_PLANS)[number];
+
+export const DEVELOPER_SALON_SUBSCRIPTION_PATCH_FIELDS = [
+  'plan',
+  'status',
+  'trialEndsAt',
+  'currentPeriodStart',
+  'currentPeriodEnd',
+  'cancelAtPeriodEnd',
+  'developerSuspended',
+] as const;

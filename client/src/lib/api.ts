@@ -213,6 +213,21 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify(body),
       }),
+    getSalonSubscription: (salonId: string) =>
+      request<import('@/types').DeveloperSalonSubscription>(
+        `/developer/salons/${salonId}/subscription`
+      ),
+    updateSalonSubscription: (
+      salonId: string,
+      body: import('@/types').UpdateDeveloperSalonSubscriptionRequest
+    ) =>
+      request<import('@/types').UpdateDeveloperSalonSubscriptionResponse>(
+        `/developer/salons/${salonId}/subscription`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+        }
+      ),
     getSalonDeletePreview: (salonId: string) =>
       request<import('@/types').SalonDeletePreview>(
         `/developer/salons/${salonId}/delete-preview`
