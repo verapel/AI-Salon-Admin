@@ -573,6 +573,7 @@ export interface GoogleEventPreviewItem {
   end: GoogleEventTimePreview;
   recurringEventId: string | null;
   originalStartTime: GoogleEventTimePreview | null;
+  created: string | null;
   updated: string | null;
   etag: string | null;
   htmlLink: string | null;
@@ -585,6 +586,11 @@ export interface GoogleEventPreviewItem {
   matchingStatus?: CalendarMatchingStatus;
   /** Present after manual-import foundation. */
   importReadiness?: GoogleImportReadiness;
+  /** Present when automatic import is enabled. */
+  autoImport?: {
+    status: 'would_import' | 'skip' | 'already_imported';
+    reason: string | null;
+  };
 }
 
 export interface GoogleEventsPreviewResponse {
@@ -597,6 +603,7 @@ export interface GoogleEventsPreviewResponse {
   calendarName: string | null;
   salonTimeZone?: string;
   staffOptions?: GoogleImportStaffOption[];
+  autoImportEnabled?: boolean;
 }
 
 export interface GoogleEventImportRequest {

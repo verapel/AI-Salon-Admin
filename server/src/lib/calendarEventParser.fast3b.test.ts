@@ -463,12 +463,13 @@ describe('GOOGLE-CAL-FAST-3B safety contracts (static)', () => {
       routes,
       /from\('appointments'\)|from\('clients'\)|from\('reminders'\)|appointment_external_links|calendar_mapping_rules|calendar_import_issues/,
     );
-    // Preview handler must not mutate import_enabled.
-    const previewSlice = routes.slice(
-      routes.indexOf("/google/events/preview"),
-      routes.indexOf("/google/events/preview") + 2500,
+    // Preview may read import_enabled for auto-eligibility display; must not mutate it.
+    const previewStart = routes.indexOf("/google/events/preview");
+    const previewSlice = routes.slice(previewStart, previewStart + 4500);
+    assert.doesNotMatch(
+      previewSlice,
+      /import_enabled\s*:\s*true|import_enabled\s*=\s*true|\.update\([\s\S]*import_enabled/,
     );
-    assert.doesNotMatch(previewSlice, /import_enabled/);
     assert.doesNotMatch(previewSlice, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/);
   });
 

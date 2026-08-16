@@ -40,6 +40,13 @@ import {
   type GoogleImportErrorCode,
   type ManualGoogleImportRequest,
 } from '../lib/googleCalendarImport.js';
+import {
+  decideGoogleAutoImport,
+  parseStrictEnabledFlag,
+  readAutoImportSinceFromConfig,
+  readAutoImportStaffIdFromConfig,
+  setGoogleCalendarImportEnabled,
+} from '../lib/googleCalendarAutoImport.js';
 import type {
   AppleCalendarConnectRequest,
   CalendarConnectionPublic,
@@ -602,6 +609,25 @@ router.get('/google/events/preview', requireSalonWriteAccess, async (req, res) =
     }
 
     const staffOptions = await loadActiveStaffOptions(supabase as any, salonId);
+
+    let autoStaffId: string | null = null;
+    let autoImportSince: string | null = null;
+    try {
+      const { data: cfgRow } = await supabase
+        .from('calendar_connections')
+        .select('id, provider_config, import_enabled')
+        .eq('salon_id', salonId)
+        .eq('provider', GOOGLE_PROVIDER)
+        .maybeSingle();
+      if (cfgRow?.import_enabled) {
+        autoStaffId = readAutoImportStaffIdFromConfig(cfgRow.provider_config);
+        autoImportSince = readAutoImportSinceFromConfig(cfgRow.provider_config);
+      }
+    } catch {
+      autoStaffId = null;
+      autoImportSince = null;
+    }
+
     const missingParsed = {
       classification: ['invalid'],
       importability: 'not_importable' as const,
@@ -636,13 +662,39 @@ router.get('/google/events/preview', requireSalonWriteAccess, async (req, res) =
         event: ev,
         alreadyImported,
       });
-      return { ...ev, importReadiness };
+
+      let autoImport: { status: 'would_import' | 'skip' | 'already_imported'; reason: string | null } | undefined;
+      if (autoStaffId && ev.matching && ev.parsed) {
+        const decision = decideGoogleAutoImport({
+          parsed: ev.parsed,
+          matching: ev.matching,
+          eventStatus: ev.status,
+          summary: ev.summary,
+          staffId: autoStaffId,
+          alreadyImported,
+          created: ev.created,
+          autoImportSince,
+          serviceNames: ev.matching.service.displayName
+            ? [ev.matching.service.displayName]
+            : undefined,
+        });
+        if (alreadyImported) {
+          autoImport = { status: 'already_imported', reason: 'already_imported' };
+        } else if (decision.action === 'import') {
+          autoImport = { status: 'would_import', reason: null };
+        } else {
+          autoImport = { status: 'skip', reason: decision.reason };
+        }
+      }
+
+      return { ...ev, importReadiness, autoImport };
     });
 
     return res.json({
       ...preview,
       events,
       staffOptions,
+      autoImportEnabled: Boolean(autoStaffId),
     });
   } catch (err) {
     if (err instanceof CalendarMatchCatalogError) {
@@ -833,6 +885,79 @@ router.post('/google/events/import', requireSalonWriteAccess, async (req, res) =
     return res.status(502).json({
       error: 'Could not import Google event',
       code: 'google_import_failed',
+    });
+  }
+});
+
+/**
+ * PUT /api/calendar/google/import-enabled
+ * GOOGLE-CAL-FAST-6: Explicitly enable/disable automatic Google pull import.
+ * When enabling, resolves unique Tatev/Tatevik staff for this salon into provider_config.
+ */
+router.put('/google/import-enabled', requireSalonWriteAccess, async (req, res) => {
+  const salonId = getSalonId(req);
+  try {
+    const enabled = parseStrictEnabledFlag((req.body || {}).enabled);
+    if (enabled === null) {
+      return res.status(400).json({
+        error: 'enabled must be a boolean',
+        code: 'invalid_enabled_flag',
+      });
+    }
+    const result = await setGoogleCalendarImportEnabled({
+      db: supabase as any,
+      salonId,
+      enabled,
+    });
+
+    const { data: row, error } = await supabase
+      .from('calendar_connections')
+      .select(CONNECTION_INTERNAL_SELECT)
+      .eq('salon_id', salonId)
+      .eq('provider', GOOGLE_PROVIDER)
+      .maybeSingle();
+
+    if (error || !row) {
+      return res.status(500).json({ error: 'Could not load Google connection' });
+    }
+
+    return res.json({
+      connection: mapCalendarConnectionInternalSafe(row as unknown as ConnectionInternalRow),
+      importEnabled: result.importEnabled,
+      autoImportStaffName: result.autoImportStaffName,
+    });
+  } catch (err) {
+    if (err instanceof GoogleCalendarOAuthError) {
+      if (err.code === 'GOOGLE_OAUTH_NOT_CONNECTED') {
+        return res.status(404).json({
+          error: 'Google Calendar is not connected',
+          code: 'google_not_connected',
+        });
+      }
+      if (err.code === 'GOOGLE_CALENDAR_NOT_SELECTED') {
+        return res.status(400).json({
+          error: 'Google calendar is not selected',
+          code: 'google_calendar_not_selected',
+        });
+      }
+      if (err.code === 'GOOGLE_AUTO_STAFF_UNRESOLVED') {
+        return res.status(409).json({
+          error: 'Could not resolve Tatev staff for automatic import',
+          code: 'google_auto_staff_unresolved',
+        });
+      }
+      return res.status(502).json({
+        error: 'Could not update Google import setting',
+        code: 'google_import_setting_failed',
+      });
+    }
+    console.error('[calendar] google import-enabled unexpected', {
+      salonId,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return res.status(500).json({
+      error: 'Could not update Google import setting',
+      code: 'google_import_setting_failed',
     });
   }
 });

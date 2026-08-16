@@ -33,6 +33,7 @@ import {
 } from './middleware/auth.js';
 import { supabase, checkSupabaseConnection } from './lib/supabase.js';
 import { startWhatsAppOutboundWorker } from './lib/whatsappOutboundWorker.js';
+import { startGoogleCalendarPullWorker } from './lib/googleCalendarPullWorker.js';
 import { loadTelegramTokenFromDb, saveTelegramTokenToDb } from './lib/telegramToken.js';
 import { registerTelegramPollingRestarter } from './lib/telegramPollingControl.js';
 import {
@@ -1248,6 +1249,17 @@ async function bootstrap() {
     } catch (err) {
       console.error('[whatsapp/outbound-worker] bootstrap failed', {
         operation: 'outbound_worker_bootstrap',
+        result: 'error',
+        message: err instanceof Error ? err.message : 'unknown',
+      });
+    }
+
+    // GOOGLE-CAL-FAST-6: Google Calendar auto-pull (import_enabled connections only).
+    try {
+      startGoogleCalendarPullWorker({ db: supabase, runImmediately: false });
+    } catch (err) {
+      console.error('[calendar/google-auto] worker bootstrap failed', {
+        operation: 'google_pull_worker_bootstrap',
         result: 'error',
         message: err instanceof Error ? err.message : 'unknown',
       });
