@@ -221,6 +221,15 @@ export const api = {
           body: JSON.stringify(body),
         },
       ),
+    setGoogleImportEnabled: (enabled: boolean) =>
+      request<{
+        connection: import('@/types').CalendarConnectionPublic | null;
+        importEnabled: boolean;
+        autoImportStaffName: string | null;
+      }>('/calendar/google/import-enabled', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      }),
     disconnectGoogle: () =>
       request<{ connection: import('@/types').CalendarConnectionPublic | null }>(
         '/calendar/google',

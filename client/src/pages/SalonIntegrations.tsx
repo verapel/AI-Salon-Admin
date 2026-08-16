@@ -243,6 +243,45 @@ function serviceMatchDetail(
   };
 }
 
+function autoImportReasonLabel(
+  t: (key: import('@/context/LanguageContext').TranslationKey) => string,
+  reason: string | null | undefined,
+): string {
+  switch (reason) {
+    case 'already_imported':
+      return t('integrations.google.autoSkipAlready');
+    case 'before_auto_import':
+    case 'created_unknown':
+      return t('integrations.google.autoSkipBeforeEnable');
+    case 'cancelled':
+      return t('integrations.google.autoSkipCancelled');
+    case 'all_day':
+      return t('integrations.google.autoSkipAllDay');
+    case 'invalid_time':
+    case 'overnight':
+      return t('integrations.google.autoSkipTime');
+    case 'service_not_matched':
+    case 'service_inactive_or_invalid':
+    case 'service_invalid':
+    case 'service_review_required':
+      return t('integrations.google.autoSkipService');
+    case 'client_ambiguous':
+      return t('integrations.google.autoSkipClientAmbiguous');
+    case 'no_exact_phone':
+      return t('integrations.google.autoSkipPhone');
+    case 'unsafe_client_name':
+    case 'client_review_required':
+      return t('integrations.google.autoSkipClient');
+    case 'appointment_conflict':
+      return t('integrations.google.autoSkipConflict');
+    case 'staff_unresolved':
+    case 'staff_invalid':
+      return t('integrations.google.autoSkipStaff');
+    default:
+      return t('integrations.google.autoSkipOther');
+  }
+}
+
 function ParsedField({
   label,
   value,
@@ -591,6 +630,8 @@ export default function SalonIntegrations() {
   const [googlePreviewTruncated, setGooglePreviewTruncated] = useState(false);
   const [googlePreviewLoaded, setGooglePreviewLoaded] = useState(false);
   const [googleStaffOptions, setGoogleStaffOptions] = useState<GoogleImportStaffOption[]>([]);
+  const [googleAutoImportToggling, setGoogleAutoImportToggling] = useState(false);
+  const [googleAutoImportError, setGoogleAutoImportError] = useState<string | null>(null);
 
   const refreshConnections = useCallback(async () => {
     const data = await api.calendar.getConnections();
@@ -807,6 +848,28 @@ export default function SalonIntegrations() {
     }
   };
 
+  const handleToggleGoogleAutoImport = async (enabled: boolean) => {
+    if (googleAutoImportToggling) return;
+    setGoogleAutoImportToggling(true);
+    setGoogleAutoImportError(null);
+    try {
+      const result = await api.calendar.setGoogleImportEnabled(enabled);
+      if (result.connection) {
+        setGoogleConnection(result.connection);
+      } else {
+        setGoogleConnection((prev) =>
+          prev ? { ...prev, importEnabled: result.importEnabled } : prev,
+        );
+      }
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : t('integrations.google.autoImportError');
+      setGoogleAutoImportError(message || t('integrations.google.autoImportError'));
+    } finally {
+      setGoogleAutoImportToggling(false);
+    }
+  };
+
   if (loading) {
     return <LoadingSpinner />;
   }
@@ -939,6 +1002,56 @@ export default function SalonIntegrations() {
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   {t('integrations.google.noImportYet')}
                 </p>
+
+                {googleSelected ? (
+                  <div className="space-y-2 rounded-md border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {t('integrations.google.autoImportTitle')}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {t('integrations.google.autoImportHelp')}
+                    </p>
+                    <p className="text-xs text-amber-800 dark:text-amber-200">
+                      {t('integrations.google.autoImportPilotNote')}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className={
+                          googleConnection?.importEnabled ? 'btn-secondary' : 'btn-primary'
+                        }
+                        disabled={googleAutoImportToggling || googleConnection?.importEnabled}
+                        onClick={() => void handleToggleGoogleAutoImport(true)}
+                      >
+                        {googleAutoImportToggling && !googleConnection?.importEnabled
+                          ? t('integrations.google.autoImportSaving')
+                          : t('integrations.google.autoImportEnable')}
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          googleConnection?.importEnabled ? 'btn-primary' : 'btn-secondary'
+                        }
+                        disabled={googleAutoImportToggling || !googleConnection?.importEnabled}
+                        onClick={() => void handleToggleGoogleAutoImport(false)}
+                      >
+                        {googleAutoImportToggling && googleConnection?.importEnabled
+                          ? t('integrations.google.autoImportSaving')
+                          : t('integrations.google.autoImportDisable')}
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-600 dark:text-gray-300">
+                      {googleConnection?.importEnabled
+                        ? t('integrations.google.autoImportOn')
+                        : t('integrations.google.autoImportOff')}
+                    </p>
+                    {googleAutoImportError ? (
+                      <p className="text-sm text-red-600 dark:text-red-400">
+                        {googleAutoImportError}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 {needsCalendarPick ? (
                   <div className="space-y-2">
@@ -1233,12 +1346,28 @@ export default function SalonIntegrations() {
                                                   reasons: ['already_imported'],
                                                 }
                                               : item.importReadiness,
+                                            autoImport: {
+                                              status: 'already_imported',
+                                              reason: 'already_imported',
+                                            },
                                           }
                                         : item,
                                     ),
                                   );
                                 }}
                               />
+                              {ev.autoImport ? (
+                                <div className="mt-2 text-xs text-gray-600 dark:text-gray-300">
+                                  <span className="font-medium">
+                                    {t('integrations.google.autoImportStatus')}:{' '}
+                                  </span>
+                                  {ev.autoImport.status === 'would_import'
+                                    ? t('integrations.google.autoWouldImport')
+                                    : ev.autoImport.status === 'already_imported'
+                                      ? t('integrations.google.autoSkipAlready')
+                                      : autoImportReasonLabel(t, ev.autoImport.reason)}
+                                </div>
+                              ) : null}
                             </article>
                           );
                         })}

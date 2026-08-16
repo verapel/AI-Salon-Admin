@@ -46,6 +46,9 @@ export const GOOGLE_CALENDAR_EVENTS_URL_PREFIX =
 
 export const GOOGLE_CALENDAR_PROVIDER = 'google' as const;
 
+/** FAST-6D/F: persisted events.list page cursor in provider_config. */
+export const GOOGLE_AUTO_IMPORT_PAGE_TOKEN_CONFIG_KEY = 'auto_import_page_token' as const;
+
 /** FAST-2 preview safety caps (not final sync architecture). */
 export const GOOGLE_EVENTS_PREVIEW_MAX_PAGES = 10;
 export const GOOGLE_EVENTS_PREVIEW_MAX_EVENTS = 500;
@@ -64,7 +67,8 @@ export type GoogleCalendarOAuthErrorCode =
   | 'GOOGLE_CALENDAR_NOT_FOUND'
   | 'GOOGLE_CALENDAR_SAVE_FAILED'
   | 'GOOGLE_CALENDAR_NOT_SELECTED'
-  | 'GOOGLE_EVENTS_FETCH_FAILED';
+  | 'GOOGLE_EVENTS_FETCH_FAILED'
+  | 'GOOGLE_AUTO_STAFF_UNRESOLVED';
 
 export class GoogleCalendarOAuthError extends Error {
   readonly code: GoogleCalendarOAuthErrorCode;
@@ -126,6 +130,7 @@ export type GoogleEventPreviewItem = {
   end: GoogleEventTimePreview;
   recurringEventId: string | null;
   originalStartTime: GoogleEventTimePreview | null;
+  created: string | null;
   updated: string | null;
   etag: string | null;
   htmlLink: string | null;
@@ -139,6 +144,11 @@ export type GoogleEventPreviewItem = {
   matchingStatus?: CalendarMatchingStatus;
   /** GOOGLE-CAL-FAST-5B: manual import readiness (separate from parsed.importability). */
   importReadiness?: GoogleImportReadiness;
+  /** GOOGLE-CAL-FAST-6: auto-pull eligibility when import_enabled. */
+  autoImport?: {
+    status: 'would_import' | 'skip' | 'already_imported';
+    reason: string | null;
+  };
 };
 
 export type GoogleEventsPreviewResult = {
@@ -153,6 +163,8 @@ export type GoogleEventsPreviewResult = {
   salonTimeZone?: string;
   /** Active salon staff for manual import selector (FAST-5B). */
   staffOptions?: ImportableStaffOption[];
+  /** True when connection import_enabled and pilot staff configured. */
+  autoImportEnabled?: boolean;
 };
 
 export type GoogleFetch = typeof fetch;
@@ -672,6 +684,20 @@ export async function listGoogleCalendarsForSalon(params: {
   });
 }
 
+/** Calendar change must drop the previous events.list page cursor. */
+export function applyCalendarSelectProviderConfig(
+  prevConfig: unknown,
+  selectedCalendar: Record<string, unknown>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> =
+    prevConfig && typeof prevConfig === 'object' && !Array.isArray(prevConfig)
+      ? { ...(prevConfig as Record<string, unknown>) }
+      : {};
+  next.selectedCalendar = selectedCalendar;
+  delete next[GOOGLE_AUTO_IMPORT_PAGE_TOKEN_CONFIG_KEY];
+  return next;
+}
+
 export async function selectGoogleCalendarForSalon(params: {
   db: any;
   salonId: string;
@@ -714,17 +740,14 @@ export async function selectGoogleCalendarForSalon(params: {
       ? (existing.provider_config as Record<string, unknown>)
       : {};
 
-  const provider_config = {
-    ...prevConfig,
-    selectedCalendar: {
-      id: match.id,
-      summary: match.summary,
-      timeZone: match.timeZone,
-      primary: match.primary,
-      accessRole: match.accessRole,
-      selectedAt: now,
-    },
-  };
+  const provider_config = applyCalendarSelectProviderConfig(prevConfig, {
+    id: match.id,
+    summary: match.summary,
+    timeZone: match.timeZone,
+    primary: match.primary,
+    accessRole: match.accessRole,
+    selectedAt: now,
+  });
 
   const { error } = await params.db
     .from('calendar_connections')
@@ -769,10 +792,14 @@ export function buildGoogleEventsPreviewWindow(now: Date = new Date()): {
 
 export function buildGoogleCalendarEventsListUrl(params: {
   calendarId: string;
-  timeMin: string;
-  timeMax: string;
+  timeMin?: string;
+  timeMax?: string;
   pageToken?: string | null;
   maxResults?: number;
+  /** Preview stays startTime. Auto-pull uses updated + updatedMin (no start-time window). */
+  orderBy?: 'startTime' | 'updated';
+  /** Lower bound for event last-modification time (RFC3339). */
+  updatedMin?: string | null;
 }): string {
   const calendarId = params.calendarId.trim();
   if (!calendarId) {
@@ -785,10 +812,13 @@ export function buildGoogleCalendarEventsListUrl(params: {
     `${GOOGLE_CALENDAR_EVENTS_URL_PREFIX}${encodeURIComponent(calendarId)}/events`,
   );
   url.searchParams.set('singleEvents', 'true');
-  url.searchParams.set('orderBy', 'startTime');
+  url.searchParams.set('orderBy', params.orderBy === 'updated' ? 'updated' : 'startTime');
   url.searchParams.set('showDeleted', 'false');
-  url.searchParams.set('timeMin', params.timeMin);
-  url.searchParams.set('timeMax', params.timeMax);
+  if (params.timeMin) url.searchParams.set('timeMin', params.timeMin);
+  if (params.timeMax) url.searchParams.set('timeMax', params.timeMax);
+  if (params.updatedMin?.trim()) {
+    url.searchParams.set('updatedMin', params.updatedMin.trim());
+  }
   url.searchParams.set(
     'maxResults',
     String(params.maxResults && params.maxResults > 0 ? params.maxResults : 250),
@@ -860,6 +890,7 @@ export function mapGoogleEventPreviewEntry(
         ? row.recurringEventId.trim()
         : null,
     originalStartTime: originalStart,
+    created: typeof row.created === 'string' && row.created.trim() ? row.created.trim() : null,
     updated: typeof row.updated === 'string' ? row.updated : null,
     etag: typeof row.etag === 'string' ? row.etag : null,
     htmlLink: typeof row.htmlLink === 'string' ? row.htmlLink : null,
@@ -881,6 +912,7 @@ export async function listGoogleCalendarEventsPreview(params: {
   fetchImpl?: GoogleFetch;
   maxPages?: number;
   maxEvents?: number;
+  orderBy?: 'startTime' | 'updated';
 }): Promise<{ events: GoogleEventPreviewItem[]; truncated: boolean }> {
   const token = params.accessToken.trim();
   if (!token) {
@@ -921,6 +953,7 @@ export async function listGoogleCalendarEventsPreview(params: {
       timeMax: params.timeMax,
       pageToken,
       maxResults: pageSize,
+      orderBy: params.orderBy,
     });
 
     let response: Response;
@@ -978,6 +1011,153 @@ export async function listGoogleCalendarEventsPreview(params: {
   } while (pageToken);
 
   return { events, truncated };
+}
+
+/** 410 always; 400 only when the body points at a bad pageToken. */
+export function isRecoverableGooglePageTokenError(
+  status: number,
+  json: unknown,
+): boolean {
+  if (status === 410) return true;
+  if (status !== 400) return false;
+  const text = JSON.stringify(json ?? '').toLowerCase();
+  return text.includes('pagetoken') || text.includes('page token');
+}
+
+/**
+ * FAST-6D: Auto-pull discovery list.
+ * Uses updatedMin (Google created/updated after enable), not appointment start/end.
+ * Paginates and keeps only caller-selected events so a first page of old
+ * updated-ascending rows cannot hide a later new event in the same walk.
+ */
+export async function listGoogleCalendarEventsForAutoPull(params: {
+  accessToken: string;
+  calendarId: string;
+  calendarName?: string | null;
+  updatedMin: string;
+  fetchImpl?: GoogleFetch;
+  maxPages?: number;
+  maxKeepEvents?: number;
+  pageToken?: string | null;
+  keepEvent: (event: GoogleEventPreviewItem) => boolean;
+}): Promise<{
+  events: GoogleEventPreviewItem[];
+  nextPageToken: string | null;
+  pages: number;
+  scannedRaw: number;
+  truncated: boolean;
+}> {
+  const token = params.accessToken.trim();
+  if (!token) {
+    throw new GoogleCalendarOAuthError(
+      'GOOGLE_EVENTS_FETCH_FAILED',
+      'Access token is required',
+    );
+  }
+  const calendarId = params.calendarId.trim();
+  if (!calendarId) {
+    throw new GoogleCalendarOAuthError(
+      'GOOGLE_CALENDAR_NOT_SELECTED',
+      'Calendar is not selected',
+    );
+  }
+  const updatedMin = params.updatedMin.trim();
+  if (!updatedMin) {
+    throw new GoogleCalendarOAuthError(
+      'GOOGLE_EVENTS_FETCH_FAILED',
+      'updatedMin is required',
+    );
+  }
+
+  const fetchImpl = params.fetchImpl ?? fetch;
+  const maxPages = params.maxPages ?? GOOGLE_EVENTS_PREVIEW_MAX_PAGES;
+  const maxKeep = params.maxKeepEvents ?? GOOGLE_EVENTS_PREVIEW_MAX_EVENTS;
+  const calendarName = params.calendarName ?? null;
+  const kept: GoogleEventPreviewItem[] = [];
+  let pageToken: string | null = params.pageToken?.trim() || null;
+  let pages = 0;
+  let scannedRaw = 0;
+  let retriedExpiredToken = false;
+
+  while (pages < maxPages && kept.length < maxKeep) {
+    pages += 1;
+    const url = buildGoogleCalendarEventsListUrl({
+      calendarId,
+      pageToken,
+      maxResults: 250,
+      orderBy: 'updated',
+      updatedMin,
+    });
+
+    let response: Response;
+    try {
+      response = await fetchImpl(url, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      throw new GoogleCalendarOAuthError(
+        'GOOGLE_EVENTS_FETCH_FAILED',
+        'Events list request failed',
+      );
+    }
+
+    let json: unknown = null;
+    try {
+      json = await response.json();
+    } catch {
+      json = null;
+    }
+
+    if (
+      pageToken &&
+      !retriedExpiredToken &&
+      isRecoverableGooglePageTokenError(response.status, json)
+    ) {
+      retriedExpiredToken = true;
+      pageToken = null;
+      pages -= 1;
+      continue;
+    }
+
+    if (!response.ok) {
+      throw new GoogleCalendarOAuthError(
+        'GOOGLE_EVENTS_FETCH_FAILED',
+        'Events list request failed',
+      );
+    }
+    if (!json || typeof json !== 'object' || Array.isArray(json)) {
+      throw new GoogleCalendarOAuthError(
+        'GOOGLE_EVENTS_FETCH_FAILED',
+        'Events list response is invalid',
+      );
+    }
+
+    const body = json as Record<string, unknown>;
+    const items = Array.isArray(body.items) ? body.items : [];
+    for (const item of items) {
+      const mapped = mapGoogleEventPreviewEntry(item, calendarId, calendarName);
+      if (!mapped) continue;
+      scannedRaw += 1;
+      if (params.keepEvent(mapped) && kept.length < maxKeep) {
+        kept.push(mapped);
+      }
+    }
+
+    pageToken =
+      typeof body.nextPageToken === 'string' && body.nextPageToken.trim()
+        ? body.nextPageToken.trim()
+        : null;
+    if (!pageToken) break;
+  }
+
+  return {
+    events: kept,
+    nextPageToken: pageToken,
+    pages,
+    scannedRaw,
+    truncated: Boolean(pageToken) || kept.length >= maxKeep,
+  };
 }
 
 export async function previewGoogleCalendarEventsForSalon(params: {
