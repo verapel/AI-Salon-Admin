@@ -48,6 +48,10 @@ import {
   setGoogleCalendarImportEnabled,
 } from '../lib/googleCalendarAutoImport.js';
 import { importGoogleCalendarLast30Days } from '../lib/googleCalendarBackfill.js';
+import {
+  listGoogleReviewCalendarItems,
+  resolveGoogleCalendarReviewIssue,
+} from '../lib/googleCalendarReviewOverlay.js';
 import type {
   AppleCalendarConnectRequest,
   CalendarConnectionPublic,
@@ -848,6 +852,32 @@ router.post('/google/events/import', requireSalonWriteAccess, async (req, res) =
       },
     });
 
+    try {
+      const { data: connRow } = await supabase
+        .from('calendar_connections')
+        .select('id')
+        .eq('salon_id', salonId)
+        .eq('provider', GOOGLE_PROVIDER)
+        .maybeSingle();
+      if (connRow?.id) {
+        await resolveGoogleCalendarReviewIssue({
+          db: supabase as any,
+          salonId,
+          calendarConnectionId: String(connRow.id),
+          ev: {
+            id: body.eventId.trim(),
+            recurringEventId: null,
+            originalStartTime: body.recurrenceId
+              ? { dateTime: body.recurrenceId, date: null, timeZone: null, allDay: false }
+              : null,
+          },
+          appointmentId: result.appointmentId,
+        });
+      }
+    } catch {
+      // Overlay cleanup is best-effort; appointment write already succeeded.
+    }
+
     if (result.alreadyImported) {
       return res.status(409).json({
         error: 'Event already imported',
@@ -886,6 +916,31 @@ router.post('/google/events/import', requireSalonWriteAccess, async (req, res) =
     return res.status(502).json({
       error: 'Could not import Google event',
       code: 'google_import_failed',
+    });
+  }
+});
+
+/**
+ * GET /api/calendar/google/review-events
+ * FAST-7B: Unresolved Google events for the main salon calendar overlay.
+ * Does not create appointments/clients/services. Dedupes against import links.
+ */
+router.get('/google/review-events', async (req, res) => {
+  const salonId = getSalonId(req);
+  try {
+    const items = await listGoogleReviewCalendarItems({
+      db: supabase as any,
+      salonId,
+    });
+    return res.json({ events: items });
+  } catch (err) {
+    console.error('[calendar] google review-events failed', {
+      salonId,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return res.status(500).json({
+      error: 'Could not load Google review events',
+      code: 'google_review_events_failed',
     });
   }
 });

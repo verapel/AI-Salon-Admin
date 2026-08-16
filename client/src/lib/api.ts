@@ -213,6 +213,10 @@ export const api = {
       request<import('@/types').GoogleEventsPreviewResponse>(
         '/calendar/google/events/preview',
       ),
+    getGoogleReviewEvents: () =>
+      request<{ events: import('@/types').GoogleReviewCalendarItem[] }>(
+        '/calendar/google/review-events',
+      ),
     importGoogleEvent: (body: import('@/types').GoogleEventImportRequest) =>
       request<import('@/types').GoogleEventImportResponse>(
         '/calendar/google/events/import',

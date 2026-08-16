@@ -1,10 +1,57 @@
 import { useEffect, useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import Modal from '@/components/ui/Modal';
 import { useLanguage, type LangCode, type TranslationKey } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import { getStatusColor } from '@/lib/utils';
-import type { Appointment, Staff } from '@/types';
+import type { Appointment, GoogleReviewCalendarItem, Staff } from '@/types';
+
+type CalendarBlock = {
+  id: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  staffId: string;
+  staffName?: string;
+  title: string;
+  subtitle?: string;
+  kind: 'appointment' | 'google_review';
+  status?: Appointment['status'];
+  clientBirthday?: string | null;
+  review?: GoogleReviewCalendarItem;
+};
+
+function appointmentToBlock(apt: Appointment): CalendarBlock {
+  return {
+    id: apt.id,
+    date: apt.date,
+    startTime: apt.startTime,
+    endTime: apt.endTime,
+    staffId: apt.staffId,
+    staffName: apt.staffName,
+    title: apt.clientName || '—',
+    subtitle: apt.serviceName,
+    kind: 'appointment',
+    status: apt.status,
+    clientBirthday: apt.clientBirthday,
+  };
+}
+
+function reviewToBlock(ev: GoogleReviewCalendarItem): CalendarBlock {
+  return {
+    id: ev.id,
+    date: ev.date,
+    startTime: ev.startTime,
+    endTime: ev.endTime,
+    staffId: ev.staffId,
+    staffName: ev.staffName,
+    title: ev.title,
+    subtitle: undefined,
+    kind: 'google_review',
+    review: ev,
+  };
+}
 
 const LOCALE: Record<LangCode, string> = {
   ru: 'ru-RU',
@@ -32,21 +79,21 @@ function statusLabel(status: Appointment['status'], t: (key: TranslationKey) => 
   return t(`appointmentStatus.${status}` as TranslationKey);
 }
 
-function sortAppointmentsForDisplay(a: Appointment, b: Appointment): number {
+function sortBlocksForDisplay(a: CalendarBlock, b: CalendarBlock): number {
   const byTime = a.startTime.localeCompare(b.startTime);
   if (byTime !== 0) return byTime;
   return (a.staffName ?? '').localeCompare(b.staffName ?? '');
 }
 
-function appointmentsInHour(appointments: Appointment[], hour: number): Appointment[] {
-  return appointments
+function blocksInHour(blocks: CalendarBlock[], hour: number): CalendarBlock[] {
+  return blocks
     .filter((a) => parseInt(a.startTime.split(':')[0], 10) === hour)
-    .sort(sortAppointmentsForDisplay);
+    .sort(sortBlocksForDisplay);
 }
 
-function groupAppointmentsByTime(appointments: Appointment[]): [string, Appointment[]][] {
-  const groups = new Map<string, Appointment[]>();
-  for (const apt of appointments) {
+function groupBlocksByTime(blocks: CalendarBlock[]): [string, CalendarBlock[]][] {
+  const groups = new Map<string, CalendarBlock[]>();
+  for (const apt of blocks) {
     const timeKey = formatTime24(apt.startTime);
     const list = groups.get(timeKey) ?? [];
     list.push(apt);
@@ -54,11 +101,11 @@ function groupAppointmentsByTime(appointments: Appointment[]): [string, Appointm
   }
   return Array.from(groups.entries()).map(([time, appts]) => [
     time,
-    appts.sort(sortAppointmentsForDisplay),
+    appts.sort(sortBlocksForDisplay),
   ]);
 }
 
-function matchesStaffFilter(apt: Appointment, staffFilter: 'all' | string): boolean {
+function matchesStaffFilter(apt: CalendarBlock, staffFilter: 'all' | string): boolean {
   if (staffFilter === 'all') return true;
   if (!apt.staffId?.trim()) return false;
   return apt.staffId === staffFilter;
@@ -116,14 +163,23 @@ export default function Calendar() {
   const { language, t } = useLanguage();
   const locale = LOCALE[language];
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [reviewEvents, setReviewEvents] = useState<GoogleReviewCalendarItem[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [staffFilter, setStaffFilter] = useState<'all' | string>('all');
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [reviewOpen, setReviewOpen] = useState<GoogleReviewCalendarItem | null>(null);
+
+  const calendarBlocks = useMemo(() => {
+    return [
+      ...appointments.filter((a) => a.status !== 'cancelled').map(appointmentToBlock),
+      ...reviewEvents.map(reviewToBlock),
+    ];
+  }, [appointments, reviewEvents]);
 
   const filteredAppointments = useMemo(
-    () => appointments.filter((apt) => matchesStaffFilter(apt, staffFilter)),
-    [appointments, staffFilter]
+    () => calendarBlocks.filter((apt) => matchesStaffFilter(apt, staffFilter)),
+    [calendarBlocks, staffFilter]
   );
 
   const weekDays = useMemo(() => {
@@ -140,22 +196,27 @@ export default function Calendar() {
   const dayAppointments = useMemo(() => {
     const dateStr = toLocalDateStr(currentDate);
     return filteredAppointments
-      .filter((a) => a.date === dateStr && a.status !== 'cancelled')
-      .sort(sortAppointmentsForDisplay);
+      .filter((a) => a.date === dateStr)
+      .sort(sortBlocksForDisplay);
   }, [filteredAppointments, currentDate]);
 
   const mobileTimeGroups = useMemo(
-    () => groupAppointmentsByTime(dayAppointments),
+    () => groupBlocksByTime(dayAppointments),
     [dayAppointments]
   );
 
   const showStaffOnCards = staffFilter === 'all';
 
   useEffect(() => {
-    Promise.all([api.appointments.getAll(), api.staff.getAll()])
-      .then(([apptData, staffData]) => {
+    Promise.all([
+      api.appointments.getAll(),
+      api.staff.getAll(),
+      api.calendar.getGoogleReviewEvents().catch(() => ({ events: [] })),
+    ])
+      .then(([apptData, staffData, reviewData]) => {
         setAppointments(apptData);
         setStaff(staffData.filter((member) => member.active).sort((a, b) => a.name.localeCompare(b.name)));
+        setReviewEvents(reviewData.events ?? []);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -163,7 +224,7 @@ export default function Calendar() {
 
   const getAppointmentsForDay = (date: Date) => {
     const dateStr = toLocalDateStr(date);
-    return filteredAppointments.filter((a) => a.date === dateStr && a.status !== 'cancelled');
+    return filteredAppointments.filter((a) => a.date === dateStr);
   };
 
   const navigateWeek = (direction: number) => {
@@ -309,21 +370,39 @@ export default function Calendar() {
                     <div
                       key={apt.id}
                       className={`relative ${index > 0 ? 'border-t border-gray-100 pt-3 dark:border-gray-800' : ''}`}
+                      role={apt.kind === 'google_review' ? 'button' : undefined}
+                      onClick={
+                        apt.kind === 'google_review' && apt.review
+                          ? () => setReviewOpen(apt.review ?? null)
+                          : undefined
+                      }
                     >
                       <BirthdayIndicator
                         visible={isBirthdayIndicatorVisible(apt.date, apt.clientBirthday)}
                       />
                       <div className="flex items-start justify-between gap-2">
                         <p className="truncate text-base font-semibold text-gray-900 dark:text-white">
-                          {apt.clientName}
+                          {apt.title}
                         </p>
-                        <span className={`badge shrink-0 text-xs ${getStatusColor(apt.status)}`}>
-                          {statusLabel(apt.status, t)}
-                        </span>
+                        {apt.kind === 'google_review' ? (
+                          <span className="badge shrink-0 text-xs bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
+                            {t('calendar.googleNeedsReview')}
+                          </span>
+                        ) : (
+                          <span className={`badge shrink-0 text-xs ${getStatusColor(apt.status || 'scheduled')}`}>
+                            {statusLabel(apt.status || 'scheduled', t)}
+                          </span>
+                        )}
                       </div>
-                      <p className="mt-1 truncate text-sm text-gray-600 dark:text-gray-400">
-                        {apt.serviceName}
-                      </p>
+                      {apt.kind === 'google_review' ? (
+                        <p className="mt-1 truncate text-sm text-gray-600 dark:text-gray-400">
+                          {formatTime24(apt.startTime)}–{formatTime24(apt.endTime)} · {t('calendar.googleSource')}
+                        </p>
+                      ) : (
+                        <p className="mt-1 truncate text-sm text-gray-600 dark:text-gray-400">
+                          {apt.subtitle}
+                        </p>
+                      )}
                       {showStaffOnCards && apt.staffName && (
                         <p className="mt-0.5 truncate text-xs text-gray-400 dark:text-gray-500">
                           {t('calendar.staffPrefix')} {apt.staffName}
@@ -380,7 +459,7 @@ export default function Calendar() {
                   {`${String(hour).padStart(2, '0')}:00`}
                 </div>
                 {weekDays.map((day) => {
-                  const dayAppts = appointmentsInHour(getAppointmentsForDay(day), hour);
+                  const dayAppts = blocksInHour(getAppointmentsForDay(day), hour);
                   return (
                     <div
                       key={day.toISOString() + hour}
@@ -389,17 +468,33 @@ export default function Calendar() {
                       {dayAppts.map((apt) => (
                         <div
                           key={apt.id}
-                          className={`relative shrink-0 rounded-md p-1.5 text-xs leading-tight ${getStatusColor(apt.status)}`}
+                          className={`relative shrink-0 rounded-md p-1.5 text-xs leading-tight ${
+                            apt.kind === 'google_review'
+                              ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-100'
+                              : getStatusColor(apt.status || 'scheduled')
+                          }`}
+                          role={apt.kind === 'google_review' ? 'button' : undefined}
+                          onClick={
+                            apt.kind === 'google_review' && apt.review
+                              ? () => setReviewOpen(apt.review ?? null)
+                              : undefined
+                          }
                         >
                           <BirthdayIndicator
                             visible={isBirthdayIndicatorVisible(apt.date, apt.clientBirthday)}
                           />
-                          <p className="truncate font-medium">{apt.clientName}</p>
-                          <p className="truncate opacity-75">{apt.serviceName}</p>
+                          <p className="truncate font-medium">{apt.title}</p>
+                          {apt.kind === 'google_review' ? (
+                            <p className="truncate opacity-80">{t('calendar.googleNeedsReview')}</p>
+                          ) : (
+                            <p className="truncate opacity-75">{apt.subtitle}</p>
+                          )}
                           {showStaffOnCards && apt.staffName && (
                             <p className="truncate opacity-70">{apt.staffName}</p>
                           )}
-                          <p className="tabular-nums opacity-60">{formatTime24(apt.startTime)}</p>
+                          <p className="tabular-nums opacity-60">
+                            {formatTime24(apt.startTime)}–{formatTime24(apt.endTime)}
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -410,6 +505,62 @@ export default function Calendar() {
           </div>
         </div>
       </div>
+
+      <Modal
+        open={Boolean(reviewOpen)}
+        onClose={() => setReviewOpen(null)}
+        title={t('calendar.reviewTitle')}
+        size="sm"
+      >
+        {reviewOpen ? (
+          <div className="space-y-2 text-sm text-gray-800 dark:text-gray-200">
+            <p>
+              <span className="text-gray-500 dark:text-gray-400">
+                {t('calendar.reviewOriginalTitle')}:
+              </span>{' '}
+              <span className="font-medium">{reviewOpen.title}</span>
+            </p>
+            <p>
+              <span className="text-gray-500 dark:text-gray-400">
+                {t('calendar.reviewDateTime')}:
+              </span>{' '}
+              <span className="font-medium">
+                {reviewOpen.date} {formatTime24(reviewOpen.startTime)}–{formatTime24(reviewOpen.endTime)}
+              </span>
+            </p>
+            <p>
+              <span className="text-gray-500 dark:text-gray-400">
+                {t('calendar.reviewClientCandidate')}:
+              </span>{' '}
+              {reviewOpen.clientCandidate || t('calendar.reviewEmptyValue')}
+            </p>
+            <p>
+              <span className="text-gray-500 dark:text-gray-400">
+                {t('calendar.reviewPhoneCandidate')}:
+              </span>{' '}
+              {reviewOpen.phoneCandidate || t('calendar.reviewEmptyValue')}
+            </p>
+            <p>
+              <span className="text-gray-500 dark:text-gray-400">
+                {t('calendar.reviewServiceCandidate')}:
+              </span>{' '}
+              {reviewOpen.serviceCandidate || t('calendar.reviewEmptyValue')}
+            </p>
+            <p>
+              <span className="text-gray-500 dark:text-gray-400">{t('calendar.reviewStaff')}:</span>{' '}
+              {reviewOpen.staffName}
+            </p>
+            <p className="text-xs text-amber-800 dark:text-amber-200">
+              {t('calendar.googleNeedsReview')}
+            </p>
+            <div className="flex justify-end pt-2">
+              <button type="button" className="btn-secondary" onClick={() => setReviewOpen(null)}>
+                {t('calendar.reviewClose')}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
     </div>
   );

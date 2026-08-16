@@ -36,6 +36,10 @@ import {
 } from './googleCalendarOAuth.js';
 import { decryptCalendarCredential } from './calendarCredentialsCrypto.js';
 import { getSalonTimezone } from './scheduleSlots.js';
+import {
+  persistGoogleReviewOrResolve,
+  resolveGoogleCalendarReviewIssue,
+} from './googleCalendarReviewOverlay.js';
 
 export const GOOGLE_BACKFILL_LOOKBACK_DAYS = 30;
 export const GOOGLE_BACKFILL_LOOKBACK_MS = GOOGLE_BACKFILL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
@@ -433,6 +437,12 @@ export async function importGoogleCalendarLast30Days(params: {
     try {
       if (isImportedGoogleOccurrence(ev, importedKeys)) {
         applyBackfillOutcome(summary, { kind: 'alreadyImported' });
+        await resolveGoogleCalendarReviewIssue({
+          db: params.db,
+          salonId,
+          calendarConnectionId: conn.id,
+          ev,
+        });
         continue;
       }
 
@@ -470,6 +480,18 @@ export async function importGoogleCalendarLast30Days(params: {
             serviceStatus: matching.service.status,
           }),
         );
+        await persistGoogleReviewOrResolve({
+          db: params.db,
+          salonId,
+          calendarConnectionId: conn.id,
+          ev,
+          reasonCode: decision.reason,
+          staffId: staff.id,
+          staffName: staff.name,
+          salonTimeZone,
+          matching,
+          importedKeys,
+        });
         continue;
       }
 
@@ -494,9 +516,23 @@ export async function importGoogleCalendarLast30Days(params: {
       if (result.alreadyImported) {
         rememberImportedOccurrence(ev, importedKeys);
         applyBackfillOutcome(summary, { kind: 'alreadyImported' });
+        await resolveGoogleCalendarReviewIssue({
+          db: params.db,
+          salonId,
+          calendarConnectionId: conn.id,
+          ev,
+          appointmentId: result.appointmentId,
+        });
       } else {
         rememberImportedOccurrence(ev, importedKeys);
         summary.imported += 1;
+        await resolveGoogleCalendarReviewIssue({
+          db: params.db,
+          salonId,
+          calendarConnectionId: conn.id,
+          ev,
+          appointmentId: result.appointmentId,
+        });
       }
     } catch (err) {
       const code =
@@ -509,6 +545,17 @@ export async function importGoogleCalendarLast30Days(params: {
           importErrorCode: code,
         }),
       );
+      await persistGoogleReviewOrResolve({
+        db: params.db,
+        salonId,
+        calendarConnectionId: conn.id,
+        ev,
+        reasonCode: code,
+        staffId: staff.id,
+        staffName: staff.name,
+        salonTimeZone,
+        importedKeys,
+      });
       if (code === 'other' || !('code' in (err as object))) {
         console.error('[calendar/google-backfill] event import failed', {
           salonId,

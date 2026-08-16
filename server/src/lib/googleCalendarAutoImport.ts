@@ -36,6 +36,10 @@ import {
 } from './googleCalendarOAuth.js';
 import { decryptCalendarCredential } from './calendarCredentialsCrypto.js';
 import { getSalonTimezone } from './scheduleSlots.js';
+import {
+  persistGoogleReviewOrResolve,
+  resolveGoogleCalendarReviewIssue,
+} from './googleCalendarReviewOverlay.js';
 
 export const GOOGLE_AUTO_IMPORT_STAFF_CONFIG_KEY = 'auto_import_staff_id' as const;
 /** ISO watermark: only events with Google `created` strictly after this instant are auto-imported. */
@@ -815,7 +819,7 @@ export async function pullGoogleCalendarConnection(params: {
     // Revalidate staff still active in this salon.
     const { data: staffRow } = await params.db
       .from('staff')
-      .select('id')
+      .select('id, name')
       .eq('id', staffId)
       .eq('salon_id', params.salonId)
       .eq('active', true)
@@ -825,6 +829,10 @@ export async function pullGoogleCalendarConnection(params: {
       lastError = 'staff_invalid';
       return summary;
     }
+    const staffName =
+      typeof staffRow.name === 'string' && staffRow.name.trim()
+        ? staffRow.name.trim()
+        : 'Tatev';
 
     const watermark = readAutoImportSinceFromConfig(conn.provider_config);
     if (!watermark) {
@@ -974,11 +982,35 @@ export async function pullGoogleCalendarConnection(params: {
 
         if (decision.action === 'skip') {
           bumpSkip(decision.reason);
+          await persistGoogleReviewOrResolve({
+            db: params.db,
+            salonId: params.salonId,
+            calendarConnectionId: params.connectionId,
+            ev,
+            reasonCode: decision.reason,
+            staffId,
+            staffName,
+            salonTimeZone,
+            matching,
+            importedKeys,
+          });
           continue;
         }
 
         if (attemptedImports >= GOOGLE_CALENDAR_PULL_MAX_IMPORTS) {
           bumpSkip('import_bound');
+          await persistGoogleReviewOrResolve({
+            db: params.db,
+            salonId: params.salonId,
+            calendarConnectionId: params.connectionId,
+            ev,
+            reasonCode: 'import_bound',
+            staffId,
+            staffName,
+            salonTimeZone,
+            matching,
+            importedKeys,
+          });
           continue;
         }
 
@@ -1021,8 +1053,24 @@ export async function pullGoogleCalendarConnection(params: {
 
         if (result.alreadyImported) {
           bumpSkip('already_imported');
+          for (const key of googleEventOccurrenceKeys(ev)) importedKeys.add(key);
+          await resolveGoogleCalendarReviewIssue({
+            db: params.db,
+            salonId: params.salonId,
+            calendarConnectionId: params.connectionId,
+            ev,
+            appointmentId: result.appointmentId,
+          });
         } else {
           summary.imported += 1;
+          for (const key of googleEventOccurrenceKeys(ev)) importedKeys.add(key);
+          await resolveGoogleCalendarReviewIssue({
+            db: params.db,
+            salonId: params.salonId,
+            calendarConnectionId: params.connectionId,
+            ev,
+            appointmentId: result.appointmentId,
+          });
         }
       } catch (err) {
         const code =
@@ -1034,6 +1082,12 @@ export async function pullGoogleCalendarConnection(params: {
           bumpSkip('appointment_conflict');
         } else if (code === 'google_event_already_imported') {
           bumpSkip('already_imported');
+          await resolveGoogleCalendarReviewIssue({
+            db: params.db,
+            salonId: params.salonId,
+            calendarConnectionId: params.connectionId,
+            ev,
+          });
         } else if (
           code === 'google_event_cancelled' ||
           code === 'google_event_not_importable' ||
@@ -1056,6 +1110,19 @@ export async function pullGoogleCalendarConnection(params: {
             connectionId: params.connectionId,
             eventId: ev.id,
             code,
+          });
+        }
+        if (code !== 'google_event_already_imported') {
+          await persistGoogleReviewOrResolve({
+            db: params.db,
+            salonId: params.salonId,
+            calendarConnectionId: params.connectionId,
+            ev,
+            reasonCode: code,
+            staffId,
+            staffName,
+            salonTimeZone,
+            importedKeys,
           });
         }
       }

@@ -628,6 +628,27 @@ export interface GoogleEventImportResponse {
   alreadyImported?: boolean;
 }
 
+/** FAST-7B: unresolved Google event shown on the salon calendar overlay. */
+export interface GoogleReviewCalendarItem {
+  id: string;
+  kind: 'google_review';
+  source: 'google';
+  reviewStatus: 'needs_review';
+  eventId: string;
+  recurrenceId: string;
+  title: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  durationMinutes: number | null;
+  staffId: string;
+  staffName: string;
+  reasonCode: string;
+  clientCandidate: string | null;
+  phoneCandidate: string | null;
+  serviceCandidate: string | null;
+}
+
 /** Compact FAST-7 30-day backfill summary (no appointment/client rows). */
 export interface GoogleBackfillLast30DaysResult {
   scanned: number;
