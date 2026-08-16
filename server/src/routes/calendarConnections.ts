@@ -23,6 +23,7 @@ import {
   GoogleCalendarOAuthError,
   listGoogleCalendarsForSalon,
   loadGoogleCalendarAppConfig,
+  previewGoogleCalendarEventsForSalon,
   selectGoogleCalendarForSalon,
 } from '../lib/googleCalendarOAuth.js';
 import type {
@@ -544,6 +545,80 @@ router.put('/google/calendar', requireSalonWriteAccess, async (req, res) => {
       operation: 'google_select_calendar',
     });
     return res.status(500).json({ error: 'Could not select Google calendar' });
+  }
+});
+
+/**
+ * GET /api/calendar/google/events/preview
+ * GOOGLE-CAL-FAST-2: Read-only events.list preview for the selected calendar.
+ * Does not create clients/appointments/reminders or enable import.
+ */
+router.get('/google/events/preview', requireSalonWriteAccess, async (req, res) => {
+  const salonId = getSalonId(req);
+  try {
+    const preview = await previewGoogleCalendarEventsForSalon({
+      db: supabase as any,
+      salonId,
+    });
+    return res.json(preview);
+  } catch (err) {
+    if (err instanceof GoogleCalendarOAuthError) {
+      if (err.code === 'GOOGLE_OAUTH_NOT_CONNECTED') {
+        return res.status(404).json({
+          error: 'Google Calendar is not connected',
+          code: 'google_not_connected',
+        });
+      }
+      if (err.code === 'GOOGLE_CALENDAR_NOT_SELECTED') {
+        return res.status(400).json({
+          error: 'Google calendar is not selected',
+          code: 'google_calendar_not_selected',
+        });
+      }
+      if (
+        err.code === 'GOOGLE_OAUTH_DECRYPT_FAILED' ||
+        err.code === 'GOOGLE_OAUTH_TOKEN_EXCHANGE_FAILED' ||
+        err.code === 'GOOGLE_OAUTH_NOT_CONFIGURED'
+      ) {
+        console.error('[calendar] google events preview token failed', {
+          salonId,
+          operation: 'google_events_preview',
+          code: err.code,
+        });
+        return res.status(502).json({
+          error: 'Could not refresh Google credentials',
+          code: 'google_token_refresh_failed',
+        });
+      }
+      if (err.code === 'GOOGLE_EVENTS_FETCH_FAILED') {
+        console.error('[calendar] google events preview fetch failed', {
+          salonId,
+          operation: 'google_events_preview',
+          code: err.code,
+        });
+        return res.status(502).json({
+          error: 'Could not load Google calendar events',
+          code: 'google_events_fetch_failed',
+        });
+      }
+      console.error('[calendar] google events preview failed', {
+        salonId,
+        operation: 'google_events_preview',
+        code: err.code,
+      });
+      return res.status(502).json({
+        error: 'Could not load Google calendar events',
+        code: 'google_events_fetch_failed',
+      });
+    }
+    console.error('[calendar] google events preview unexpected', {
+      salonId,
+      operation: 'google_events_preview',
+    });
+    return res.status(500).json({
+      error: 'Could not load Google calendar events',
+      code: 'google_events_fetch_failed',
+    });
   }
 });
 

@@ -446,6 +446,43 @@ export interface GoogleCalendarListItem {
   timeZone: string | null;
 }
 
+/** Normalized Google event start/end for FAST-2 preview. */
+export interface GoogleEventTimePreview {
+  dateTime: string | null;
+  date: string | null;
+  timeZone: string | null;
+  allDay: boolean;
+}
+
+/** Safe Google events.list preview DTO (no credentials). */
+export interface GoogleEventPreviewItem {
+  id: string;
+  iCalUID: string | null;
+  summary: string | null;
+  description: string | null;
+  location: string | null;
+  status: string | null;
+  start: GoogleEventTimePreview;
+  end: GoogleEventTimePreview;
+  recurringEventId: string | null;
+  originalStartTime: GoogleEventTimePreview | null;
+  updated: string | null;
+  etag: string | null;
+  htmlLink: string | null;
+  calendarId: string;
+  calendarName: string | null;
+}
+
+export interface GoogleEventsPreviewResponse {
+  events: GoogleEventPreviewItem[];
+  count: number;
+  truncated: boolean;
+  windowStart: string;
+  windowEnd: string;
+  calendarId: string;
+  calendarName: string | null;
+}
+
 /** Meta WhatsApp Cloud API architecture marker. */
 export type WhatsAppCloudProvider = 'meta_cloud';
 

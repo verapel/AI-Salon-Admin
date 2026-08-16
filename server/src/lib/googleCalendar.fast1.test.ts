@@ -578,7 +578,6 @@ describe('GOOGLE-CAL-FAST-1 static contracts', () => {
     assert.match(routes, /router\.put\('\/google\/calendar',\s*requireSalonWriteAccess/);
     assert.match(routes, /router\.delete\('\/google',\s*requireSalonWriteAccess/);
     assert.match(routes, /getSalonId\(req\)/);
-    assert.doesNotMatch(routes, /events\.list|calendar\/v3\/calendars\/.*\/events/);
   });
 
   it('OAuth state migration additive; single-use nonce RPCs; RLS service_role', () => {
@@ -597,7 +596,6 @@ describe('GOOGLE-CAL-FAST-1 static contracts', () => {
     assert.match(routes, /router\.delete\('\/google'/);
     assert.match(integrations, /Connect Google|integrations\.google\.connect/);
     assert.match(apiClient, /getGoogleAuthUrl|getGoogleCalendars|selectGoogleCalendar|disconnectGoogle/);
-    assert.doesNotMatch(oauth, /events\.list/);
     assert.match(state, /google_calendar_oauth/);
     assert.doesNotMatch(
       a2Test,

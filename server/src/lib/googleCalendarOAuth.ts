@@ -24,7 +24,17 @@ export const GOOGLE_OAUTH_USERINFO_URL = 'https://openidconnect.googleapis.com/v
 export const GOOGLE_CALENDAR_LIST_URL =
   'https://www.googleapis.com/calendar/v3/users/me/calendarList';
 
+/** events.list base — append encodeURIComponent(calendarId) + '/events'. */
+export const GOOGLE_CALENDAR_EVENTS_URL_PREFIX =
+  'https://www.googleapis.com/calendar/v3/calendars/';
+
 export const GOOGLE_CALENDAR_PROVIDER = 'google' as const;
+
+/** FAST-2 preview safety caps (not final sync architecture). */
+export const GOOGLE_EVENTS_PREVIEW_MAX_PAGES = 10;
+export const GOOGLE_EVENTS_PREVIEW_MAX_EVENTS = 500;
+export const GOOGLE_EVENTS_PREVIEW_LOOKBACK_DAYS = 30;
+export const GOOGLE_EVENTS_PREVIEW_LOOKAHEAD_DAYS = 90;
 
 export type GoogleCalendarOAuthErrorCode =
   | 'GOOGLE_OAUTH_NOT_CONFIGURED'
@@ -36,7 +46,9 @@ export type GoogleCalendarOAuthErrorCode =
   | 'GOOGLE_OAUTH_NOT_CONNECTED'
   | 'GOOGLE_CALENDAR_LIST_FAILED'
   | 'GOOGLE_CALENDAR_NOT_FOUND'
-  | 'GOOGLE_CALENDAR_SAVE_FAILED';
+  | 'GOOGLE_CALENDAR_SAVE_FAILED'
+  | 'GOOGLE_CALENDAR_NOT_SELECTED'
+  | 'GOOGLE_EVENTS_FETCH_FAILED';
 
 export class GoogleCalendarOAuthError extends Error {
   readonly code: GoogleCalendarOAuthErrorCode;
@@ -76,6 +88,43 @@ export type GoogleCalendarListItem = {
   primary: boolean;
   accessRole: string | null;
   timeZone: string | null;
+};
+
+/** Normalized Google event start/end for preview (dateTime vs all-day date). */
+export type GoogleEventTimePreview = {
+  dateTime: string | null;
+  date: string | null;
+  timeZone: string | null;
+  allDay: boolean;
+};
+
+/** Safe events.list preview DTO — no tokens, no attendees dump. */
+export type GoogleEventPreviewItem = {
+  id: string;
+  iCalUID: string | null;
+  summary: string | null;
+  description: string | null;
+  location: string | null;
+  status: string | null;
+  start: GoogleEventTimePreview;
+  end: GoogleEventTimePreview;
+  recurringEventId: string | null;
+  originalStartTime: GoogleEventTimePreview | null;
+  updated: string | null;
+  etag: string | null;
+  htmlLink: string | null;
+  calendarId: string;
+  calendarName: string | null;
+};
+
+export type GoogleEventsPreviewResult = {
+  events: GoogleEventPreviewItem[];
+  count: number;
+  truncated: boolean;
+  windowStart: string;
+  windowEnd: string;
+  calendarId: string;
+  calendarName: string | null;
 };
 
 export type GoogleFetch = typeof fetch;
@@ -673,6 +722,307 @@ export async function selectGoogleCalendarForSalon(params: {
   return {
     selectedCalendarId: match.id,
     selectedCalendarName: match.summary,
+  };
+}
+
+export function buildGoogleEventsPreviewWindow(now: Date = new Date()): {
+  timeMin: string;
+  timeMax: string;
+} {
+  const start = new Date(now.getTime());
+  start.setUTCDate(start.getUTCDate() - GOOGLE_EVENTS_PREVIEW_LOOKBACK_DAYS);
+  const end = new Date(now.getTime());
+  end.setUTCDate(end.getUTCDate() + GOOGLE_EVENTS_PREVIEW_LOOKAHEAD_DAYS);
+  return {
+    timeMin: start.toISOString(),
+    timeMax: end.toISOString(),
+  };
+}
+
+export function buildGoogleCalendarEventsListUrl(params: {
+  calendarId: string;
+  timeMin: string;
+  timeMax: string;
+  pageToken?: string | null;
+  maxResults?: number;
+}): string {
+  const calendarId = params.calendarId.trim();
+  if (!calendarId) {
+    throw new GoogleCalendarOAuthError(
+      'GOOGLE_CALENDAR_NOT_SELECTED',
+      'Calendar is not selected',
+    );
+  }
+  const url = new URL(
+    `${GOOGLE_CALENDAR_EVENTS_URL_PREFIX}${encodeURIComponent(calendarId)}/events`,
+  );
+  url.searchParams.set('singleEvents', 'true');
+  url.searchParams.set('orderBy', 'startTime');
+  url.searchParams.set('showDeleted', 'false');
+  url.searchParams.set('timeMin', params.timeMin);
+  url.searchParams.set('timeMax', params.timeMax);
+  url.searchParams.set(
+    'maxResults',
+    String(params.maxResults && params.maxResults > 0 ? params.maxResults : 250),
+  );
+  if (params.pageToken?.trim()) {
+    url.searchParams.set('pageToken', params.pageToken.trim());
+  }
+  return url.toString();
+}
+
+export function mapGoogleEventTimePreview(raw: unknown): GoogleEventTimePreview {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { dateTime: null, date: null, timeZone: null, allDay: false };
+  }
+  const row = raw as Record<string, unknown>;
+  const dateTime =
+    typeof row.dateTime === 'string' && row.dateTime.trim()
+      ? row.dateTime.trim()
+      : null;
+  const date =
+    typeof row.date === 'string' && row.date.trim() ? row.date.trim() : null;
+  const timeZone =
+    typeof row.timeZone === 'string' && row.timeZone.trim()
+      ? row.timeZone.trim()
+      : null;
+  return {
+    dateTime,
+    date,
+    timeZone,
+    allDay: Boolean(date) && !dateTime,
+  };
+}
+
+export function mapGoogleEventPreviewEntry(
+  raw: unknown,
+  calendarId: string,
+  calendarName: string | null,
+): GoogleEventPreviewItem | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const row = raw as Record<string, unknown>;
+  const id = typeof row.id === 'string' ? row.id.trim() : '';
+  if (!id) return null;
+
+  const originalStart =
+    row.originalStartTime !== undefined && row.originalStartTime !== null
+      ? mapGoogleEventTimePreview(row.originalStartTime)
+      : null;
+
+  return {
+    id,
+    iCalUID:
+      typeof row.iCalUID === 'string' && row.iCalUID.trim()
+        ? row.iCalUID.trim()
+        : null,
+    summary:
+      typeof row.summary === 'string' && row.summary.trim()
+        ? row.summary.trim()
+        : typeof row.summary === 'string'
+          ? row.summary
+          : null,
+    description:
+      typeof row.description === 'string' ? row.description : null,
+    location: typeof row.location === 'string' ? row.location : null,
+    status: typeof row.status === 'string' ? row.status : null,
+    start: mapGoogleEventTimePreview(row.start),
+    end: mapGoogleEventTimePreview(row.end),
+    recurringEventId:
+      typeof row.recurringEventId === 'string' && row.recurringEventId.trim()
+        ? row.recurringEventId.trim()
+        : null,
+    originalStartTime: originalStart,
+    updated: typeof row.updated === 'string' ? row.updated : null,
+    etag: typeof row.etag === 'string' ? row.etag : null,
+    htmlLink: typeof row.htmlLink === 'string' ? row.htmlLink : null,
+    calendarId,
+    calendarName,
+  };
+}
+
+/**
+ * GOOGLE-CAL-FAST-2: Read-only events.list preview for a selected calendar.
+ * No syncToken. No DB writes. Caps pages/events.
+ */
+export async function listGoogleCalendarEventsPreview(params: {
+  accessToken: string;
+  calendarId: string;
+  calendarName?: string | null;
+  timeMin: string;
+  timeMax: string;
+  fetchImpl?: GoogleFetch;
+  maxPages?: number;
+  maxEvents?: number;
+}): Promise<{ events: GoogleEventPreviewItem[]; truncated: boolean }> {
+  const token = params.accessToken.trim();
+  if (!token) {
+    throw new GoogleCalendarOAuthError(
+      'GOOGLE_EVENTS_FETCH_FAILED',
+      'Access token is required',
+    );
+  }
+  const calendarId = params.calendarId.trim();
+  if (!calendarId) {
+    throw new GoogleCalendarOAuthError(
+      'GOOGLE_CALENDAR_NOT_SELECTED',
+      'Calendar is not selected',
+    );
+  }
+
+  const fetchImpl = params.fetchImpl ?? fetch;
+  const maxPages = params.maxPages ?? GOOGLE_EVENTS_PREVIEW_MAX_PAGES;
+  const maxEvents = params.maxEvents ?? GOOGLE_EVENTS_PREVIEW_MAX_EVENTS;
+  const calendarName = params.calendarName ?? null;
+  const events: GoogleEventPreviewItem[] = [];
+  let pageToken: string | null = null;
+  let pages = 0;
+  let truncated = false;
+
+  do {
+    if (pages >= maxPages || events.length >= maxEvents) {
+      truncated = true;
+      break;
+    }
+    pages += 1;
+
+    const remaining = maxEvents - events.length;
+    const pageSize = Math.min(250, remaining);
+    const url = buildGoogleCalendarEventsListUrl({
+      calendarId,
+      timeMin: params.timeMin,
+      timeMax: params.timeMax,
+      pageToken,
+      maxResults: pageSize,
+    });
+
+    let response: Response;
+    try {
+      response = await fetchImpl(url, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      throw new GoogleCalendarOAuthError(
+        'GOOGLE_EVENTS_FETCH_FAILED',
+        'Events list request failed',
+      );
+    }
+
+    let json: unknown = null;
+    try {
+      json = await response.json();
+    } catch {
+      json = null;
+    }
+    if (!response.ok) {
+      throw new GoogleCalendarOAuthError(
+        'GOOGLE_EVENTS_FETCH_FAILED',
+        'Events list request failed',
+      );
+    }
+    if (!json || typeof json !== 'object' || Array.isArray(json)) {
+      throw new GoogleCalendarOAuthError(
+        'GOOGLE_EVENTS_FETCH_FAILED',
+        'Events list response is invalid',
+      );
+    }
+
+    const body = json as Record<string, unknown>;
+    const items = Array.isArray(body.items) ? body.items : [];
+    for (const item of items) {
+      if (events.length >= maxEvents) {
+        truncated = true;
+        break;
+      }
+      const mapped = mapGoogleEventPreviewEntry(item, calendarId, calendarName);
+      if (mapped) events.push(mapped);
+    }
+
+    pageToken =
+      typeof body.nextPageToken === 'string' && body.nextPageToken.trim()
+        ? body.nextPageToken.trim()
+        : null;
+
+    if (pageToken && (pages >= maxPages || events.length >= maxEvents)) {
+      truncated = true;
+      break;
+    }
+  } while (pageToken);
+
+  return { events, truncated };
+}
+
+export async function previewGoogleCalendarEventsForSalon(params: {
+  db: any;
+  salonId: string;
+  fetchImpl?: GoogleFetch;
+  now?: Date;
+}): Promise<GoogleEventsPreviewResult> {
+  const config = loadGoogleCalendarAppConfig();
+  let row: GoogleConnectionCredentialRow;
+  try {
+    row = await loadGoogleConnectionCredentialRow(params.db, params.salonId);
+  } catch (err) {
+    if (err instanceof GoogleCalendarOAuthError) throw err;
+    throw new GoogleCalendarOAuthError(
+      'GOOGLE_OAUTH_NOT_CONNECTED',
+      'Google Calendar is not connected',
+    );
+  }
+
+  const calendarId = row.selected_calendar_id?.trim() ?? '';
+  if (!calendarId) {
+    throw new GoogleCalendarOAuthError(
+      'GOOGLE_CALENDAR_NOT_SELECTED',
+      'Google calendar is not selected',
+    );
+  }
+
+  let refreshToken: string;
+  try {
+    refreshToken = decryptGoogleRefreshToken(row);
+  } catch {
+    throw new GoogleCalendarOAuthError(
+      'GOOGLE_OAUTH_DECRYPT_FAILED',
+      'Could not decrypt Google credentials',
+    );
+  }
+
+  let accessToken: string;
+  try {
+    const refreshed = await refreshGoogleAccessToken({
+      refreshToken,
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      fetchImpl: params.fetchImpl,
+    });
+    accessToken = refreshed.accessToken;
+  } catch {
+    throw new GoogleCalendarOAuthError(
+      'GOOGLE_OAUTH_TOKEN_EXCHANGE_FAILED',
+      'Could not refresh Google access token',
+    );
+  }
+
+  const window = buildGoogleEventsPreviewWindow(params.now ?? new Date());
+  const calendarName = row.selected_calendar_name?.trim() || null;
+  const { events, truncated } = await listGoogleCalendarEventsPreview({
+    accessToken,
+    calendarId,
+    calendarName,
+    timeMin: window.timeMin,
+    timeMax: window.timeMax,
+    fetchImpl: params.fetchImpl,
+  });
+
+  return {
+    events,
+    count: events.length,
+    truncated,
+    windowStart: window.timeMin,
+    windowEnd: window.timeMax,
+    calendarId,
+    calendarName,
   };
 }
 

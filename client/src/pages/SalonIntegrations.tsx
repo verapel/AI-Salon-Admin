@@ -5,7 +5,12 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import Modal from '@/components/ui/Modal';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
-import type { CalendarConnectionPublic, GoogleCalendarListItem } from '@/types';
+import type {
+  CalendarConnectionPublic,
+  GoogleCalendarListItem,
+  GoogleEventPreviewItem,
+  GoogleEventTimePreview,
+} from '@/types';
 
 const BASIC_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -13,6 +18,30 @@ function isCredentialsStoredState(connection: CalendarConnectionPublic | null): 
   if (!connection?.isCredentialStored) return false;
   if (connection.status === 'disconnected') return false;
   return true;
+}
+
+function formatEventInstant(time: GoogleEventTimePreview): string {
+  if (time.allDay && time.date) return time.date;
+  if (time.dateTime) return time.dateTime;
+  if (time.date) return time.date;
+  return '—';
+}
+
+function formatEventDuration(
+  start: GoogleEventTimePreview,
+  end: GoogleEventTimePreview,
+  allDayLabel: string,
+): string {
+  if (start.allDay || end.allDay) return allDayLabel;
+  if (!start.dateTime || !end.dateTime) return '—';
+  const a = Date.parse(start.dateTime);
+  const b = Date.parse(end.dateTime);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return '—';
+  const mins = Math.round((b - a) / 60000);
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
 }
 
 export default function SalonIntegrations() {
@@ -46,6 +75,12 @@ export default function SalonIntegrations() {
   const [googleDisconnectOpen, setGoogleDisconnectOpen] = useState(false);
   const [googleDisconnectError, setGoogleDisconnectError] = useState<string | null>(null);
   const [googleDisconnectSubmitting, setGoogleDisconnectSubmitting] = useState(false);
+
+  const [googlePreviewEvents, setGooglePreviewEvents] = useState<GoogleEventPreviewItem[]>([]);
+  const [googlePreviewLoading, setGooglePreviewLoading] = useState(false);
+  const [googlePreviewError, setGooglePreviewError] = useState<string | null>(null);
+  const [googlePreviewTruncated, setGooglePreviewTruncated] = useState(false);
+  const [googlePreviewLoaded, setGooglePreviewLoaded] = useState(false);
 
   const refreshConnections = useCallback(async () => {
     const data = await api.calendar.getConnections();
@@ -226,12 +261,37 @@ export default function SalonIntegrations() {
       setShowCalendarPicker(false);
       setGoogleDisconnectOpen(false);
       setGoogleBanner(null);
+      setGooglePreviewEvents([]);
+      setGooglePreviewLoaded(false);
+      setGooglePreviewTruncated(false);
+      setGooglePreviewError(null);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : t('integrations.google.disconnectError');
       setGoogleDisconnectError(message || t('integrations.google.disconnectError'));
     } finally {
       setGoogleDisconnectSubmitting(false);
+    }
+  };
+
+  const handlePreviewGoogleEvents = async () => {
+    if (googlePreviewLoading) return;
+    setGooglePreviewLoading(true);
+    setGooglePreviewError(null);
+    try {
+      const data = await api.calendar.getGoogleEventsPreview();
+      setGooglePreviewEvents(data.events);
+      setGooglePreviewTruncated(Boolean(data.truncated));
+      setGooglePreviewLoaded(true);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : t('integrations.google.previewError');
+      setGooglePreviewError(message || t('integrations.google.previewError'));
+      setGooglePreviewEvents([]);
+      setGooglePreviewLoaded(false);
+      setGooglePreviewTruncated(false);
+    } finally {
+      setGooglePreviewLoading(false);
     }
   };
 
@@ -430,6 +490,20 @@ export default function SalonIntegrations() {
                     <button
                       type="button"
                       className="btn-secondary"
+                      disabled={googlePreviewLoading}
+                      onClick={() => {
+                        void handlePreviewGoogleEvents();
+                      }}
+                    >
+                      {googlePreviewLoading
+                        ? t('integrations.google.previewLoading')
+                        : t('integrations.google.previewEvents')}
+                    </button>
+                  ) : null}
+                  {googleSelected ? (
+                    <button
+                      type="button"
+                      className="btn-secondary"
                       disabled={googleCalendarsLoading}
                       onClick={() => {
                         setShowCalendarPicker(true);
@@ -450,6 +524,89 @@ export default function SalonIntegrations() {
                     {t('integrations.google.disconnect')}
                   </button>
                 </div>
+
+                {googleSelected ? (
+                  <div className="space-y-3 border-t border-gray-200 pt-3 dark:border-gray-700">
+                    <p className="text-sm text-amber-800 dark:text-amber-200">
+                      {t('integrations.google.previewBanner')}
+                    </p>
+                    {googlePreviewError ? (
+                      <p className="text-sm text-red-600 dark:text-red-400">
+                        {googlePreviewError}
+                      </p>
+                    ) : null}
+                    {googlePreviewTruncated ? (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {t('integrations.google.previewTruncated')}
+                      </p>
+                    ) : null}
+                    {googlePreviewLoaded && googlePreviewEvents.length === 0 ? (
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        {t('integrations.google.previewEmpty')}
+                      </p>
+                    ) : null}
+                    {googlePreviewEvents.length > 0 ? (
+                      <div className="max-h-96 overflow-auto rounded-md border border-gray-200 dark:border-gray-700">
+                        <table className="min-w-full divide-y divide-gray-200 text-left text-sm dark:divide-gray-700">
+                          <thead className="bg-gray-100 dark:bg-gray-900/60">
+                            <tr>
+                              <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
+                                {t('integrations.google.previewColStart')}
+                              </th>
+                              <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
+                                {t('integrations.google.previewColEnd')}
+                              </th>
+                              <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
+                                {t('integrations.google.previewColTitle')}
+                              </th>
+                              <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
+                                {t('integrations.google.previewColDuration')}
+                              </th>
+                              <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
+                                {t('integrations.google.previewColStatus')}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                            {googlePreviewEvents.map((ev) => (
+                              <tr key={ev.id} className="align-top">
+                                <td className="px-3 py-2 whitespace-nowrap text-gray-900 dark:text-gray-100">
+                                  {formatEventInstant(ev.start)}
+                                  {ev.start.allDay ? (
+                                    <span className="mt-1 block text-xs text-gray-500">
+                                      {t('integrations.google.previewAllDay')}
+                                    </span>
+                                  ) : null}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap text-gray-900 dark:text-gray-100">
+                                  {formatEventInstant(ev.end)}
+                                </td>
+                                <td className="px-3 py-2 text-gray-900 dark:text-gray-100">
+                                  <div className="font-medium">{ev.summary || '—'}</div>
+                                  {ev.location ? (
+                                    <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                                      {ev.location}
+                                    </div>
+                                  ) : null}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300">
+                                  {formatEventDuration(
+                                    ev.start,
+                                    ev.end,
+                                    t('integrations.google.previewAllDay'),
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300">
+                                  {ev.status || '—'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             )}
           </div>

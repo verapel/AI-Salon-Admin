@@ -209,6 +209,10 @@ export const api = {
           body: JSON.stringify({ calendarId }),
         },
       ),
+    getGoogleEventsPreview: () =>
+      request<import('@/types').GoogleEventsPreviewResponse>(
+        '/calendar/google/events/preview',
+      ),
     disconnectGoogle: () =>
       request<{ connection: import('@/types').CalendarConnectionPublic | null }>(
         '/calendar/google',

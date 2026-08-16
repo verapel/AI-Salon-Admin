@@ -227,11 +227,11 @@ describe('GOOGLE-CAL-A2 calendar connections read model', () => {
     assert.doesNotMatch(routes, /req\.query\.salonId|req\.body\.salonId/);
   });
 
-  it('11. A2 foundation intact; Google OAuth routes owned by FAST-1', () => {
-    // A2 shipped read-model + source enum only. OAuth/discovery live in GOOGLE-CAL-FAST-1.
+  it('11. A2 foundation intact; Google OAuth/preview owned by later stages', () => {
+    // A2 shipped read-model + source enum only. OAuth/discovery/preview live in FAST-1/2.
     assert.match(routes, /buildCalendarConnectionsResponse|connections/);
     assert.match(serverTypes, /'google'/);
-    assert.doesNotMatch(routes, /events\.list/);
+    assert.doesNotMatch(routes, /from\('appointments'\)|appointment_external_links/);
   });
 
   it('Apple write routes and crypto helper unchanged in behaviour surface', () => {
