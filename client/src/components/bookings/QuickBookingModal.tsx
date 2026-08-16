@@ -3,8 +3,15 @@ import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
-import { createQuickBooking, emptyQuickBookingForm } from '@/lib/quickBooking';
-import type { Staff } from '@/types';
+import {
+  applyClientNameQuery,
+  applyExistingClientSelection,
+  createQuickBooking,
+  emptyQuickBookingForm,
+  formatClientSuggestion,
+  matchExistingClients,
+} from '@/lib/quickBooking';
+import type { Client, Staff } from '@/types';
 
 interface QuickBookingModalProps {
   open: boolean;
@@ -16,21 +23,29 @@ export default function QuickBookingModal({ open, onClose, onSuccess }: QuickBoo
   const { t } = useLanguage();
   const [form, setForm] = useState(emptyQuickBookingForm);
   const [staff, setStaff] = useState<Staff[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [loadingStaff, setLoadingStaff] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setForm(emptyQuickBookingForm());
     setError(null);
+    setShowSuggestions(false);
     setLoadingStaff(true);
-    api.staff
-      .getAll()
-      .then((list) => setStaff(list.filter((s) => s.active)))
+    Promise.all([api.staff.getAll(), api.clients.getAll()])
+      .then(([staffList, clientList]) => {
+        setStaff(staffList.filter((s) => s.active));
+        setClients(clientList);
+      })
       .catch(() => setError(t('quickBooking.submitError')))
       .finally(() => setLoadingStaff(false));
   }, [open, t]);
+
+  const suggestions =
+    form.clientId || !showSuggestions ? [] : matchExistingClients(form.clientName, clients);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,15 +78,39 @@ export default function QuickBookingModal({ open, onClose, onSuccess }: QuickBoo
             </p>
           )}
 
-          <div>
+          <div className="relative">
             <label className="mb-1.5 block text-sm font-medium">{t('quickBooking.fieldClientName')}</label>
             <input
               className="input-field w-full min-w-0"
               value={form.clientName}
-              onChange={(e) => setForm({ ...form, clientName: e.target.value })}
+              onChange={(e) => {
+                setForm(applyClientNameQuery(form, e.target.value));
+                setShowSuggestions(true);
+              }}
+              onFocus={() => setShowSuggestions(true)}
               placeholder={t('quickBooking.placeholderClientName')}
+              autoComplete="off"
               required
             />
+            {suggestions.length > 0 && (
+              <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                {suggestions.map((client) => (
+                  <li key={client.id}>
+                    <button
+                      type="button"
+                      className="w-full px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setForm(applyExistingClientSelection(form, client));
+                        setShowSuggestions(false);
+                      }}
+                    >
+                      {formatClientSuggestion(client)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div>

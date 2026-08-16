@@ -1,11 +1,20 @@
 import { api } from '@/lib/api';
+import {
+  resolveClientId as resolveClientIdWithStore,
+  type QuickBookingClientStore,
+} from '@/lib/quickBookingMatch';
 
-export const normalizePhone = (phone: string) => phone.replace(/\D/g, '');
-
-export const quickClientEmail = (phone: string) => {
-  const digits = normalizePhone(phone);
-  return `quick-client-${digits || Date.now()}@no-email.local`;
-};
+export {
+  applyClientNameQuery,
+  applyExistingClientSelection,
+  formatClientSuggestion,
+  matchExistingClients,
+  normalizePhone,
+  quickClientEmail,
+  QUICK_BOOKING_SUGGESTION_LIMIT,
+  resolveClientId as resolveClientIdWithStore,
+} from '@/lib/quickBookingMatch';
+export type { QuickBookingClientMatch, QuickBookingClientStore } from '@/lib/quickBookingMatch';
 
 const toLocalDateStr = (date = new Date()) => {
   const y = date.getFullYear();
@@ -16,6 +25,7 @@ const toLocalDateStr = (date = new Date()) => {
 
 export function emptyQuickBookingForm() {
   return {
+    clientId: null as string | null,
     clientName: '',
     phone: '',
     serviceName: '',
@@ -28,21 +38,18 @@ export function emptyQuickBookingForm() {
 
 export type QuickBookingForm = ReturnType<typeof emptyQuickBookingForm>;
 
-export async function resolveClientId(name: string, phone: string): Promise<string> {
-  const trimmedName = name.trim();
-  const trimmedPhone = phone.trim();
-  const clients = await api.clients.getAll();
-  const normalized = normalizePhone(trimmedPhone);
-  const existing = clients.find((c) => normalizePhone(c.phone) === normalized);
-  if (existing) return existing.id;
+const defaultClientStore: QuickBookingClientStore = {
+  list: () => api.clients.getAll(),
+  create: (data) => api.clients.create(data),
+};
 
-  const created = await api.clients.create({
-    name: trimmedName,
-    phone: trimmedPhone,
-    email: quickClientEmail(trimmedPhone),
-    notes: '',
-  });
-  return created.id;
+export async function resolveClientId(
+  name: string,
+  phone: string,
+  existingClientId?: string | null,
+  store: QuickBookingClientStore = defaultClientStore
+): Promise<string> {
+  return resolveClientIdWithStore(name, phone, existingClientId, store);
 }
 
 export async function resolveServiceId(serviceName: string): Promise<string> {
@@ -62,7 +69,7 @@ export async function resolveServiceId(serviceName: string): Promise<string> {
 }
 
 export async function createQuickBooking(form: QuickBookingForm) {
-  const clientId = await resolveClientId(form.clientName, form.phone);
+  const clientId = await resolveClientId(form.clientName, form.phone, form.clientId);
   const serviceId = await resolveServiceId(form.serviceName);
   return api.appointments.create({
     clientId,
