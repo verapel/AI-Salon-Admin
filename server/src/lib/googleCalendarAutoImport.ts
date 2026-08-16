@@ -37,9 +37,17 @@ import {
 import { decryptCalendarCredential } from './calendarCredentialsCrypto.js';
 import { getSalonTimezone } from './scheduleSlots.js';
 import {
+  isGoogleEventEligibleForSalonCalendarDisplay,
   persistGoogleReviewOrResolve,
   resolveGoogleCalendarReviewIssue,
 } from './googleCalendarReviewOverlay.js';
+import {
+  loadGoogleCoverageClientSession,
+  loadRememberedGoogleCoverageClientId,
+  pickGoogleCoverageDisplayName,
+  resolveOrCreateGoogleCoverageClient,
+  type CoverageClientRecord,
+} from './googleCalendarCoverageClient.js';
 
 export const GOOGLE_AUTO_IMPORT_STAFF_CONFIG_KEY = 'auto_import_staff_id' as const;
 /** ISO watermark: only events with Google `created` strictly after this instant are auto-imported. */
@@ -941,13 +949,50 @@ export async function pullGoogleCalendarConnection(params: {
       }
     }
 
-    const catalog =
+    const loadedCatalog =
       params.matchCatalog ??
       (await loadSalonCalendarMatchCatalog(params.db, params.salonId));
+    const catalog = {
+      clients: [...loadedCatalog.clients],
+      services: loadedCatalog.services,
+    };
 
     const executeImport = params.executeImport ?? executeManualGoogleCalendarImport;
     const serviceNames = catalog.services.map((s) => s.name);
+    const clientSession: CoverageClientRecord[] = await loadGoogleCoverageClientSession({
+      db: params.db,
+      salonId: params.salonId,
+      catalog,
+    });
     let attemptedImports = 0;
+
+    const ensureAutoCoverageClient = async (
+      ev: GoogleEventPreviewItem,
+      parsedClientName: string | null,
+      phoneDigits: string,
+    ): Promise<string | null> => {
+      if (!isGoogleEventEligibleForSalonCalendarDisplay(ev)) return null;
+      const rememberedClientId = await loadRememberedGoogleCoverageClientId({
+        db: params.db,
+        salonId: params.salonId,
+        calendarConnectionId: params.connectionId,
+        ev,
+      });
+      const resolved = await resolveOrCreateGoogleCoverageClient({
+        db: params.db,
+        salonId: params.salonId,
+        session: clientSession,
+        catalog,
+        ev,
+        displayName: pickGoogleCoverageDisplayName({
+          clientNameCandidate: parsedClientName,
+          title: ev.summary,
+        }),
+        phoneDigits,
+        rememberedClientId,
+      });
+      return resolved?.clientId ?? null;
+    };
 
     for (const ev of events) {
       summary.scanned += 1;
@@ -982,6 +1027,11 @@ export async function pullGoogleCalendarConnection(params: {
 
         if (decision.action === 'skip') {
           bumpSkip(decision.reason);
+          const coverageClientId = await ensureAutoCoverageClient(
+            ev,
+            parsed.clientNameCandidate,
+            parsed.phone.normalized || '',
+          );
           await persistGoogleReviewOrResolve({
             db: params.db,
             salonId: params.salonId,
@@ -993,12 +1043,18 @@ export async function pullGoogleCalendarConnection(params: {
             salonTimeZone,
             matching,
             importedKeys,
+            clientId: coverageClientId,
           });
           continue;
         }
 
         if (attemptedImports >= GOOGLE_CALENDAR_PULL_MAX_IMPORTS) {
           bumpSkip('import_bound');
+          const coverageClientId = await ensureAutoCoverageClient(
+            ev,
+            parsed.clientNameCandidate,
+            parsed.phone.normalized || '',
+          );
           await persistGoogleReviewOrResolve({
             db: params.db,
             salonId: params.salonId,
@@ -1010,6 +1066,7 @@ export async function pullGoogleCalendarConnection(params: {
             salonTimeZone,
             matching,
             importedKeys,
+            clientId: coverageClientId,
           });
           continue;
         }
@@ -1033,6 +1090,11 @@ export async function pullGoogleCalendarConnection(params: {
         }
         attemptedImports += 1;
 
+        const coverageClientId = await ensureAutoCoverageClient(
+          ev,
+          parsed.clientNameCandidate,
+          parsed.phone.normalized || '',
+        );
         const result: ManualGoogleImportResult = await executeImport({
           db: params.db,
           salonId: params.salonId,
@@ -1043,9 +1105,11 @@ export async function pullGoogleCalendarConnection(params: {
             staffId: decision.staffId,
             serviceId: decision.serviceId,
             client:
-              decision.clientMode === 'existing'
-                ? { mode: 'existing', clientId: decision.clientId }
-                : { mode: 'new', name: decision.clientName },
+              coverageClientId
+                ? { mode: 'existing', clientId: coverageClientId }
+                : decision.clientMode === 'existing'
+                  ? { mode: 'existing', clientId: decision.clientId }
+                  : { mode: 'new', name: decision.clientName },
             expectedEtag: ev.etag || undefined,
             expectedUpdated: ev.updated || undefined,
           },

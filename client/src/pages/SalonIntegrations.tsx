@@ -1104,14 +1104,26 @@ export default function SalonIntegrations() {
                       <div className="space-y-1 text-sm text-gray-800 dark:text-gray-200">
                         <p className="font-medium">{t('integrations.google.backfillDone')}</p>
                         <p>
+                          {t('integrations.google.backfillScanned')}: {googleBackfillResult.scanned}
+                        </p>
+                        <p>
+                          {t('integrations.google.backfillRepresented')}:{' '}
+                          {googleBackfillResult.represented}
+                        </p>
+                        <p>
                           {t('integrations.google.backfillImported')}: {googleBackfillResult.imported}
                         </p>
                         <p>
-                          {t('integrations.google.backfillAlready')}:{' '}
-                          {googleBackfillResult.alreadyImported}
+                          {t('integrations.google.backfillReviewEvents')}:{' '}
+                          {googleBackfillResult.reviewEvents}
                         </p>
                         <p>
-                          {t('integrations.google.backfillSkipped')}: {googleBackfillResult.skipped}
+                          {t('integrations.google.backfillClientsCreated')}:{' '}
+                          {googleBackfillResult.clientsCreated}
+                        </p>
+                        <p>
+                          {t('integrations.google.backfillClientsReused')}:{' '}
+                          {googleBackfillResult.clientsReused}
                         </p>
                         <p>
                           {t('integrations.google.backfillFailed')}: {googleBackfillResult.failed}

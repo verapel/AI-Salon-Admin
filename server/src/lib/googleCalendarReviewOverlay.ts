@@ -74,6 +74,7 @@ export type GoogleReviewCalendarItem = {
   clientCandidate: string | null;
   phoneCandidate: string | null;
   serviceCandidate: string | null;
+  clientId: string | null;
 };
 
 export type GoogleReviewParsedSnapshot = {
@@ -87,6 +88,7 @@ export type GoogleReviewParsedSnapshot = {
   clientCandidate: string | null;
   phoneCandidate: string | null;
   serviceCandidate: string | null;
+  clientId: string | null;
 };
 
 export function isGoogleEventCancelledOrDeleted(
@@ -209,6 +211,7 @@ export function buildGoogleReviewSnapshot(params: {
   staffId: string;
   staffName: string;
   matching?: CalendarEventMatchingPreview;
+  clientId?: string | null;
 }): GoogleReviewParsedSnapshot | null {
   const times = googleEventCalendarTimes(params.ev, params.salonTimeZone);
   if (!times) return null;
@@ -234,6 +237,7 @@ export function buildGoogleReviewSnapshot(params: {
     phoneCandidate: parsed.phone.normalized || parsed.phone.value,
     serviceCandidate:
       params.matching?.service.displayName || parsed.serviceCandidate,
+    clientId: params.clientId ?? null,
   };
 }
 
@@ -266,6 +270,7 @@ export function mapGoogleReviewIssueToCalendarItem(row: {
     clientCandidate: parsed.clientCandidate,
     phoneCandidate: parsed.phoneCandidate,
     serviceCandidate: parsed.serviceCandidate,
+    clientId: parsed.clientId,
   };
 }
 
@@ -288,6 +293,7 @@ function readSnapshot(raw: unknown): GoogleReviewParsedSnapshot | null {
     clientCandidate: typeof o.clientCandidate === 'string' ? o.clientCandidate : null,
     phoneCandidate: typeof o.phoneCandidate === 'string' ? o.phoneCandidate : null,
     serviceCandidate: typeof o.serviceCandidate === 'string' ? o.serviceCandidate : null,
+    clientId: typeof o.clientId === 'string' ? o.clientId : null,
   };
 }
 
@@ -314,6 +320,7 @@ export async function upsertGoogleCalendarReviewIssue(params: {
   staffName: string;
   salonTimeZone: string;
   matching?: CalendarEventMatchingPreview;
+  clientId?: string | null;
 }): Promise<boolean> {
   if (!isGoogleEventEligibleForSalonCalendarDisplay(params.ev)) return false;
   if (!googleSkipReasonNeedsCalendarOverlay(params.reasonCode) && params.reasonCode !== 'other') {
@@ -325,6 +332,7 @@ export async function upsertGoogleCalendarReviewIssue(params: {
     staffId: params.staffId,
     staffName: params.staffName,
     matching: params.matching,
+    clientId: params.clientId,
   });
   if (!snapshot) return false;
 
@@ -343,6 +351,7 @@ export async function upsertGoogleCalendarReviewIssue(params: {
       start: params.ev.start,
       end: params.ev.end,
       calendarId: params.ev.calendarId,
+      clientId: snapshot.clientId,
     },
     parsed_event: snapshot,
     reason_code: params.reasonCode,
@@ -492,6 +501,7 @@ export async function persistGoogleReviewOrResolve(params: {
   salonTimeZone: string;
   matching?: CalendarEventMatchingPreview;
   importedKeys: Set<string>;
+  clientId?: string | null;
 }): Promise<'overlay' | 'resolved' | 'hidden'> {
   if (isImportedGoogleOccurrence(params.ev, params.importedKeys)) {
     await resolveGoogleCalendarReviewIssue({

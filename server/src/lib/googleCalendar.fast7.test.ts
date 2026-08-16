@@ -106,12 +106,15 @@ function backfillDb(opts: {
     recurrence_id?: string;
     external_calendar_id?: string;
   }>;
+  clients?: Array<{ id: string; name: string; phone: string; notes?: string }>;
 } = {}) {
   const updates: Record<string, unknown>[] = [];
   const staffRows = opts.staffRows ?? [
     { id: STAFF, name: 'Tatev Mikaelyan', active: true },
   ];
   const importedLinkRows = opts.importedLinkRows ?? [];
+  const clients = opts.clients ?? [];
+  let clientSeq = 1;
   const cfg = opts.providerConfig ?? {
     [GOOGLE_AUTO_IMPORT_STAFF_CONFIG_KEY]: STAFF,
     [GOOGLE_AUTO_IMPORT_SINCE_CONFIG_KEY]: WATERMARK,
@@ -120,7 +123,41 @@ function backfillDb(opts: {
 
   return {
     updates,
+    clients,
     from(table: string) {
+      if (table === 'clients') {
+        return {
+          select() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              is() {
+                return chain;
+              },
+              then: async (resolve: any) => resolve({ data: clients, error: null }),
+            };
+            return chain;
+          },
+          insert(row: any) {
+            const created = {
+              id: row.id || `gclient-${clientSeq++}`,
+              name: row.name,
+              phone: row.phone || '',
+              notes: row.notes || '',
+            };
+            clients.push(created);
+            return {
+              select() {
+                return {
+                  single: async () => ({ data: { id: created.id }, error: null }),
+                };
+              },
+              then: async (resolve: any) => resolve({ data: created, error: null }),
+            };
+          },
+        };
+      }
       if (table === 'appointment_external_links') {
         return {
           select() {
@@ -303,14 +340,15 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
     assert.equal(calls, 0);
   });
 
-  it('3. future event is excluded', async () => {
+  it('3. future event is included (no future timeMax)', async () => {
     const window = buildGoogleBackfillWindow(NOW);
     const ev = previewEvent({
       id: 'future',
       start: { dateTime: FUTURE, date: null, timeZone: 'UTC', allDay: false },
       end: { dateTime: '2026-08-20T12:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
     });
-    assert.equal(isGoogleEventStartInBackfillWindow(ev, window), false);
+    assert.equal(isGoogleEventStartInBackfillWindow(ev, window), true);
+    assert.equal(window.timeMax, undefined);
     let calls = 0;
     const result = await runBackfill({
       events: [ev, previewEvent({ id: 'in-window' })],
@@ -324,9 +362,9 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
         };
       },
     });
-    assert.equal(selectGoogleEventsForBackfill([ev], window).length, 0);
-    assert.equal(result.imported, 1);
-    assert.equal(calls, 1);
+    assert.equal(selectGoogleEventsForBackfill([ev], window).length, 1);
+    assert.equal(result.imported, 2);
+    assert.equal(calls, 2);
   });
 
   it('4. >250 events follows pagination', async () => {
@@ -350,7 +388,7 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
       assert.match(url, /orderBy=startTime/);
       assert.match(url, /showDeleted=false/);
       assert.match(url, /timeMin=/);
-      assert.match(url, /timeMax=/);
+      assert.doesNotMatch(url, /timeMax=/);
       if (calls === 1) {
         return new Response(JSON.stringify({ items: page1, nextPageToken: 'p2' }), {
           status: 200,
@@ -364,7 +402,6 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
       accessToken: 'at',
       calendarId: 'primary',
       timeMin: buildGoogleBackfillWindow(NOW).timeMin,
-      timeMax: buildGoogleBackfillWindow(NOW).timeMax,
       fetchImpl,
     });
     assert.equal(listed.events.length, 270);
@@ -394,7 +431,6 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
       accessToken: 'at',
       calendarId: 'primary',
       timeMin: buildGoogleBackfillWindow(NOW).timeMin,
-      timeMax: buildGoogleBackfillWindow(NOW).timeMax,
       fetchImpl,
     });
     assert.equal(listed.events.length, 5000);
@@ -404,7 +440,6 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
       accessToken: 'at',
       calendarId: 'primary',
       timeMin: buildGoogleBackfillWindow(NOW).timeMin,
-      timeMax: buildGoogleBackfillWindow(NOW).timeMax,
       fetchImpl: (async () =>
         new Response(
           JSON.stringify({
@@ -510,7 +545,7 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
   });
 
   it('9. safe new client is created', async () => {
-    let client: { mode?: string; name?: string } = {};
+    let client: { mode?: string; name?: string; clientId?: string } = {};
     const result = await runBackfill({
       executeImport: async ({ body }) => {
         client = body.client;
@@ -523,8 +558,9 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
       },
     });
     assert.equal(result.imported, 1);
-    assert.equal(client.mode, 'new');
-    assert.equal(client.name, 'Agunik Yeganian');
+    assert.equal(client.mode, 'existing');
+    assert.ok(client.clientId);
+    assert.equal(result.clientsCreated, 1);
   });
 
   it('10. no exact phone is skipped', async () => {

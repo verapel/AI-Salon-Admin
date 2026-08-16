@@ -82,15 +82,54 @@ function coverageDb(opts: {
     external_calendar_id?: string;
   }>;
   issues?: IssueRow[];
+  clients?: Array<{ id: string; name: string; phone: string; notes?: string; deleted_at?: string | null }>;
 } = {}) {
   const importedLinkRows = opts.importedLinkRows ?? [];
   const issues = opts.issues ?? [];
+  const clients = opts.clients ?? [];
   let issueSeq = 1;
+  let clientSeq = 1;
 
   return {
     issues,
     importedLinkRows,
+    clients,
     from(table: string) {
+      if (table === 'clients') {
+        return {
+          select() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              is() {
+                return chain;
+              },
+              then: async (resolve: any) => resolve({ data: clients, error: null }),
+            };
+            return chain;
+          },
+          insert(row: any) {
+            const created = {
+              id: row.id || `gclient-${clientSeq++}`,
+              name: row.name,
+              phone: row.phone || '',
+              notes: row.notes || '',
+              deleted_at: null,
+            };
+            clients.push(created);
+            const chain: any = {
+              select() {
+                return {
+                  single: async () => ({ data: { id: created.id }, error: null }),
+                };
+              },
+              then: async (resolve: any) => resolve({ data: created, error: null }),
+            };
+            return chain;
+          },
+        };
+      }
       if (table === 'calendar_import_issues') {
         return {
           select() {
@@ -448,7 +487,6 @@ describe('GOOGLE-CAL-FAST-7B all-event calendar coverage', () => {
       accessToken: 'at',
       calendarId: 'primary',
       timeMin: window.timeMin,
-      timeMax: window.timeMax,
       fetchImpl,
     });
     assert.equal(listed.events.length, 260);
@@ -527,7 +565,7 @@ describe('GOOGLE-CAL-FAST-7B all-event calendar coverage', () => {
     assert.equal(item?.kind, 'google_review');
     assert.equal(item?.staffId, STAFF);
     assert.equal(item?.title, TITLE);
-    assert.doesNotMatch(JSON.stringify(item), /"clientId"/);
+    assert.equal(item?.clientId, null);
     assert.doesNotMatch(JSON.stringify(item), /"serviceId"/);
   });
 

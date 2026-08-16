@@ -908,7 +908,7 @@ export async function listGoogleCalendarEventsPreview(params: {
   calendarId: string;
   calendarName?: string | null;
   timeMin: string;
-  timeMax: string;
+  timeMax?: string;
   fetchImpl?: GoogleFetch;
   maxPages?: number;
   maxEvents?: number;

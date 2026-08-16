@@ -647,14 +647,21 @@ export interface GoogleReviewCalendarItem {
   clientCandidate: string | null;
   phoneCandidate: string | null;
   serviceCandidate: string | null;
+  clientId?: string | null;
 }
 
-/** Compact FAST-7 30-day backfill summary (no appointment/client rows). */
+/** Compact FAST-7D coverage summary (no appointment/client rows). */
 export interface GoogleBackfillLast30DaysResult {
   scanned: number;
+  represented: number;
   imported: number;
+  appointments: number;
+  reviewEvents: number;
+  clientsCreated: number;
+  clientsReused: number;
   alreadyImported: number;
   skipped: number;
+  excluded: number;
   failed: number;
   truncated: boolean;
   reasons: {

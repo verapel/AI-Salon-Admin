@@ -1,5 +1,5 @@
 /**
- * GOOGLE-CAL-FAST-7: Manual 30-day historical backfill from the selected Google Calendar.
+ * GOOGLE-CAL-FAST-7D: Manual coverage from now-30d through all future Google events.
  * Isolated from FAST-6 auto-pull. Does not write watermarks, page tokens, or Google events.
  * Reuses decideGoogleAutoImport (without autoImportSince) + executeManualGoogleCalendarImport.
  */
@@ -37,9 +37,17 @@ import {
 import { decryptCalendarCredential } from './calendarCredentialsCrypto.js';
 import { getSalonTimezone } from './scheduleSlots.js';
 import {
+  isGoogleEventEligibleForSalonCalendarDisplay,
   persistGoogleReviewOrResolve,
   resolveGoogleCalendarReviewIssue,
 } from './googleCalendarReviewOverlay.js';
+import {
+  loadGoogleCoverageClientSession,
+  loadRememberedGoogleCoverageClientId,
+  pickGoogleCoverageDisplayName,
+  resolveOrCreateGoogleCoverageClient,
+  type CoverageClientRecord,
+} from './googleCalendarCoverageClient.js';
 
 export const GOOGLE_BACKFILL_LOOKBACK_DAYS = 30;
 export const GOOGLE_BACKFILL_LOOKBACK_MS = GOOGLE_BACKFILL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
@@ -61,9 +69,15 @@ export type GoogleBackfillReasonCounts = {
 
 export type GoogleBackfillResult = {
   scanned: number;
+  represented: number;
   imported: number;
+  appointments: number;
+  reviewEvents: number;
+  clientsCreated: number;
+  clientsReused: number;
   alreadyImported: number;
   skipped: number;
+  excluded: number;
   failed: number;
   truncated: boolean;
   reasons: GoogleBackfillReasonCounts;
@@ -100,23 +114,28 @@ export function emptyGoogleBackfillReasons(): GoogleBackfillReasonCounts {
 export function emptyGoogleBackfillResult(truncated = false): GoogleBackfillResult {
   return {
     scanned: 0,
+    represented: 0,
     imported: 0,
+    appointments: 0,
+    reviewEvents: 0,
+    clientsCreated: 0,
+    clientsReused: 0,
     alreadyImported: 0,
     skipped: 0,
+    excluded: 0,
     failed: 0,
     truncated,
     reasons: emptyGoogleBackfillReasons(),
   };
 }
 
-/** Event START window: [now - 30 days, now). Future starts are excluded. */
+/** Event START window: [now - 30 days, +∞). No future timeMax. */
 export function buildGoogleBackfillWindow(now: Date = new Date()): {
   timeMin: string;
-  timeMax: string;
+  timeMax?: string;
 } {
   return {
     timeMin: new Date(now.getTime() - GOOGLE_BACKFILL_LOOKBACK_MS).toISOString(),
-    timeMax: now.toISOString(),
   };
 }
 
@@ -138,19 +157,21 @@ export function googleEventStartMs(
 
 export function isGoogleEventStartInBackfillWindow(
   ev: Pick<GoogleEventPreviewItem, 'start'>,
-  window: { timeMin: string; timeMax: string },
+  window: { timeMin: string; timeMax?: string },
 ): boolean {
   const startMs = googleEventStartMs(ev);
   if (startMs == null) return false;
   const min = Date.parse(window.timeMin);
+  if (!Number.isFinite(min) || startMs < min) return false;
+  if (!window.timeMax) return true;
   const max = Date.parse(window.timeMax);
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return false;
-  return startMs >= min && startMs < max;
+  if (!Number.isFinite(max)) return true;
+  return startMs < max;
 }
 
 export function selectGoogleEventsForBackfill(
   events: GoogleEventPreviewItem[],
-  window: { timeMin: string; timeMax: string },
+  window: { timeMin: string; timeMax?: string },
 ): GoogleEventPreviewItem[] {
   return events.filter((ev) => isGoogleEventStartInBackfillWindow(ev, window));
 }
@@ -216,7 +237,7 @@ export async function listGoogleCalendarEventsForBackfill(params: {
   calendarId: string;
   calendarName?: string | null;
   timeMin: string;
-  timeMax: string;
+  timeMax?: string;
   fetchImpl?: GoogleFetch;
   maxPages?: number;
   maxEvents?: number;
@@ -283,6 +304,7 @@ function applyBackfillOutcome(
 ): void {
   if (outcome.kind === 'alreadyImported') {
     summary.alreadyImported += 1;
+    summary.represented += 1;
     return;
   }
   summary.reasons[outcome.reason] += 1;
@@ -291,10 +313,54 @@ function applyBackfillOutcome(
     return;
   }
   summary.skipped += 1;
+  if (
+    outcome.reason === 'cancelled' ||
+    outcome.reason === 'allDay' ||
+    outcome.reason === 'invalidTime'
+  ) {
+    summary.excluded += 1;
+  }
+}
+
+async function ensureCoverageClient(params: {
+  db: any;
+  salonId: string;
+  calendarConnectionId: string;
+  ev: GoogleEventPreviewItem;
+  parsedClientName: string | null;
+  phoneDigits: string;
+  session: CoverageClientRecord[];
+  catalog: CalendarMatchCatalog;
+  summary: GoogleBackfillResult;
+}): Promise<string | null> {
+  if (!isGoogleEventEligibleForSalonCalendarDisplay(params.ev)) return null;
+  const rememberedClientId = await loadRememberedGoogleCoverageClientId({
+    db: params.db,
+    salonId: params.salonId,
+    calendarConnectionId: params.calendarConnectionId,
+    ev: params.ev,
+  });
+  const resolved = await resolveOrCreateGoogleCoverageClient({
+    db: params.db,
+    salonId: params.salonId,
+    session: params.session,
+    catalog: params.catalog,
+    ev: params.ev,
+    displayName: pickGoogleCoverageDisplayName({
+      clientNameCandidate: params.parsedClientName,
+      title: params.ev.summary,
+    }),
+    phoneDigits: params.phoneDigits,
+    rememberedClientId,
+  });
+  if (!resolved) return null;
+  if (resolved.created) params.summary.clientsCreated += 1;
+  else params.summary.clientsReused += 1;
+  return resolved.clientId;
 }
 
 /**
- * Manual 30-day backfill. Does not write FAST-6 provider_config keys.
+ * Manual now-30d → all-future coverage. Does not write FAST-6 provider_config keys.
  * One unsafe event is counted and skipped; later events still run.
  */
 export async function importGoogleCalendarLast30Days(params: {
@@ -404,7 +470,7 @@ export async function importGoogleCalendarLast30Days(params: {
       calendarId,
       calendarName: conn.selected_calendar_name ?? null,
       timeMin: window.timeMin,
-      timeMax: window.timeMax,
+      ...(window.timeMax ? { timeMax: window.timeMax } : {}),
       fetchImpl: params.fetchImpl,
       maxPages: params.maxPages,
       maxEvents: params.maxEvents,
@@ -427,10 +493,19 @@ export async function importGoogleCalendarLast30Days(params: {
     }
   }
 
-  const catalog =
+  const loadedCatalog =
     params.matchCatalog ?? (await loadSalonCalendarMatchCatalog(params.db, salonId));
+  const catalog = {
+    clients: [...loadedCatalog.clients],
+    services: loadedCatalog.services,
+  };
   const executeImport = params.executeImport ?? executeManualGoogleCalendarImport;
   const serviceNames = catalog.services.map((s) => s.name);
+  const clientSession: CoverageClientRecord[] = await loadGoogleCoverageClientSession({
+    db: params.db,
+    salonId,
+    catalog,
+  });
 
   for (const ev of events) {
     summary.scanned += 1;
@@ -472,6 +547,18 @@ export async function importGoogleCalendarLast30Days(params: {
         serviceNames,
       });
 
+      const coverageClientId = await ensureCoverageClient({
+        db: params.db,
+        salonId,
+        calendarConnectionId: conn.id,
+        ev,
+        parsedClientName: parsed.clientNameCandidate,
+        phoneDigits: parsed.phone.normalized || '',
+        session: clientSession,
+        catalog,
+        summary,
+      });
+
       if (decision.action === 'skip') {
         applyBackfillOutcome(
           summary,
@@ -480,7 +567,7 @@ export async function importGoogleCalendarLast30Days(params: {
             serviceStatus: matching.service.status,
           }),
         );
-        await persistGoogleReviewOrResolve({
+        const persistKind = await persistGoogleReviewOrResolve({
           db: params.db,
           salonId,
           calendarConnectionId: conn.id,
@@ -491,7 +578,12 @@ export async function importGoogleCalendarLast30Days(params: {
           salonTimeZone,
           matching,
           importedKeys,
+          clientId: coverageClientId,
         });
+        if (persistKind === 'overlay') {
+          summary.reviewEvents += 1;
+          summary.represented += 1;
+        }
         continue;
       }
 
@@ -505,9 +597,11 @@ export async function importGoogleCalendarLast30Days(params: {
           staffId: decision.staffId,
           serviceId: decision.serviceId,
           client:
-            decision.clientMode === 'existing'
-              ? { mode: 'existing', clientId: decision.clientId }
-              : { mode: 'new', name: decision.clientName },
+            coverageClientId
+              ? { mode: 'existing', clientId: coverageClientId }
+              : decision.clientMode === 'existing'
+                ? { mode: 'existing', clientId: decision.clientId }
+                : { mode: 'new', name: decision.clientName },
           expectedEtag: ev.etag || undefined,
           expectedUpdated: ev.updated || undefined,
         },
@@ -526,6 +620,8 @@ export async function importGoogleCalendarLast30Days(params: {
       } else {
         rememberImportedOccurrence(ev, importedKeys);
         summary.imported += 1;
+        summary.appointments += 1;
+        summary.represented += 1;
         await resolveGoogleCalendarReviewIssue({
           db: params.db,
           salonId,
@@ -545,7 +641,7 @@ export async function importGoogleCalendarLast30Days(params: {
           importErrorCode: code,
         }),
       );
-      await persistGoogleReviewOrResolve({
+      const persistKind = await persistGoogleReviewOrResolve({
         db: params.db,
         salonId,
         calendarConnectionId: conn.id,
@@ -556,6 +652,10 @@ export async function importGoogleCalendarLast30Days(params: {
         salonTimeZone,
         importedKeys,
       });
+      if (persistKind === 'overlay') {
+        summary.reviewEvents += 1;
+        summary.represented += 1;
+      }
       if (code === 'other' || !('code' in (err as object))) {
         console.error('[calendar/google-backfill] event import failed', {
           salonId,
