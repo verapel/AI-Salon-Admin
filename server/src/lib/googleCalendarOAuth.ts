@@ -20,6 +20,10 @@ import {
   type CalendarMatchCatalog,
   type CalendarMatchingStatus,
 } from './calendarEventMatcher.js';
+import type {
+  GoogleImportReadiness,
+  ImportableStaffOption,
+} from './googleCalendarImport.js';
 
 /** Read-only calendar + OpenID email for account display. No write / Gmail / contacts. */
 export const GOOGLE_CALENDAR_OAUTH_SCOPES = [
@@ -133,6 +137,8 @@ export type GoogleEventPreviewItem = {
   matching?: CalendarEventMatchingPreview;
   /** Convenience mirror of matching.matchingStatus for UI. */
   matchingStatus?: CalendarMatchingStatus;
+  /** GOOGLE-CAL-FAST-5B: manual import readiness (separate from parsed.importability). */
+  importReadiness?: GoogleImportReadiness;
 };
 
 export type GoogleEventsPreviewResult = {
@@ -145,6 +151,8 @@ export type GoogleEventsPreviewResult = {
   calendarName: string | null;
   /** Salon IANA timezone used for parsed local times (FAST-3B). */
   salonTimeZone?: string;
+  /** Active salon staff for manual import selector (FAST-5B). */
+  staffOptions?: ImportableStaffOption[];
 };
 
 export type GoogleFetch = typeof fetch;

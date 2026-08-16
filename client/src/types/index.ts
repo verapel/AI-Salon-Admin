@@ -537,6 +537,30 @@ export interface CalendarEventMatchingPreview {
   matchingStatus: CalendarMatchingStatus;
 }
 
+/** GOOGLE-CAL-FAST manual import readiness (separate from parsed.importability). */
+export type GoogleImportReadinessStatus =
+  | 'importable'
+  | 'needs_client_review'
+  | 'needs_service_review'
+  | 'needs_staff_review'
+  | 'already_imported'
+  | 'not_importable';
+
+export interface GoogleImportReadiness {
+  status: GoogleImportReadinessStatus;
+  reasons: string[];
+  occurrenceKey: string;
+  externalUid: string;
+  recurrenceId: string;
+  suggestedNewClientName: string | null;
+  canCreateNewClient: boolean;
+}
+
+export interface GoogleImportStaffOption {
+  id: string;
+  name: string;
+}
+
 /** Safe Google events.list preview DTO (no credentials). */
 export interface GoogleEventPreviewItem {
   id: string;
@@ -559,6 +583,8 @@ export interface GoogleEventPreviewItem {
   /** Present after FAST-4; optional for older responses. */
   matching?: CalendarEventMatchingPreview;
   matchingStatus?: CalendarMatchingStatus;
+  /** Present after manual-import foundation. */
+  importReadiness?: GoogleImportReadiness;
 }
 
 export interface GoogleEventsPreviewResponse {
@@ -570,6 +596,29 @@ export interface GoogleEventsPreviewResponse {
   calendarId: string;
   calendarName: string | null;
   salonTimeZone?: string;
+  staffOptions?: GoogleImportStaffOption[];
+}
+
+export interface GoogleEventImportRequest {
+  eventId: string;
+  recurrenceId?: string;
+  staffId: string;
+  serviceId: string;
+  client: {
+    mode: 'existing' | 'new';
+    clientId?: string;
+    name?: string;
+    phone?: string;
+  };
+  expectedEtag?: string;
+  expectedUpdated?: string;
+}
+
+export interface GoogleEventImportResponse {
+  appointmentId: string;
+  clientId: string;
+  clientCreated: boolean;
+  alreadyImported?: boolean;
 }
 
 /** Meta WhatsApp Cloud API architecture marker. */

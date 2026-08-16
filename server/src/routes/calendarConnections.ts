@@ -31,6 +31,15 @@ import {
   CALENDAR_MATCH_CATALOG_FAILED_CODE,
 } from '../lib/calendarEventMatcher.js';
 import { getSalonTimezone } from '../lib/scheduleSlots.js';
+import {
+  computeGoogleImportReadiness,
+  executeManualGoogleCalendarImport,
+  GoogleCalendarImportError,
+  loadActiveStaffOptions,
+  loadGoogleImportedOccurrenceKeys,
+  type GoogleImportErrorCode,
+  type ManualGoogleImportRequest,
+} from '../lib/googleCalendarImport.js';
 import type {
   AppleCalendarConnectRequest,
   CalendarConnectionPublic,
@@ -567,7 +576,74 @@ router.get('/google/events/preview', requireSalonWriteAccess, async (req, res) =
       salonId,
       salonTimeZone,
     });
-    return res.json(preview);
+
+    let importedKeys = new Set<string>();
+    try {
+      const { data: connRow } = await supabase
+        .from('calendar_connections')
+        .select('id')
+        .eq('salon_id', salonId)
+        .eq('provider', GOOGLE_PROVIDER)
+        .maybeSingle();
+      if (connRow?.id) {
+        importedKeys = await loadGoogleImportedOccurrenceKeys(supabase as any, {
+          salonId,
+          calendarConnectionId: String(connRow.id),
+        });
+      }
+    } catch (linkErr) {
+      console.error('[calendar] google events preview import-links failed', {
+        salonId,
+        operation: 'google_events_preview',
+        message: linkErr instanceof Error ? linkErr.message : String(linkErr),
+      });
+      // Soft-fail: preview still useful; import endpoint rechecks links.
+      importedKeys = new Set();
+    }
+
+    const staffOptions = await loadActiveStaffOptions(supabase as any, salonId);
+    const missingParsed = {
+      classification: ['invalid'],
+      importability: 'not_importable' as const,
+      localDate: null,
+      localStartTime: null,
+      localEndTime: null,
+      durationMinutes: null,
+      clientNameCandidate: null,
+      phone: { value: null, normalized: null, confidence: 'none' as const },
+      serviceCandidate: null,
+      priceCandidate: { value: null, raw: null, confidence: 'none' as const },
+      staffCandidate: null,
+      reasons: ['missing_parse'],
+    };
+    const events = preview.events.map((ev) => {
+      const parsed = ev.parsed ?? missingParsed;
+      const identity = computeGoogleImportReadiness({
+        parsed,
+        matching: ev.matching,
+        event: ev,
+        alreadyImported: false,
+      });
+      const alreadyImported =
+        importedKeys.has(identity.occurrenceKey) ||
+        importedKeys.has(identity.externalUid) ||
+        (identity.recurrenceId
+          ? importedKeys.has(`${identity.externalUid}:${identity.recurrenceId}`)
+          : false);
+      const importReadiness = computeGoogleImportReadiness({
+        parsed,
+        matching: ev.matching,
+        event: ev,
+        alreadyImported,
+      });
+      return { ...ev, importReadiness };
+    });
+
+    return res.json({
+      ...preview,
+      events,
+      staffOptions,
+    });
   } catch (err) {
     if (err instanceof CalendarMatchCatalogError) {
       console.error('[calendar] google events preview match catalog failed', {
@@ -637,6 +713,126 @@ router.get('/google/events/preview', requireSalonWriteAccess, async (req, res) =
     return res.status(500).json({
       error: 'Could not load Google calendar events',
       code: 'google_events_fetch_failed',
+    });
+  }
+});
+
+const GOOGLE_IMPORT_HTTP_STATUS: Record<GoogleImportErrorCode, number> = {
+  google_not_connected: 404,
+  google_calendar_not_selected: 400,
+  google_event_not_found: 404,
+  google_event_changed: 409,
+  google_event_cancelled: 400,
+  google_event_not_importable: 400,
+  google_event_already_imported: 409,
+  client_review_required: 400,
+  client_ambiguous: 409,
+  client_blocked: 403,
+  service_review_required: 400,
+  service_invalid: 400,
+  staff_required: 400,
+  staff_invalid: 400,
+  appointment_conflict: 409,
+  google_import_failed: 502,
+};
+
+/**
+ * POST /api/calendar/google/events/import
+ * GOOGLE-CAL-FAST-5B: Manual one-event import after owner confirmation.
+ * Re-fetches Google event; writes via owned RPC. No Google writes. No bulk.
+ */
+router.post('/google/events/import', requireSalonWriteAccess, async (req, res) => {
+  const salonId = getSalonId(req);
+  try {
+    const body = (req.body || {}) as Partial<ManualGoogleImportRequest>;
+    if (!body.eventId || typeof body.eventId !== 'string') {
+      return res.status(400).json({
+        error: 'eventId is required',
+        code: 'google_event_not_found',
+      });
+    }
+    if (!body.staffId || typeof body.staffId !== 'string') {
+      return res.status(400).json({
+        error: 'staffId is required',
+        code: 'staff_required',
+      });
+    }
+    if (!body.serviceId || typeof body.serviceId !== 'string') {
+      return res.status(400).json({
+        error: 'serviceId is required',
+        code: 'service_review_required',
+      });
+    }
+    if (!body.client || (body.client.mode !== 'existing' && body.client.mode !== 'new')) {
+      return res.status(400).json({
+        error: 'client confirmation is required',
+        code: 'client_review_required',
+      });
+    }
+
+    const salonTimeZone = await getSalonTimezone(salonId);
+    const result = await executeManualGoogleCalendarImport({
+      db: supabase as any,
+      salonId,
+      salonTimeZone,
+      body: {
+        eventId: body.eventId,
+        recurrenceId:
+          typeof body.recurrenceId === 'string' ? body.recurrenceId : undefined,
+        staffId: body.staffId,
+        serviceId: body.serviceId,
+        client: {
+          mode: body.client.mode,
+          clientId:
+            typeof body.client.clientId === 'string' ? body.client.clientId : undefined,
+          name: typeof body.client.name === 'string' ? body.client.name : undefined,
+          phone: typeof body.client.phone === 'string' ? body.client.phone : undefined,
+        },
+        expectedEtag:
+          typeof body.expectedEtag === 'string' ? body.expectedEtag : undefined,
+        expectedUpdated:
+          typeof body.expectedUpdated === 'string' ? body.expectedUpdated : undefined,
+      },
+    });
+
+    if (result.alreadyImported) {
+      return res.status(409).json({
+        error: 'Event already imported',
+        code: 'google_event_already_imported',
+        appointmentId: result.appointmentId || undefined,
+        clientId: result.clientId || undefined,
+        clientCreated: false,
+        alreadyImported: true,
+      });
+    }
+
+    return res.status(201).json({
+      appointmentId: result.appointmentId,
+      clientId: result.clientId,
+      clientCreated: result.clientCreated,
+      alreadyImported: false,
+    });
+  } catch (err) {
+    if (err instanceof GoogleCalendarImportError) {
+      const status = GOOGLE_IMPORT_HTTP_STATUS[err.code] ?? 502;
+      console.error('[calendar] google event import rejected', {
+        salonId,
+        operation: 'google_event_import',
+        code: err.code,
+      });
+      return res.status(status).json({
+        error: 'Could not import Google event',
+        code: err.code,
+      });
+    }
+    console.error('[calendar] google event import unexpected', {
+      salonId,
+      operation: 'google_event_import',
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return res.status(502).json({
+      error: 'Could not import Google event',
+      code: 'google_import_failed',
     });
   }
 });

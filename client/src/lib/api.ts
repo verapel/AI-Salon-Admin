@@ -213,6 +213,14 @@ export const api = {
       request<import('@/types').GoogleEventsPreviewResponse>(
         '/calendar/google/events/preview',
       ),
+    importGoogleEvent: (body: import('@/types').GoogleEventImportRequest) =>
+      request<import('@/types').GoogleEventImportResponse>(
+        '/calendar/google/events/import',
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        },
+      ),
     disconnectGoogle: () =>
       request<{ connection: import('@/types').CalendarConnectionPublic | null }>(
         '/calendar/google',
