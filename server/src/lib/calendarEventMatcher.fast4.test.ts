@@ -13,6 +13,8 @@ import {
   type ExternalCalendarEventInput,
 } from './calendarEventParser.js';
 import {
+  CALENDAR_MATCH_CATALOG_FAILED_CODE,
+  CalendarMatchCatalogError,
   loadSalonCalendarMatchCatalog,
   matchParsedCalendarEvent,
   matchServiceCandidate,
@@ -21,6 +23,7 @@ import {
   type MatchableClient,
   type MatchableService,
 } from './calendarEventMatcher.js';
+import { previewGoogleCalendarEventsForSalon } from './googleCalendarOAuth.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '../../..');
@@ -350,40 +353,243 @@ describe('GOOGLE-CAL-FAST-4 calendarEventMatcher (executed)', () => {
     assert.equal(JSON.stringify(catalog).includes('birthday'), false);
   });
 
-  it('logs catalog load errors without throwing (preview stays read-only)', async () => {
-    const errors: unknown[] = [];
-    const prev = console.error;
-    console.error = (...args: unknown[]) => {
-      errors.push(args);
+  it('FIX-1B A — client catalog SELECT error throws safe catalog error (no empty catalog)', async () => {
+    const db = {
+      from(table: string) {
+        return {
+          select() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then(resolve: (v: unknown) => void) {
+                if (table === 'clients') {
+                  resolve({ data: null, error: { message: 'clients-boom SECRET_SQL' } });
+                  return;
+                }
+                resolve({ data: [], error: null });
+              },
+            };
+            return chain;
+          },
+        };
+      },
     };
-    try {
-      const db = {
-        from(table: string) {
-          return {
-            select() {
-              const chain: any = {
-                eq() {
-                  return chain;
-                },
-                then(resolve: (v: unknown) => void) {
+    await assert.rejects(
+      () => loadSalonCalendarMatchCatalog(db, 'salon-err'),
+      (err: unknown) =>
+        err instanceof CalendarMatchCatalogError &&
+        err.code === CALENDAR_MATCH_CATALOG_FAILED_CODE &&
+        err.catalog === 'clients' &&
+        err.salonId === 'salon-err' &&
+        !String(err.message).includes('SECRET_SQL'),
+    );
+  });
+
+  it('FIX-1B B — service catalog SELECT error throws safe catalog error', async () => {
+    const db = {
+      from(table: string) {
+        return {
+          select() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then(resolve: (v: unknown) => void) {
+                if (table === 'services') {
+                  resolve({ data: null, error: { message: 'services-boom' } });
+                  return;
+                }
+                resolve({ data: [], error: null });
+              },
+            };
+            return chain;
+          },
+        };
+      },
+    };
+    await assert.rejects(
+      () => loadSalonCalendarMatchCatalog(db, 'salon-err'),
+      (err: unknown) =>
+        err instanceof CalendarMatchCatalogError &&
+        err.catalog === 'services' &&
+        err.code === CALENDAR_MATCH_CATALOG_FAILED_CODE,
+    );
+  });
+
+  it('FIX-1B C — client success + service failure → whole catalog load fails', async () => {
+    const db = {
+      from(table: string) {
+        return {
+          select() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then(resolve: (v: unknown) => void) {
+                if (table === 'clients') {
                   resolve({
-                    data: null,
-                    error: { message: `${table}-boom` },
+                    data: [{ id: 'c1', name: 'A', phone: '+1' }],
+                    error: null,
                   });
-                },
-              };
-              return chain;
-            },
-          };
-        },
+                  return;
+                }
+                resolve({ data: null, error: { message: 'services-down' } });
+              },
+            };
+            return chain;
+          },
+        };
+      },
+    };
+    await assert.rejects(
+      () => loadSalonCalendarMatchCatalog(db, 'salon-partial'),
+      (err: unknown) =>
+        err instanceof CalendarMatchCatalogError && err.catalog === 'services',
+    );
+  });
+
+  it('FIX-1B D — service success + client failure → whole catalog load fails', async () => {
+    const db = {
+      from(table: string) {
+        return {
+          select() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then(resolve: (v: unknown) => void) {
+                if (table === 'clients') {
+                  resolve({ data: null, error: { message: 'clients-down' } });
+                  return;
+                }
+                resolve({
+                  data: [{ id: 's1', name: 'Cut' }],
+                  error: null,
+                });
+              },
+            };
+            return chain;
+          },
+        };
+      },
+    };
+    await assert.rejects(
+      () => loadSalonCalendarMatchCatalog(db, 'salon-partial'),
+      (err: unknown) =>
+        err instanceof CalendarMatchCatalogError && err.catalog === 'clients',
+    );
+  });
+
+  it('FIX-1B E — successful SELECT returning [] is a valid empty catalog', async () => {
+    const db = {
+      from(_table: string) {
+        return {
+          select() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then(resolve: (v: unknown) => void) {
+                resolve({ data: [], error: null });
+              },
+            };
+            return chain;
+          },
+        };
+      },
+    };
+    const catalog = await loadSalonCalendarMatchCatalog(db, 'salon-empty');
+    assert.deepEqual(catalog, { clients: [], services: [] });
+  });
+
+  it('FIX-1B preview propagates catalog failure (does not match against fake empty catalog)', async () => {
+    const { encryptCalendarCredential } = await import('./calendarCredentialsCrypto.js');
+    const { serializeGoogleCalendarCredentialBlob, GOOGLE_CALENDAR_OAUTH_SCOPE } =
+      await import('./googleCalendarOAuth.js');
+    const prevKey = process.env.CALENDAR_CREDENTIALS_ENCRYPTION_KEY;
+    const prevCid = process.env.GOOGLE_CALENDAR_CLIENT_ID;
+    const prevSecret = process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
+    const prevRedirect = process.env.GOOGLE_CALENDAR_REDIRECT_URI;
+    process.env.CALENDAR_CREDENTIALS_ENCRYPTION_KEY = Buffer.alloc(32, 5).toString('base64');
+    process.env.GOOGLE_CALENDAR_CLIENT_ID = 'test-client-id';
+    process.env.GOOGLE_CALENDAR_CLIENT_SECRET = 'test-client-secret';
+    process.env.GOOGLE_CALENDAR_REDIRECT_URI =
+      'https://app.example.com/api/calendar/google/callback';
+    try {
+      const enc = encryptCalendarCredential(
+        serializeGoogleCalendarCredentialBlob({
+          refresh_token: 'rt-secret',
+          scope: GOOGLE_CALENDAR_OAUTH_SCOPE,
+          token_type: 'Bearer',
+        }),
+      );
+      const row = {
+        id: 'row1',
+        credential_ciphertext: enc.ciphertext,
+        credential_iv: enc.iv,
+        credential_auth_tag: enc.authTag,
+        status: 'connected',
+        selected_calendar_id: 'primary',
+        selected_calendar_name: 'cal',
+        provider_config: {},
       };
-      const catalog = await loadSalonCalendarMatchCatalog(db, 'salon-err');
-      assert.deepEqual(catalog, { clients: [], services: [] });
-      assert.ok(errors.length >= 1);
-      const blob = JSON.stringify(errors);
-      assert.match(blob, /clients-boom|services-boom|match-catalog/);
+      await assert.rejects(
+        () =>
+          previewGoogleCalendarEventsForSalon({
+            db: {
+              from() {
+                return {
+                  select() {
+                    return {
+                      eq() {
+                        return {
+                          eq() {
+                            return {
+                              maybeSingle: async () => ({ data: row, error: null }),
+                            };
+                          },
+                        };
+                      },
+                    };
+                  },
+                };
+              },
+            },
+            salonId: 'salon-x',
+            salonTimeZone: 'Asia/Yerevan',
+            now: new Date('2026-08-16T12:00:00.000Z'),
+            fetchImpl: async (input) => {
+              const url = String(input);
+              if (url.includes('/token')) {
+                return new Response(
+                  JSON.stringify({ access_token: 'at-live', expires_in: 3600 }),
+                  { status: 200 },
+                );
+              }
+              return new Response(JSON.stringify({ items: [] }), { status: 200 });
+            },
+            loadMatchCatalog: async () => {
+              throw new CalendarMatchCatalogError({
+                catalog: 'clients',
+                salonId: 'salon-x',
+              });
+            },
+          }),
+        (err: unknown) =>
+          err instanceof CalendarMatchCatalogError &&
+          err.code === CALENDAR_MATCH_CATALOG_FAILED_CODE &&
+          err.catalog === 'clients',
+      );
     } finally {
-      console.error = prev;
+      if (prevKey === undefined) delete process.env.CALENDAR_CREDENTIALS_ENCRYPTION_KEY;
+      else process.env.CALENDAR_CREDENTIALS_ENCRYPTION_KEY = prevKey;
+      if (prevCid === undefined) delete process.env.GOOGLE_CALENDAR_CLIENT_ID;
+      else process.env.GOOGLE_CALENDAR_CLIENT_ID = prevCid;
+      if (prevSecret === undefined) delete process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
+      else process.env.GOOGLE_CALENDAR_CLIENT_SECRET = prevSecret;
+      if (prevRedirect === undefined) delete process.env.GOOGLE_CALENDAR_REDIRECT_URI;
+      else process.env.GOOGLE_CALENDAR_REDIRECT_URI = prevRedirect;
     }
   });
 });
@@ -402,6 +608,9 @@ describe('GOOGLE-CAL-FAST-4 static contracts', () => {
     assert.match(oauth, /matchingStatus/);
     assert.match(matcher, /\.eq\('active',\s*true\)/);
     assert.match(matcher, /findBoundedPhraseSpan/);
+    assert.match(matcher, /CalendarMatchCatalogError/);
+    assert.match(routes, /calendar_match_catalog_failed|CALENDAR_MATCH_CATALOG_FAILED_CODE/);
+    assert.match(routes, /CalendarMatchCatalogError/);
     assert.doesNotMatch(oauth, /import_enabled:\s*true/);
     assert.doesNotMatch(matcher, /\.insert\s*\(|\.update\s*\(|\.upsert\s*\(|\.delete\s*\(/);
     assert.doesNotMatch(routes, /from\('appointments'\)|from\('reminders'\)|appointment_external_links|calendar_mapping_rules|calendar_import_issues/);

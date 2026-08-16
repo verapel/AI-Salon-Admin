@@ -26,6 +26,10 @@ import {
   previewGoogleCalendarEventsForSalon,
   selectGoogleCalendarForSalon,
 } from '../lib/googleCalendarOAuth.js';
+import {
+  CalendarMatchCatalogError,
+  CALENDAR_MATCH_CATALOG_FAILED_CODE,
+} from '../lib/calendarEventMatcher.js';
 import { getSalonTimezone } from '../lib/scheduleSlots.js';
 import type {
   AppleCalendarConnectRequest,
@@ -565,6 +569,18 @@ router.get('/google/events/preview', requireSalonWriteAccess, async (req, res) =
     });
     return res.json(preview);
   } catch (err) {
+    if (err instanceof CalendarMatchCatalogError) {
+      console.error('[calendar] google events preview match catalog failed', {
+        salonId,
+        operation: 'google_events_preview',
+        code: err.code,
+        catalog: err.catalog,
+      });
+      return res.status(503).json({
+        error: 'Could not load salon matching catalog',
+        code: CALENDAR_MATCH_CATALOG_FAILED_CODE,
+      });
+    }
     if (err instanceof GoogleCalendarOAuthError) {
       if (err.code === 'GOOGLE_OAUTH_NOT_CONNECTED') {
         return res.status(404).json({

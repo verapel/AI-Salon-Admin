@@ -80,6 +80,28 @@ export type CalendarMatchCatalog = {
   services: MatchableService[];
 };
 
+/** Safe public API / internal code for catalog read failures (no SQL details). */
+export const CALENDAR_MATCH_CATALOG_FAILED_CODE = 'calendar_match_catalog_failed' as const;
+
+export type CalendarMatchCatalogKind = 'clients' | 'services';
+
+/**
+ * Thrown when a required salon clients/services SELECT fails.
+ * Must abort matching preview — never degrade to a fake empty catalog.
+ */
+export class CalendarMatchCatalogError extends Error {
+  readonly code = CALENDAR_MATCH_CATALOG_FAILED_CODE;
+  readonly catalog: CalendarMatchCatalogKind;
+  readonly salonId: string;
+
+  constructor(params: { catalog: CalendarMatchCatalogKind; salonId: string; message?: string }) {
+    super(params.message ?? 'Calendar match catalog load failed');
+    this.name = 'CalendarMatchCatalogError';
+    this.catalog = params.catalog;
+    this.salonId = params.salonId;
+  }
+}
+
 const EMPTY_CLIENT: CalendarEventClientMatch = {
   status: 'not_attempted',
   confidence: 'none',
@@ -533,6 +555,9 @@ export function matchParsedCalendarEvents(
  * Load minimal salon clients + services for matching.
  * READ ONLY — select only id/name/phone and id/name (active services only).
  * Caller must pass authenticated salonId.
+ *
+ * Failed SELECT → throws CalendarMatchCatalogError (never returns fake empty catalog).
+ * Successful SELECT with [] → valid empty catalog (allowed).
  */
 export async function loadSalonCalendarMatchCatalog(
   db: any,
@@ -554,13 +579,25 @@ export async function loadSalonCalendarMatchCatalog(
   if (clientsRes?.error) {
     console.error('[calendar/match-catalog] clients load failed', {
       salonId: sid,
+      catalog: 'clients',
       message: clientsRes.error?.message ?? String(clientsRes.error),
+    });
+    throw new CalendarMatchCatalogError({
+      catalog: 'clients',
+      salonId: sid,
+      message: 'Failed to load salon clients for calendar matching',
     });
   }
   if (servicesRes?.error) {
     console.error('[calendar/match-catalog] services load failed', {
       salonId: sid,
+      catalog: 'services',
       message: servicesRes.error?.message ?? String(servicesRes.error),
+    });
+    throw new CalendarMatchCatalogError({
+      catalog: 'services',
+      salonId: sid,
+      message: 'Failed to load salon services for calendar matching',
     });
   }
 
