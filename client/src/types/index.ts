@@ -484,6 +484,59 @@ export interface CalendarEventParsedPreview {
   reasons: string[];
 }
 
+/** GOOGLE-CAL-FAST-4: salon-scoped read-only matching preview (no import). */
+export type CalendarMatchingStatus = 'matched' | 'partial' | 'review';
+
+export type CalendarClientMatchStatus =
+  | 'matched'
+  | 'possible'
+  | 'ambiguous'
+  | 'not_found'
+  | 'not_attempted';
+
+export type CalendarClientMatchConfidence =
+  | 'exact_phone'
+  | 'exact_name'
+  | 'possible_name'
+  | 'none';
+
+export type CalendarServiceMatchStatus =
+  | 'matched'
+  | 'ambiguous'
+  | 'not_found'
+  | 'not_attempted';
+
+export type CalendarServiceMatchConfidence =
+  | 'exact_name'
+  | 'contained_name'
+  | 'none';
+
+export interface CalendarEventClientMatch {
+  status: CalendarClientMatchStatus;
+  confidence: CalendarClientMatchConfidence;
+  clientId: string | null;
+  displayName: string | null;
+  matchedPhone: string | null;
+}
+
+export interface CalendarEventServiceMatch {
+  status: CalendarServiceMatchStatus;
+  confidence: CalendarServiceMatchConfidence;
+  serviceId: string | null;
+  displayName: string | null;
+}
+
+export interface CalendarEventMatchingPreview {
+  client: CalendarEventClientMatch;
+  service: CalendarEventServiceMatch;
+  recognizedClientText: string | null;
+  serviceSearchText: string | null;
+  serviceResidualText: string | null;
+  staff: null;
+  reasons: string[];
+  matchingStatus: CalendarMatchingStatus;
+}
+
 /** Safe Google events.list preview DTO (no credentials). */
 export interface GoogleEventPreviewItem {
   id: string;
@@ -503,6 +556,9 @@ export interface GoogleEventPreviewItem {
   calendarName: string | null;
   /** Present after FAST-3B; optional for older responses. */
   parsed?: CalendarEventParsedPreview;
+  /** Present after FAST-4; optional for older responses. */
+  matching?: CalendarEventMatchingPreview;
+  matchingStatus?: CalendarMatchingStatus;
 }
 
 export interface GoogleEventsPreviewResponse {

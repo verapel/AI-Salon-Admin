@@ -283,6 +283,7 @@ describe('GOOGLE-CAL-FAST-2 pagination + salon preview (mock HTTP)', () => {
       fetchImpl,
       now: new Date('2026-08-16T12:00:00.000Z'),
       salonTimeZone: 'Asia/Yerevan',
+      matchCatalog: { clients: [], services: [] },
     });
     assert.deepEqual(seen2, ['salon-bound']);
     assert.equal(preview.count, 1);
