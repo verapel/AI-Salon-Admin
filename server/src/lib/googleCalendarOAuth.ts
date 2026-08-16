@@ -13,6 +13,13 @@ import {
   resolveParserTimezone,
   type CalendarEventParsedPreview,
 } from './calendarEventParser.js';
+import {
+  loadSalonCalendarMatchCatalog,
+  matchParsedCalendarEvent,
+  type CalendarEventMatchingPreview,
+  type CalendarMatchCatalog,
+  type CalendarMatchingStatus,
+} from './calendarEventMatcher.js';
 
 /** Read-only calendar + OpenID email for account display. No write / Gmail / contacts. */
 export const GOOGLE_CALENDAR_OAUTH_SCOPES = [
@@ -120,8 +127,12 @@ export type GoogleEventPreviewItem = {
   htmlLink: string | null;
   calendarId: string;
   calendarName: string | null;
-  /** GOOGLE-CAL-FAST-3B: deterministic parse preview (no import / no matching). */
+  /** GOOGLE-CAL-FAST-3B: deterministic parse preview (no import). */
   parsed?: CalendarEventParsedPreview;
+  /** GOOGLE-CAL-FAST-4: salon-scoped read-only client/service matching (no writes). */
+  matching?: CalendarEventMatchingPreview;
+  /** Convenience mirror of matching.matchingStatus for UI. */
+  matchingStatus?: CalendarMatchingStatus;
 };
 
 export type GoogleEventsPreviewResult = {
@@ -970,6 +981,12 @@ export async function previewGoogleCalendarEventsForSalon(params: {
   salonTimeZone?: string;
   /** Optional loader when salonTimeZone is omitted. */
   getSalonTimeZone?: (salonId: string) => Promise<string>;
+  /**
+   * GOOGLE-CAL-FAST-4: optional in-memory match catalog (tests / injection).
+   * When omitted, loads salon clients+services once (read-only) via db.
+   */
+  matchCatalog?: CalendarMatchCatalog;
+  loadMatchCatalog?: (salonId: string) => Promise<CalendarMatchCatalog>;
 }): Promise<GoogleEventsPreviewResult> {
   const config = loadGoogleCalendarAppConfig();
   let row: GoogleConnectionCredentialRow;
@@ -1028,7 +1045,7 @@ export async function previewGoogleCalendarEventsForSalon(params: {
     fetchImpl: params.fetchImpl,
   });
 
-  // GOOGLE-CAL-FAST-3B: attach pure deterministic parse (no DB writes / no matching).
+  // GOOGLE-CAL-FAST-3B: attach pure deterministic parse (no DB writes).
   let salonTimeZone: string;
   if (typeof params.salonTimeZone === 'string' && params.salonTimeZone.trim()) {
     salonTimeZone = resolveParserTimezone(params.salonTimeZone);
@@ -1038,9 +1055,18 @@ export async function previewGoogleCalendarEventsForSalon(params: {
     salonTimeZone = resolveParserTimezone(undefined);
   }
 
-  const eventsWithParsed: GoogleEventPreviewItem[] = events.map((ev) => ({
-    ...ev,
-    parsed: parseExternalCalendarEvent(
+  // GOOGLE-CAL-FAST-4: load salon clients+services once, match all events in memory (read-only).
+  let matchCatalog: CalendarMatchCatalog;
+  if (params.matchCatalog) {
+    matchCatalog = params.matchCatalog;
+  } else if (params.loadMatchCatalog) {
+    matchCatalog = await params.loadMatchCatalog(params.salonId);
+  } else {
+    matchCatalog = await loadSalonCalendarMatchCatalog(params.db, params.salonId);
+  }
+
+  const eventsWithParsed: GoogleEventPreviewItem[] = events.map((ev) => {
+    const parsed = parseExternalCalendarEvent(
       {
         summary: ev.summary,
         description: ev.description,
@@ -1049,8 +1075,19 @@ export async function previewGoogleCalendarEventsForSalon(params: {
         end: ev.end,
       },
       salonTimeZone,
-    ),
-  }));
+    );
+    const matching = matchParsedCalendarEvent({
+      parsed,
+      originalTitle: ev.summary,
+      catalog: matchCatalog,
+    });
+    return {
+      ...ev,
+      parsed,
+      matching,
+      matchingStatus: matching.matchingStatus,
+    };
+  });
 
   return {
     events: eventsWithParsed,

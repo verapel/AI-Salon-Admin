@@ -7,7 +7,9 @@ import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import type {
   CalendarConnectionPublic,
+  CalendarEventMatchingPreview,
   CalendarEventParsedPreview,
+  CalendarMatchingStatus,
   CalendarParseImportability,
   GoogleCalendarListItem,
   GoogleEventPreviewItem,
@@ -138,6 +140,106 @@ function formatParsedPrice(parsed: CalendarEventParsedPreview | undefined): stri
       ? String(parsed.priceCandidate.value)
       : parsed.priceCandidate.raw || '—';
   return `${v} (${parsed.priceCandidate.confidence})`;
+}
+
+function matchingStatusLabel(
+  t: (key: import('@/context/LanguageContext').TranslationKey) => string,
+  value: CalendarMatchingStatus | undefined,
+): string {
+  if (value === 'matched') return t('integrations.google.matchingStatusMatched');
+  if (value === 'partial') return t('integrations.google.matchingStatusPartial');
+  return t('integrations.google.matchingStatusReview');
+}
+
+function matchingStatusClass(value: CalendarMatchingStatus | undefined): string {
+  if (value === 'matched') return 'text-emerald-800 dark:text-emerald-200';
+  if (value === 'partial') return 'text-amber-800 dark:text-amber-200';
+  return 'text-amber-800 dark:text-amber-200';
+}
+
+function clientMatchDetail(
+  t: (key: import('@/context/LanguageContext').TranslationKey) => string,
+  matching: CalendarEventMatchingPreview | undefined,
+): { title: string; detail: string } {
+  const client = matching?.client;
+  if (!client || client.status === 'not_attempted') {
+    return {
+      title: t('integrations.google.matchingDash'),
+      detail: t('integrations.google.matchingClientNotAttempted'),
+    };
+  }
+  if (client.status === 'ambiguous') {
+    return {
+      title: t('integrations.google.matchingDash'),
+      detail: t('integrations.google.matchingClientAmbiguous'),
+    };
+  }
+  if (client.status === 'not_found') {
+    return {
+      title: t('integrations.google.matchingDash'),
+      detail: t('integrations.google.matchingClientNotFound'),
+    };
+  }
+  if (client.status === 'matched' && client.confidence === 'exact_phone') {
+    return {
+      title: `✓ ${client.displayName || t('integrations.google.matchingDash')}`,
+      detail: t('integrations.google.matchingClientExactPhone').replace(
+        '{phone}',
+        client.matchedPhone || '',
+      ),
+    };
+  }
+  if (client.status === 'matched') {
+    return {
+      title: `✓ ${client.displayName || t('integrations.google.matchingDash')}`,
+      detail: t('integrations.google.matchingClientExactName'),
+    };
+  }
+  return {
+    title: t('integrations.google.matchingDash'),
+    detail: t('integrations.google.matchingClientNotFound'),
+  };
+}
+
+function serviceMatchDetail(
+  t: (key: import('@/context/LanguageContext').TranslationKey) => string,
+  matching: CalendarEventMatchingPreview | undefined,
+): { title: string; detail: string } {
+  const service = matching?.service;
+  if (!service || service.status === 'not_attempted') {
+    return {
+      title: t('integrations.google.matchingDash'),
+      detail: t('integrations.google.matchingServiceNotAttempted'),
+    };
+  }
+  if (service.status === 'ambiguous') {
+    return {
+      title: t('integrations.google.matchingDash'),
+      detail: t('integrations.google.matchingServiceAmbiguous'),
+    };
+  }
+  if (service.status === 'not_found') {
+    return {
+      title: t('integrations.google.matchingDash'),
+      detail: t('integrations.google.matchingServiceNotFound'),
+    };
+  }
+  if (service.status === 'matched' && service.confidence === 'exact_name') {
+    return {
+      title: `✓ ${service.displayName || t('integrations.google.matchingDash')}`,
+      detail: t('integrations.google.matchingServiceExact'),
+    };
+  }
+  if (service.status === 'matched') {
+    return {
+      title: `✓ ${service.displayName || t('integrations.google.matchingDash')}`,
+      detail: t('integrations.google.matchingServiceContained'),
+    };
+  }
+  return {
+    title: t('integrations.google.matchingDash'),
+    detail: t('integrations.google.matchingServiceNotFound'),
+  };
 }
 
 function ParsedField({
@@ -644,6 +746,9 @@ export default function SalonIntegrations() {
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       {t('integrations.google.previewParseNote')}
                     </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {t('integrations.google.previewMatchNote')}
+                    </p>
                     {googlePreviewError ? (
                       <p className="text-sm text-red-600 dark:text-red-400">
                         {googlePreviewError}
@@ -750,6 +855,65 @@ export default function SalonIntegrations() {
                                         <li key={label}>{label}</li>
                                       ))}
                                     </ul>
+                                  );
+                                })()}
+                              </div>
+
+                              <div className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+                                {(() => {
+                                  const matching = ev.matching;
+                                  const status =
+                                    matching?.matchingStatus ?? ev.matchingStatus;
+                                  const clientInfo = clientMatchDetail(t, matching);
+                                  const serviceInfo = serviceMatchDetail(t, matching);
+                                  return (
+                                    <>
+                                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                          {t('integrations.google.matchingSection')}
+                                        </p>
+                                        <span
+                                          className={`text-xs font-semibold ${matchingStatusClass(status)}`}
+                                        >
+                                          {t('integrations.google.matchingStatusLabel')}:{' '}
+                                          {matchingStatusLabel(t, status)}
+                                        </span>
+                                      </div>
+                                      <div className="space-y-2 text-sm text-gray-800 dark:text-gray-200">
+                                        <div>
+                                          <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                                            {t('integrations.google.matchingClient')}
+                                          </p>
+                                          <p>{clientInfo.title}</p>
+                                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            {clientInfo.detail}
+                                          </p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                                            {t('integrations.google.matchingService')}
+                                          </p>
+                                          <p>{serviceInfo.title}</p>
+                                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            {serviceInfo.detail}
+                                          </p>
+                                        </div>
+                                        {matching?.serviceResidualText ? (
+                                          <div>
+                                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                                              {t('integrations.google.matchingResidual')}
+                                            </p>
+                                            <p>{matching.serviceResidualText}</p>
+                                          </div>
+                                        ) : null}
+                                        <div>
+                                          <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                                            {t('integrations.google.matchingStaff')}
+                                          </p>
+                                          <p>{t('integrations.google.matchingStaffUnset')}</p>
+                                        </div>
+                                      </div>
+                                    </>
                                   );
                                 })()}
                               </div>
