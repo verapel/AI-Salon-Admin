@@ -12,6 +12,7 @@ import type {
   CalendarMatchingStatus,
   CalendarParseImportability,
   GoogleCalendarListItem,
+  GoogleBackfillLast30DaysResult,
   GoogleEventPreviewItem,
   GoogleEventTimePreview,
   GoogleImportStaffOption,
@@ -632,6 +633,11 @@ export default function SalonIntegrations() {
   const [googleStaffOptions, setGoogleStaffOptions] = useState<GoogleImportStaffOption[]>([]);
   const [googleAutoImportToggling, setGoogleAutoImportToggling] = useState(false);
   const [googleAutoImportError, setGoogleAutoImportError] = useState<string | null>(null);
+  const [googleBackfillConfirmOpen, setGoogleBackfillConfirmOpen] = useState(false);
+  const [googleBackfillRunning, setGoogleBackfillRunning] = useState(false);
+  const [googleBackfillError, setGoogleBackfillError] = useState<string | null>(null);
+  const [googleBackfillResult, setGoogleBackfillResult] =
+    useState<GoogleBackfillLast30DaysResult | null>(null);
 
   const refreshConnections = useCallback(async () => {
     const data = await api.calendar.getConnections();
@@ -870,6 +876,23 @@ export default function SalonIntegrations() {
     }
   };
 
+  const handleImportGoogleLast30Days = async () => {
+    if (googleBackfillRunning) return;
+    setGoogleBackfillRunning(true);
+    setGoogleBackfillError(null);
+    try {
+      const result = await api.calendar.importGoogleLast30Days();
+      setGoogleBackfillResult(result);
+      setGoogleBackfillConfirmOpen(false);
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : t('integrations.google.backfillError');
+      setGoogleBackfillError(message || t('integrations.google.backfillError'));
+    } finally {
+      setGoogleBackfillRunning(false);
+    }
+  };
+
   if (loading) {
     return <LoadingSpinner />;
   }
@@ -1048,6 +1071,61 @@ export default function SalonIntegrations() {
                     {googleAutoImportError ? (
                       <p className="text-sm text-red-600 dark:text-red-400">
                         {googleAutoImportError}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {googleSelected ? (
+                  <div className="space-y-2 rounded-md border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {t('integrations.google.backfillTitle')}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {t('integrations.google.backfillHelp')}
+                    </p>
+                    <p className="text-xs text-amber-800 dark:text-amber-200">
+                      {t('integrations.google.backfillPilotNote')}
+                    </p>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      disabled={googleBackfillRunning}
+                      onClick={() => {
+                        setGoogleBackfillError(null);
+                        setGoogleBackfillConfirmOpen(true);
+                      }}
+                    >
+                      {googleBackfillRunning
+                        ? t('integrations.google.backfillRunning')
+                        : t('integrations.google.backfillButton')}
+                    </button>
+                    {googleBackfillResult ? (
+                      <div className="space-y-1 text-sm text-gray-800 dark:text-gray-200">
+                        <p className="font-medium">{t('integrations.google.backfillDone')}</p>
+                        <p>
+                          {t('integrations.google.backfillImported')}: {googleBackfillResult.imported}
+                        </p>
+                        <p>
+                          {t('integrations.google.backfillAlready')}:{' '}
+                          {googleBackfillResult.alreadyImported}
+                        </p>
+                        <p>
+                          {t('integrations.google.backfillSkipped')}: {googleBackfillResult.skipped}
+                        </p>
+                        <p>
+                          {t('integrations.google.backfillFailed')}: {googleBackfillResult.failed}
+                        </p>
+                        {googleBackfillResult.truncated ? (
+                          <p className="text-amber-800 dark:text-amber-200">
+                            {t('integrations.google.backfillTruncated')}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {googleBackfillError ? (
+                      <p className="text-sm text-red-600 dark:text-red-400">
+                        {googleBackfillError}
                       </p>
                     ) : null}
                   </div>
@@ -1554,6 +1632,46 @@ export default function SalonIntegrations() {
               {disconnectSubmitting
                 ? t('integrations.apple.disconnecting')
                 : t('integrations.apple.disconnectConfirmButton')}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={googleBackfillConfirmOpen}
+        onClose={() => {
+          if (googleBackfillRunning) return;
+          setGoogleBackfillConfirmOpen(false);
+        }}
+        title={t('integrations.google.backfillConfirmTitle')}
+        size="sm"
+      >
+        <div className="space-y-3 text-sm text-gray-800 dark:text-gray-200">
+          <p>{t('integrations.google.backfillConfirmGoogleUnchanged')}</p>
+          <p>{t('integrations.google.backfillConfirmSkipImported')}</p>
+          <p>{t('integrations.google.backfillConfirmSkipUnsafe')}</p>
+          <p>{t('integrations.google.backfillConfirmTatev')}</p>
+          {googleBackfillError ? (
+            <p className="text-red-600 dark:text-red-400">{googleBackfillError}</p>
+          ) : null}
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={googleBackfillRunning}
+              onClick={() => setGoogleBackfillConfirmOpen(false)}
+            >
+              {t('integrations.google.importConfirmCancel')}
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={googleBackfillRunning}
+              onClick={() => void handleImportGoogleLast30Days()}
+            >
+              {googleBackfillRunning
+                ? t('integrations.google.backfillRunning')
+                : t('integrations.google.importConfirmSubmit')}
             </button>
           </div>
         </div>

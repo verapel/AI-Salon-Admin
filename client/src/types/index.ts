@@ -628,6 +628,28 @@ export interface GoogleEventImportResponse {
   alreadyImported?: boolean;
 }
 
+/** Compact FAST-7 30-day backfill summary (no appointment/client rows). */
+export interface GoogleBackfillLast30DaysResult {
+  scanned: number;
+  imported: number;
+  alreadyImported: number;
+  skipped: number;
+  failed: number;
+  truncated: boolean;
+  reasons: {
+    noPhone: number;
+    unsafeClientName: number;
+    clientAmbiguous: number;
+    serviceUnmatched: number;
+    serviceAmbiguous: number;
+    conflict: number;
+    cancelled: number;
+    allDay: number;
+    invalidTime: number;
+    other: number;
+  };
+}
+
 /** Meta WhatsApp Cloud API architecture marker. */
 export type WhatsAppCloudProvider = 'meta_cloud';
 

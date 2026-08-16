@@ -47,6 +47,7 @@ import {
   readAutoImportStaffIdFromConfig,
   setGoogleCalendarImportEnabled,
 } from '../lib/googleCalendarAutoImport.js';
+import { importGoogleCalendarLast30Days } from '../lib/googleCalendarBackfill.js';
 import type {
   AppleCalendarConnectRequest,
   CalendarConnectionPublic,
@@ -885,6 +886,111 @@ router.post('/google/events/import', requireSalonWriteAccess, async (req, res) =
     return res.status(502).json({
       error: 'Could not import Google event',
       code: 'google_import_failed',
+    });
+  }
+});
+
+/**
+ * POST /api/calendar/google/events/import-last-30-days
+ * GOOGLE-CAL-FAST-7: Manual historical backfill. Salon/staff derived on the server.
+ * Browser must not send salonId or staff authority. Isolated from FAST-6 watermarks.
+ */
+router.post('/google/events/import-last-30-days', requireSalonWriteAccess, async (req, res) => {
+  const salonId = getSalonId(req);
+  try {
+    const result = await importGoogleCalendarLast30Days({
+      db: supabase as any,
+      salonId,
+    });
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof CalendarMatchCatalogError) {
+      console.error('[calendar] google 30-day backfill catalog failed', {
+        salonId,
+        operation: 'google_import_last_30_days',
+        code: err.code,
+        catalog: err.catalog,
+      });
+      return res.status(503).json({
+        error: 'Could not load salon matching catalog',
+        code: CALENDAR_MATCH_CATALOG_FAILED_CODE,
+      });
+    }
+    if (err instanceof GoogleCalendarOAuthError) {
+      if (err.code === 'GOOGLE_OAUTH_NOT_CONNECTED') {
+        return res.status(404).json({
+          error: 'Google Calendar is not connected',
+          code: 'google_not_connected',
+        });
+      }
+      if (err.code === 'GOOGLE_CALENDAR_NOT_SELECTED') {
+        return res.status(400).json({
+          error: 'Google calendar is not selected',
+          code: 'google_calendar_not_selected',
+        });
+      }
+      if (err.code === 'GOOGLE_AUTO_STAFF_UNRESOLVED') {
+        return res.status(409).json({
+          error: 'Could not resolve Tatev staff for 30-day import',
+          code: 'google_auto_staff_unresolved',
+        });
+      }
+      if (
+        err.code === 'GOOGLE_OAUTH_DECRYPT_FAILED' ||
+        err.code === 'GOOGLE_OAUTH_TOKEN_EXCHANGE_FAILED' ||
+        err.code === 'GOOGLE_OAUTH_NOT_CONFIGURED'
+      ) {
+        console.error('[calendar] google 30-day backfill token failed', {
+          salonId,
+          operation: 'google_import_last_30_days',
+          code: err.code,
+        });
+        return res.status(502).json({
+          error: 'Could not refresh Google credentials',
+          code: 'google_token_refresh_failed',
+        });
+      }
+      if (err.code === 'GOOGLE_EVENTS_FETCH_FAILED') {
+        console.error('[calendar] google 30-day backfill fetch failed', {
+          salonId,
+          operation: 'google_import_last_30_days',
+          code: err.code,
+        });
+        return res.status(502).json({
+          error: 'Could not load Google calendar events',
+          code: 'google_events_fetch_failed',
+        });
+      }
+      console.error('[calendar] google 30-day backfill oauth failed', {
+        salonId,
+        operation: 'google_import_last_30_days',
+        code: err.code,
+      });
+      return res.status(502).json({
+        error: 'Could not import last 30 days',
+        code: 'google_backfill_failed',
+      });
+    }
+    if (err instanceof GoogleCalendarImportError) {
+      const status = GOOGLE_IMPORT_HTTP_STATUS[err.code] ?? 502;
+      console.error('[calendar] google 30-day backfill rejected', {
+        salonId,
+        operation: 'google_import_last_30_days',
+        code: err.code,
+      });
+      return res.status(status).json({
+        error: 'Could not import last 30 days',
+        code: err.code,
+      });
+    }
+    console.error('[calendar] google 30-day backfill unexpected', {
+      salonId,
+      operation: 'google_import_last_30_days',
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return res.status(502).json({
+      error: 'Could not import last 30 days',
+      code: 'google_backfill_failed',
     });
   }
 });

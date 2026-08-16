@@ -221,6 +221,11 @@ export const api = {
           body: JSON.stringify(body),
         },
       ),
+    importGoogleLast30Days: () =>
+      request<import('@/types').GoogleBackfillLast30DaysResult>(
+        '/calendar/google/events/import-last-30-days',
+        { method: 'POST' },
+      ),
     setGoogleImportEnabled: (enabled: boolean) =>
       request<{
         connection: import('@/types').CalendarConnectionPublic | null;
