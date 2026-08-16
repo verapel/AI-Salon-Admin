@@ -4,7 +4,7 @@ import { CalendarDays, ShieldCheck } from 'lucide-react';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import Modal from '@/components/ui/Modal';
 import { useLanguage } from '@/context/LanguageContext';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import type {
   CalendarConnectionPublic,
   CalendarEventMatchingPreview,
@@ -14,6 +14,7 @@ import type {
   GoogleCalendarListItem,
   GoogleEventPreviewItem,
   GoogleEventTimePreview,
+  GoogleImportStaffOption,
 } from '@/types';
 
 const BASIC_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -257,6 +258,301 @@ function ParsedField({
   );
 }
 
+function GoogleEventImportPanel({
+  event,
+  staffOptions,
+  onImported,
+}: {
+  event: GoogleEventPreviewItem;
+  staffOptions: GoogleImportStaffOption[];
+  onImported: (eventId: string) => void;
+}) {
+  const { t } = useLanguage();
+  const readiness = event.importReadiness;
+  const matching = event.matching;
+  const parsed = event.parsed;
+
+  const [staffId, setStaffId] = useState('');
+  const [newClientName, setNewClientName] = useState(
+    readiness?.suggestedNewClientName || '',
+  );
+  const [localImported, setLocalImported] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  const isExistingClient =
+    matching?.client.status === 'matched' && Boolean(matching.client.clientId);
+  const canNewClient = Boolean(readiness?.canCreateNewClient);
+  const serviceMatched =
+    matching?.service.status === 'matched' && Boolean(matching.service.serviceId);
+  const alreadyImported =
+    readiness?.status === 'already_imported' || localImported;
+  const notImportable = readiness?.status === 'not_importable';
+
+  const clientMode: 'existing' | 'new' | null = isExistingClient
+    ? 'existing'
+    : canNewClient
+      ? 'new'
+      : null;
+
+  const nameOk =
+    clientMode === 'existing' ||
+    (clientMode === 'new' && newClientName.trim().length > 0);
+  const canSubmit =
+    !alreadyImported &&
+    !notImportable &&
+    serviceMatched &&
+    clientMode != null &&
+    nameOk &&
+    Boolean(staffId) &&
+    !submitting;
+
+  // Potentially importable = not hard-blocked (show controls).
+  const showControls =
+    !notImportable &&
+    readiness?.status !== undefined &&
+    (serviceMatched ||
+      matching?.service.status === 'ambiguous' ||
+      matching?.service.status === 'not_found' ||
+      canNewClient ||
+      isExistingClient);
+
+  if (alreadyImported) {
+    return (
+      <div className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          {t('integrations.google.importSection')}
+        </p>
+        <p className="mt-1 text-sm font-medium text-emerald-700 dark:text-emerald-300">
+          {t('integrations.google.importAlready')}
+        </p>
+      </div>
+    );
+  }
+
+  if (!showControls || !serviceMatched || clientMode == null) {
+    return (
+      <div className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+        <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          {t('integrations.google.importSection')}
+        </p>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+          {t('integrations.google.importNotReady')}
+        </p>
+      </div>
+    );
+  }
+
+  const phoneDisplay =
+    parsed?.phone.confidence === 'exact' && parsed.phone.normalized
+      ? parsed.phone.normalized
+      : '—';
+  const dateDisplay = parsed?.localDate || '—';
+  const timeDisplay = formatParsedLocalTime(parsed);
+  const durationDisplay =
+    parsed?.durationMinutes != null
+      ? t('integrations.google.parsedMinutes').replace('{n}', String(parsed.durationMinutes))
+      : '—';
+  const serviceName = matching?.service.displayName || '—';
+  const clientLabel = isExistingClient
+    ? matching?.client.displayName || t('integrations.google.importExistingClient')
+    : t('integrations.google.importNewClient');
+  const staffName = staffOptions.find((s) => s.id === staffId)?.name || '—';
+
+  const handleConfirmImport = async () => {
+    if (!canSubmit || !matching?.service.serviceId) return;
+    setSubmitting(true);
+    setImportError(null);
+    try {
+      await api.calendar.importGoogleEvent({
+        eventId: event.id,
+        recurrenceId: readiness?.recurrenceId || undefined,
+        staffId,
+        serviceId: matching.service.serviceId,
+        client:
+          clientMode === 'existing'
+            ? { mode: 'existing', clientId: matching.client.clientId || undefined }
+            : {
+                mode: 'new',
+                name: newClientName.trim(),
+                phone: parsed?.phone.normalized || undefined,
+              },
+        expectedEtag: event.etag || undefined,
+        expectedUpdated: event.updated || undefined,
+      });
+      setLocalImported(true);
+      setConfirmOpen(false);
+      onImported(event.id);
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.code === 'google_event_already_imported') {
+        setLocalImported(true);
+        setConfirmOpen(false);
+        onImported(event.id);
+      } else {
+        const message =
+          err instanceof Error ? err.message : t('integrations.google.importError');
+        setImportError(message || t('integrations.google.importError'));
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {t('integrations.google.importSection')}
+      </p>
+      {localImported ? (
+        <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+          {t('integrations.google.importSuccess')}
+        </p>
+      ) : (
+        <div className="space-y-3">
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {t('integrations.google.importClient')}
+            </p>
+            <p className="text-sm text-gray-900 dark:text-gray-100">{clientLabel}</p>
+          </div>
+          {clientMode === 'new' ? (
+            <>
+              <label className="block">
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {t('integrations.google.importName')}
+                </span>
+                <input
+                  type="text"
+                  value={newClientName}
+                  onChange={(e) => setNewClientName(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                />
+              </label>
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {t('integrations.google.importPhone')}
+                </p>
+                <p className="text-sm text-gray-900 dark:text-gray-100">{phoneDisplay}</p>
+              </div>
+            </>
+          ) : null}
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {t('integrations.google.importService')}
+            </p>
+            <p className="text-sm text-gray-900 dark:text-gray-100">{serviceName}</p>
+          </div>
+          <label className="block">
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              {t('integrations.google.importStaff')}
+            </span>
+            <select
+              value={staffId}
+              onChange={(e) => setStaffId(e.target.value)}
+              className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+            >
+              <option value="">{t('integrations.google.importStaffPlaceholder')}</option>
+              {staffOptions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <dl className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <ParsedField label={t('integrations.google.importDate')} value={dateDisplay} />
+            <ParsedField label={t('integrations.google.importTime')} value={timeDisplay} />
+            <ParsedField
+              label={t('integrations.google.importDuration')}
+              value={durationDisplay}
+            />
+          </dl>
+          <p className="text-xs text-amber-800 dark:text-amber-200">
+            {clientMode === 'new'
+              ? t('integrations.google.importWarning')
+              : t('integrations.google.importWarningExisting')}
+          </p>
+          {importError ? (
+            <p className="text-sm text-red-600 dark:text-red-400">{importError}</p>
+          ) : null}
+          <button
+            type="button"
+            disabled={!canSubmit}
+            onClick={() => setConfirmOpen(true)}
+            className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t('integrations.google.importButton')}
+          </button>
+        </div>
+      )}
+
+      <Modal
+        open={confirmOpen}
+        onClose={() => {
+          if (!submitting) setConfirmOpen(false);
+        }}
+        title={t('integrations.google.importConfirmTitle')}
+      >
+        <div className="space-y-2 text-sm text-gray-800 dark:text-gray-200">
+          {clientMode === 'new' ? (
+            <>
+              <p>{t('integrations.google.importNewClient')}:</p>
+              <p className="font-medium">
+                {newClientName.trim()}
+                <br />
+                {phoneDisplay}
+              </p>
+            </>
+          ) : (
+            <p>
+              {t('integrations.google.importClient')}:{' '}
+              <span className="font-medium">{clientLabel}</span>
+            </p>
+          )}
+          <p>
+            {t('integrations.google.importService')}:{' '}
+            <span className="font-medium">{serviceName}</span>
+          </p>
+          <p>
+            {t('integrations.google.importStaff')}:{' '}
+            <span className="font-medium">{staffName}</span>
+          </p>
+          <p>
+            {t('integrations.google.importDate')}/{t('integrations.google.importTime')}:{' '}
+            <span className="font-medium">
+              {dateDisplay}, {timeDisplay}
+            </span>
+          </p>
+          {importError ? (
+            <p className="text-red-600 dark:text-red-400">{importError}</p>
+          ) : null}
+          <div className="flex justify-end gap-2 pt-3">
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={submitting}
+              onClick={() => setConfirmOpen(false)}
+            >
+              {t('integrations.google.importConfirmCancel')}
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={submitting || !canSubmit}
+              onClick={() => void handleConfirmImport()}
+            >
+              {submitting
+                ? t('integrations.google.importing')
+                : t('integrations.google.importConfirmSubmit')}
+            </button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
 export default function SalonIntegrations() {
   const { t } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -294,6 +590,7 @@ export default function SalonIntegrations() {
   const [googlePreviewError, setGooglePreviewError] = useState<string | null>(null);
   const [googlePreviewTruncated, setGooglePreviewTruncated] = useState(false);
   const [googlePreviewLoaded, setGooglePreviewLoaded] = useState(false);
+  const [googleStaffOptions, setGoogleStaffOptions] = useState<GoogleImportStaffOption[]>([]);
 
   const refreshConnections = useCallback(async () => {
     const data = await api.calendar.getConnections();
@@ -478,6 +775,7 @@ export default function SalonIntegrations() {
       setGooglePreviewLoaded(false);
       setGooglePreviewTruncated(false);
       setGooglePreviewError(null);
+      setGoogleStaffOptions([]);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : t('integrations.google.disconnectError');
@@ -496,6 +794,7 @@ export default function SalonIntegrations() {
       setGooglePreviewEvents(data.events);
       setGooglePreviewTruncated(Boolean(data.truncated));
       setGooglePreviewLoaded(true);
+      setGoogleStaffOptions(data.staffOptions ?? []);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : t('integrations.google.previewError');
@@ -917,6 +1216,29 @@ export default function SalonIntegrations() {
                                   );
                                 })()}
                               </div>
+
+                              <GoogleEventImportPanel
+                                event={ev}
+                                staffOptions={googleStaffOptions}
+                                onImported={(eventId) => {
+                                  setGooglePreviewEvents((prev) =>
+                                    prev.map((item) =>
+                                      item.id === eventId
+                                        ? {
+                                            ...item,
+                                            importReadiness: item.importReadiness
+                                              ? {
+                                                  ...item.importReadiness,
+                                                  status: 'already_imported',
+                                                  reasons: ['already_imported'],
+                                                }
+                                              : item.importReadiness,
+                                          }
+                                        : item,
+                                    ),
+                                  );
+                                }}
+                              />
                             </article>
                           );
                         })}
