@@ -97,10 +97,9 @@ describe('GOOGLE-CAL-A2 AppointmentSource + migration (static/runtime)', () => {
 describe('GOOGLE-CAL-A2 calendar connections read model', () => {
   const routes = read('server/src/routes/calendarConnections.ts');
   const crypto = read('server/src/lib/calendarCredentialsCrypto.ts');
-  const index = read('server/src/index.ts');
-  const apiClient = read('client/src/lib/api.ts');
   const integrations = read('client/src/pages/SalonIntegrations.tsx');
   const clientTypes = read('client/src/types/index.ts');
+  const serverTypes = read('server/src/types.ts');
 
   it('7. public DTO mapping never exposes credential columns', () => {
     const publicDto = mapCalendarConnectionSafe(
@@ -228,11 +227,11 @@ describe('GOOGLE-CAL-A2 calendar connections read model', () => {
     assert.doesNotMatch(routes, /req\.query\.salonId|req\.body\.salonId/);
   });
 
-  it('11. no Google OAuth / Google API routes in this stage', () => {
-    assert.doesNotMatch(routes, /\/google\/auth-url|\/google\/callback|googleapis\.com/);
-    assert.doesNotMatch(index, /\/calendar\/google/);
-    assert.doesNotMatch(apiClient, /connectGoogle|google\/auth|googleapis/);
-    assert.doesNotMatch(integrations, /Connect Google|google\.auth|OAuth/);
+  it('11. A2 foundation intact; Google OAuth routes owned by FAST-1', () => {
+    // A2 shipped read-model + source enum only. OAuth/discovery live in GOOGLE-CAL-FAST-1.
+    assert.match(routes, /buildCalendarConnectionsResponse|connections/);
+    assert.match(serverTypes, /'google'/);
+    assert.doesNotMatch(routes, /events\.list/);
   });
 
   it('Apple write routes and crypto helper unchanged in behaviour surface', () => {

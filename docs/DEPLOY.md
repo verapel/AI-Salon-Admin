@@ -49,7 +49,11 @@ Use nginx/Caddy as reverse proxy with HTTPS. Set `PORT=3001` and proxy `/` to th
 | `TELEGRAM_CHAT_ID` | Recommended | Admin notifications |
 | `APP_URL` | Recommended | Public URL |
 | `TELEGRAM_BOT_TOKEN` | Optional | Or connect via Integrations UI |
-| `CALENDAR_CREDENTIALS_ENCRYPTION_KEY` | Optional until Apple connect | Base64 32-byte AES-256-GCM key; encrypt/decrypt fail closed if missing |
+| `CALENDAR_CREDENTIALS_ENCRYPTION_KEY` | Optional until Apple/Google connect | Base64 32-byte AES-256-GCM key; encrypt/decrypt fail closed if missing |
+| `GOOGLE_CALENDAR_CLIENT_ID` | Optional until Google connect | Google OAuth Web client ID |
+| `GOOGLE_CALENDAR_CLIENT_SECRET` | Optional until Google connect | Google OAuth Web client secret |
+| `GOOGLE_CALENDAR_REDIRECT_URI` | Optional | Defaults to `${APP_URL}/api/calendar/google/callback` |
+| `GOOGLE_CALENDAR_OAUTH_STATE_SECRET` | Optional | Dedicated OAuth state HMAC secret; else derived from client secret |
 
 ## Post-deploy verification
 

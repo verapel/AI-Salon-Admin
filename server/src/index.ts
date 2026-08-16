@@ -21,6 +21,7 @@ import authRouter from './routes/auth.js';
 import internalRouter from './routes/internal.js';
 import staffPortalRouter from './routes/staffPortal.js';
 import calendarConnectionsRouter from './routes/calendarConnections.js';
+import googleCalendarOAuthCallbackRouter from './routes/googleCalendarOAuthCallback.js';
 import whatsappWebhookRouter from './routes/whatsappWebhook.js';
 import instagramWebhookRouter from './routes/instagramWebhook.js';
 import instagramOAuthCallbackRouter from './routes/instagramOAuthCallback.js';
@@ -1173,6 +1174,10 @@ app.use('/api/internal', internalRouter);
 // IG-2 Instagram OAuth callback (Meta browser redirect). Not a messaging webhook.
 // Intentionally outside /api/developer — callback has no developer Bearer token.
 app.use('/api/integrations/instagram', instagramOAuthCallbackRouter);
+
+// GOOGLE-CAL-FAST-1: Google OAuth callback (browser redirect). Public — no salon Bearer.
+// Must remain outside salonAuth. Authenticated /api/calendar/* routes stay protected below.
+app.use('/api/calendar/google', googleCalendarOAuthCallbackRouter);
 
 const API_AUTH_REQUIRED = process.env.API_AUTH_REQUIRED === 'true';
 const noopAuth: RequestHandler = (_req, _res, next) => next();

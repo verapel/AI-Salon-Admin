@@ -437,6 +437,15 @@ export interface AppleCalendarConnectResponse {
   message: string;
 }
 
+/** Safe Google calendarList entry (no tokens). */
+export interface GoogleCalendarListItem {
+  id: string;
+  summary: string;
+  primary: boolean;
+  accessRole: string | null;
+  timeZone: string | null;
+}
+
 /** Meta WhatsApp Cloud API architecture marker. */
 export type WhatsAppCloudProvider = 'meta_cloud';
 

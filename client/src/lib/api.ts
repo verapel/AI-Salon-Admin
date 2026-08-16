@@ -193,6 +193,27 @@ export const api = {
         '/calendar/apple',
         { method: 'DELETE' }
       ),
+    getGoogleAuthUrl: () =>
+      request<{ authorizationUrl: string; expiresInSeconds: number }>(
+        '/calendar/google/auth-url',
+      ),
+    getGoogleCalendars: () =>
+      request<{ calendars: import('@/types').GoogleCalendarListItem[] }>(
+        '/calendar/google/calendars',
+      ),
+    selectGoogleCalendar: (calendarId: string) =>
+      request<{ connection: import('@/types').CalendarConnectionPublic | null }>(
+        '/calendar/google/calendar',
+        {
+          method: 'PUT',
+          body: JSON.stringify({ calendarId }),
+        },
+      ),
+    disconnectGoogle: () =>
+      request<{ connection: import('@/types').CalendarConnectionPublic | null }>(
+        '/calendar/google',
+        { method: 'DELETE' },
+      ),
   },
   developer: {
     getSalons: () => request<import('@/types').DeveloperSalon[]>('/developer/salons'),

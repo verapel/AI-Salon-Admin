@@ -12,6 +12,19 @@ import {
   encryptCalendarCredential,
   isCalendarCredentialCryptoError,
 } from '../lib/calendarCredentialsCrypto.js';
+import {
+  createPersistedGoogleCalendarOAuthState,
+  getGoogleCalendarOAuthStateTtlMs,
+  GoogleCalendarOAuthStateError,
+} from '../lib/googleCalendarOAuthState.js';
+import {
+  buildGoogleCalendarAuthorizationUrl,
+  GOOGLE_CALENDAR_PROVIDER,
+  GoogleCalendarOAuthError,
+  listGoogleCalendarsForSalon,
+  loadGoogleCalendarAppConfig,
+  selectGoogleCalendarForSalon,
+} from '../lib/googleCalendarOAuth.js';
 import type {
   AppleCalendarConnectRequest,
   CalendarConnectionPublic,
@@ -22,6 +35,7 @@ import type {
 const router = Router();
 
 const APPLE_PROVIDER = 'apple' as const;
+const GOOGLE_PROVIDER = GOOGLE_CALENDAR_PROVIDER;
 
 /** Explicit metadata columns — never select credential_* or provider_config for responses. */
 const CONNECTION_METADATA_SELECT = `
@@ -393,6 +407,211 @@ router.delete('/apple', requireSalonWriteAccess, async (req, res) => {
       operation: 'apple_disconnect',
     });
     return res.status(500).json({ error: 'Could not disconnect Apple Calendar' });
+  }
+});
+
+async function loadGoogleConnectionPublic(
+  salonId: string,
+): Promise<CalendarConnectionPublic | null> {
+  const { data, error } = await supabase
+    .from('calendar_connections')
+    .select(CONNECTION_INTERNAL_SELECT)
+    .eq('salon_id', salonId)
+    .eq('provider', GOOGLE_PROVIDER)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  return mapCalendarConnectionInternalSafe(data as unknown as ConnectionInternalRow);
+}
+
+/**
+ * GET /api/calendar/google/auth-url
+ * Authenticated owner/admin: create OAuth state and return Google authorization URL.
+ */
+router.get('/google/auth-url', requireSalonWriteAccess, async (req, res) => {
+  const salonId = getSalonId(req);
+  try {
+    const config = loadGoogleCalendarAppConfig();
+    const state = await createPersistedGoogleCalendarOAuthState({
+      db: supabase as any,
+      salonId,
+      initiatorUserId: req.auth?.userId ?? null,
+    });
+    const authorizationUrl = buildGoogleCalendarAuthorizationUrl({
+      clientId: config.clientId,
+      redirectUri: config.redirectUri,
+      scope: config.scope,
+      state,
+    });
+    return res.json({
+      authorizationUrl,
+      expiresInSeconds: Math.floor(getGoogleCalendarOAuthStateTtlMs() / 1000),
+    });
+  } catch (err) {
+    if (err instanceof GoogleCalendarOAuthError && err.code === 'GOOGLE_OAUTH_NOT_CONFIGURED') {
+      return res.status(503).json({ error: 'Google Calendar OAuth is not configured' });
+    }
+    if (err instanceof GoogleCalendarOAuthStateError) {
+      console.error('[calendar] google auth-url state failed', {
+        salonId,
+        operation: 'google_auth_url',
+        code: err.code,
+      });
+      return res.status(503).json({ error: 'Could not start Google authorization' });
+    }
+    console.error('[calendar] google auth-url failed', {
+      salonId,
+      operation: 'google_auth_url',
+    });
+    return res.status(500).json({ error: 'Could not start Google authorization' });
+  }
+});
+
+/**
+ * GET /api/calendar/google/calendars
+ * List calendars for the salon's Google connection (read-only).
+ */
+router.get('/google/calendars', requireSalonWriteAccess, async (req, res) => {
+  const salonId = getSalonId(req);
+  try {
+    const calendars = await listGoogleCalendarsForSalon({
+      db: supabase as any,
+      salonId,
+    });
+    return res.json({ calendars });
+  } catch (err) {
+    if (err instanceof GoogleCalendarOAuthError) {
+      if (err.code === 'GOOGLE_OAUTH_NOT_CONNECTED') {
+        return res.status(404).json({ error: 'Google Calendar is not connected' });
+      }
+      if (err.code === 'GOOGLE_OAUTH_NOT_CONFIGURED') {
+        return res.status(503).json({ error: 'Google Calendar OAuth is not configured' });
+      }
+      console.error('[calendar] google calendars failed', {
+        salonId,
+        operation: 'google_calendars',
+        code: err.code,
+      });
+      return res.status(502).json({ error: 'Could not list Google calendars' });
+    }
+    console.error('[calendar] google calendars unexpected', {
+      salonId,
+      operation: 'google_calendars',
+    });
+    return res.status(500).json({ error: 'Could not list Google calendars' });
+  }
+});
+
+/**
+ * PUT /api/calendar/google/calendar
+ * Select a calendar after verifying it belongs to the authorized account.
+ */
+router.put('/google/calendar', requireSalonWriteAccess, async (req, res) => {
+  const salonId = getSalonId(req);
+  const calendarId =
+    req.body && typeof req.body === 'object' && typeof (req.body as any).calendarId === 'string'
+      ? String((req.body as any).calendarId).trim()
+      : '';
+  if (!calendarId) {
+    return res.status(400).json({ error: 'calendarId is required' });
+  }
+  try {
+    await selectGoogleCalendarForSalon({
+      db: supabase as any,
+      salonId,
+      calendarId,
+    });
+    const connection = await loadGoogleConnectionPublic(salonId);
+    return res.json({ connection });
+  } catch (err) {
+    if (err instanceof GoogleCalendarOAuthError) {
+      if (err.code === 'GOOGLE_CALENDAR_NOT_FOUND') {
+        return res.status(404).json({ error: 'Calendar was not found for this Google account' });
+      }
+      if (err.code === 'GOOGLE_OAUTH_NOT_CONNECTED') {
+        return res.status(404).json({ error: 'Google Calendar is not connected' });
+      }
+      console.error('[calendar] google select calendar failed', {
+        salonId,
+        operation: 'google_select_calendar',
+        code: err.code,
+      });
+      return res.status(502).json({ error: 'Could not select Google calendar' });
+    }
+    console.error('[calendar] google select calendar unexpected', {
+      salonId,
+      operation: 'google_select_calendar',
+    });
+    return res.status(500).json({ error: 'Could not select Google calendar' });
+  }
+});
+
+/**
+ * DELETE /api/calendar/google
+ * Wipe Google credentials/selection only. Apple and appointments untouched.
+ */
+router.delete('/google', requireSalonWriteAccess, async (req, res) => {
+  const salonId = getSalonId(req);
+  const now = new Date().toISOString();
+  try {
+    const { data: existing, error: existingError } = await supabase
+      .from('calendar_connections')
+      .select('id')
+      .eq('salon_id', salonId)
+      .eq('provider', GOOGLE_PROVIDER)
+      .maybeSingle();
+
+    if (existingError) {
+      console.error('[calendar] google disconnect lookup failed', {
+        salonId,
+        operation: 'google_disconnect_lookup',
+      });
+      return res.status(500).json({ error: 'Could not disconnect Google Calendar' });
+    }
+
+    if (!existing) {
+      return res.json({ connection: null });
+    }
+
+    const { error: updateError } = await supabase
+      .from('calendar_connections')
+      .update({
+        credential_ciphertext: null,
+        credential_iv: null,
+        credential_auth_tag: null,
+        account_email: null,
+        import_enabled: false,
+        status: 'disconnected',
+        selected_calendar_id: null,
+        selected_calendar_url: null,
+        selected_calendar_name: null,
+        last_error: null,
+        last_sync_at: null,
+        last_sync_started_at: null,
+        sync_lock_token: null,
+        provider_config: {},
+        updated_at: now,
+      })
+      .eq('salon_id', salonId)
+      .eq('provider', GOOGLE_PROVIDER);
+
+    if (updateError) {
+      console.error('[calendar] google disconnect update failed', {
+        salonId,
+        operation: 'google_disconnect_update',
+      });
+      return res.status(500).json({ error: 'Could not disconnect Google Calendar' });
+    }
+
+    const connection = await loadGoogleConnectionPublic(salonId);
+    return res.json({ connection });
+  } catch {
+    console.error('[calendar] google disconnect failed', {
+      salonId,
+      operation: 'google_disconnect',
+    });
+    return res.status(500).json({ error: 'Could not disconnect Google Calendar' });
   }
 });
 
