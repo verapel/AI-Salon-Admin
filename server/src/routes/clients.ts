@@ -13,6 +13,7 @@ router.get('/', async (req, res) => {
     .from('clients')
     .select('*')
     .eq('salon_id', salonId)
+    .is('deleted_at', null)
     .order('name');
 
   if (error) return res.status(500).json({ error: error.message });
@@ -129,9 +130,10 @@ router.delete('/:id', requireSalonWriteAccess, async (req, res) => {
   const id = req.params.id as string;
   const { data, error } = await supabase
     .from('clients')
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq('id', id)
     .eq('salon_id', salonId)
+    .is('deleted_at', null)
     .select('id')
     .maybeSingle();
 

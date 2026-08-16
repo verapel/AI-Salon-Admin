@@ -175,6 +175,7 @@ export interface Database {
           birthday: string | null;
           telegram_chat_id: number | null;
           salon_id: string | null;
+          deleted_at: string | null;
         };
         Insert: {
           id?: string;
@@ -191,6 +192,7 @@ export interface Database {
           birthday?: string | null;
           telegram_chat_id?: number | null;
           salon_id?: string | null;
+          deleted_at?: string | null;
         };
         Update: {
           id?: string;
@@ -207,6 +209,7 @@ export interface Database {
           birthday?: string | null;
           telegram_chat_id?: number | null;
           salon_id?: string | null;
+          deleted_at?: string | null;
         };
         Relationships: [];
       };

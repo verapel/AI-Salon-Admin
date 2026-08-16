@@ -97,6 +97,7 @@ export default function Clients() {
     if (!confirm(t('clients.deleteConfirm'))) return;
     try {
       await api.clients.delete(id);
+      setClients((prev) => prev.filter((client) => client.id !== id));
       loadClients();
     } catch (err) {
       console.error(err);
