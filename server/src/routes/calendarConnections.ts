@@ -26,6 +26,7 @@ import {
   previewGoogleCalendarEventsForSalon,
   selectGoogleCalendarForSalon,
 } from '../lib/googleCalendarOAuth.js';
+import { getSalonTimezone } from '../lib/scheduleSlots.js';
 import type {
   AppleCalendarConnectRequest,
   CalendarConnectionPublic,
@@ -556,9 +557,11 @@ router.put('/google/calendar', requireSalonWriteAccess, async (req, res) => {
 router.get('/google/events/preview', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
   try {
+    const salonTimeZone = await getSalonTimezone(salonId);
     const preview = await previewGoogleCalendarEventsForSalon({
       db: supabase as any,
       salonId,
+      salonTimeZone,
     });
     return res.json(preview);
   } catch (err) {

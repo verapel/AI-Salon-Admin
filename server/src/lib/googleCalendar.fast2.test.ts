@@ -282,11 +282,15 @@ describe('GOOGLE-CAL-FAST-2 pagination + salon preview (mock HTTP)', () => {
       salonId: 'salon-bound',
       fetchImpl,
       now: new Date('2026-08-16T12:00:00.000Z'),
+      salonTimeZone: 'Asia/Yerevan',
     });
     assert.deepEqual(seen2, ['salon-bound']);
     assert.equal(preview.count, 1);
     assert.equal(preview.events[0]?.summary, 'Sara highlighting roots +46 73');
     assert.equal(preview.calendarId, 'primary');
+    assert.equal(preview.salonTimeZone, 'Asia/Yerevan');
+    assert.ok(preview.events[0]?.parsed);
+    assert.equal(preview.events[0]?.parsed?.staffCandidate, null);
     const json = JSON.stringify(preview);
     assert.equal(json.includes('rt-secret'), false);
     assert.equal(json.includes('at-live'), false);

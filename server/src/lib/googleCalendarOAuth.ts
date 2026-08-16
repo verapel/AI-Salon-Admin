@@ -8,6 +8,11 @@ import {
   encryptCalendarCredential,
 } from './calendarCredentialsCrypto.js';
 import { getPublicAppOrigin } from './publicAppUrl.js';
+import {
+  parseExternalCalendarEvent,
+  resolveParserTimezone,
+  type CalendarEventParsedPreview,
+} from './calendarEventParser.js';
 
 /** Read-only calendar + OpenID email for account display. No write / Gmail / contacts. */
 export const GOOGLE_CALENDAR_OAUTH_SCOPES = [
@@ -115,6 +120,8 @@ export type GoogleEventPreviewItem = {
   htmlLink: string | null;
   calendarId: string;
   calendarName: string | null;
+  /** GOOGLE-CAL-FAST-3B: deterministic parse preview (no import / no matching). */
+  parsed?: CalendarEventParsedPreview;
 };
 
 export type GoogleEventsPreviewResult = {
@@ -125,6 +132,8 @@ export type GoogleEventsPreviewResult = {
   windowEnd: string;
   calendarId: string;
   calendarName: string | null;
+  /** Salon IANA timezone used for parsed local times (FAST-3B). */
+  salonTimeZone?: string;
 };
 
 export type GoogleFetch = typeof fetch;
@@ -957,6 +966,10 @@ export async function previewGoogleCalendarEventsForSalon(params: {
   salonId: string;
   fetchImpl?: GoogleFetch;
   now?: Date;
+  /** Pre-resolved salon IANA timezone (preferred; keeps preview testable without Supabase). */
+  salonTimeZone?: string;
+  /** Optional loader when salonTimeZone is omitted. */
+  getSalonTimeZone?: (salonId: string) => Promise<string>;
 }): Promise<GoogleEventsPreviewResult> {
   const config = loadGoogleCalendarAppConfig();
   let row: GoogleConnectionCredentialRow;
@@ -1015,14 +1028,39 @@ export async function previewGoogleCalendarEventsForSalon(params: {
     fetchImpl: params.fetchImpl,
   });
 
+  // GOOGLE-CAL-FAST-3B: attach pure deterministic parse (no DB writes / no matching).
+  let salonTimeZone: string;
+  if (typeof params.salonTimeZone === 'string' && params.salonTimeZone.trim()) {
+    salonTimeZone = resolveParserTimezone(params.salonTimeZone);
+  } else if (params.getSalonTimeZone) {
+    salonTimeZone = resolveParserTimezone(await params.getSalonTimeZone(params.salonId));
+  } else {
+    salonTimeZone = resolveParserTimezone(undefined);
+  }
+
+  const eventsWithParsed: GoogleEventPreviewItem[] = events.map((ev) => ({
+    ...ev,
+    parsed: parseExternalCalendarEvent(
+      {
+        summary: ev.summary,
+        description: ev.description,
+        status: ev.status,
+        start: ev.start,
+        end: ev.end,
+      },
+      salonTimeZone,
+    ),
+  }));
+
   return {
-    events,
-    count: events.length,
+    events: eventsWithParsed,
+    count: eventsWithParsed.length,
     truncated,
     windowStart: window.timeMin,
     windowEnd: window.timeMax,
     calendarId,
     calendarName,
+    salonTimeZone,
   };
 }
 

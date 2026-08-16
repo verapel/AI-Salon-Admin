@@ -454,6 +454,36 @@ export interface GoogleEventTimePreview {
   allDay: boolean;
 }
 
+/** GOOGLE-CAL-FAST-3B deterministic parse preview (no import). */
+export type CalendarParseImportability = 'ready' | 'review' | 'not_importable';
+
+export interface CalendarParsedPhone {
+  value: string | null;
+  normalized: string | null;
+  confidence: 'exact' | 'possible' | 'none';
+}
+
+export interface CalendarParsedPrice {
+  value: number | null;
+  raw: string | null;
+  confidence: 'likely' | 'possible' | 'none';
+}
+
+export interface CalendarEventParsedPreview {
+  classification: string[];
+  importability: CalendarParseImportability;
+  localDate: string | null;
+  localStartTime: string | null;
+  localEndTime: string | null;
+  durationMinutes: number | null;
+  clientNameCandidate: string | null;
+  phone: CalendarParsedPhone;
+  serviceCandidate: string | null;
+  priceCandidate: CalendarParsedPrice;
+  staffCandidate: null;
+  reasons: string[];
+}
+
 /** Safe Google events.list preview DTO (no credentials). */
 export interface GoogleEventPreviewItem {
   id: string;
@@ -471,6 +501,8 @@ export interface GoogleEventPreviewItem {
   htmlLink: string | null;
   calendarId: string;
   calendarName: string | null;
+  /** Present after FAST-3B; optional for older responses. */
+  parsed?: CalendarEventParsedPreview;
 }
 
 export interface GoogleEventsPreviewResponse {
@@ -481,6 +513,7 @@ export interface GoogleEventsPreviewResponse {
   windowEnd: string;
   calendarId: string;
   calendarName: string | null;
+  salonTimeZone?: string;
 }
 
 /** Meta WhatsApp Cloud API architecture marker. */

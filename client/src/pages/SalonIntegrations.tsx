@@ -7,6 +7,8 @@ import { useLanguage } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import type {
   CalendarConnectionPublic,
+  CalendarEventParsedPreview,
+  CalendarParseImportability,
   GoogleCalendarListItem,
   GoogleEventPreviewItem,
   GoogleEventTimePreview,
@@ -42,6 +44,115 @@ function formatEventDuration(
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+function importabilityLabel(
+  t: (key: import('@/context/LanguageContext').TranslationKey) => string,
+  value: CalendarParseImportability | undefined,
+): string {
+  if (value === 'ready') return t('integrations.google.parsedReady');
+  if (value === 'not_importable') return t('integrations.google.parsedNotImportable');
+  return t('integrations.google.parsedReview');
+}
+
+function importabilityClass(value: CalendarParseImportability | undefined): string {
+  if (value === 'ready') {
+    return 'text-emerald-800 dark:text-emerald-200';
+  }
+  if (value === 'not_importable') {
+    return 'text-gray-600 dark:text-gray-400';
+  }
+  return 'text-amber-800 dark:text-amber-200';
+}
+
+function parsedReasonLabels(
+  t: (key: import('@/context/LanguageContext').TranslationKey) => string,
+  parsed: CalendarEventParsedPreview | undefined,
+): string[] {
+  if (!parsed) return [t('integrations.google.reasonStaffUnset')];
+  const labels: string[] = [];
+  const reasons = parsed.reasons ?? [];
+  const pushUnique = (label: string) => {
+    if (!labels.includes(label)) labels.push(label);
+  };
+
+  // Staff is always unresolved in FAST-3B.
+  pushUnique(t('integrations.google.reasonStaffUnset'));
+
+  if (reasons.includes('all_day_event') || parsed.classification.includes('all_day')) {
+    pushUnique(t('integrations.google.reasonAllDay'));
+  }
+  if (reasons.includes('cancelled_event') || parsed.classification.includes('cancelled')) {
+    pushUnique(t('integrations.google.reasonCancelled'));
+  }
+  if (
+    reasons.includes('invalid_or_incomplete_time') ||
+    reasons.includes('missing_start_datetime') ||
+    reasons.includes('invalid_start_datetime') ||
+    reasons.includes('missing_end_datetime') ||
+    reasons.includes('end_before_or_equal_start')
+  ) {
+    pushUnique(t('integrations.google.reasonInvalidTime'));
+  }
+  if (reasons.includes('ambiguous_title_structure') || parsed.classification.includes('ambiguous')) {
+    pushUnique(t('integrations.google.reasonAmbiguous'));
+  }
+  if (reasons.includes('needs_client_review') || !parsed.clientNameCandidate) {
+    if (parsed.importability !== 'not_importable') {
+      pushUnique(t('integrations.google.reasonNeedsClient'));
+    }
+  }
+  if (reasons.includes('needs_service_review') || !parsed.serviceCandidate) {
+    if (parsed.importability !== 'not_importable') {
+      pushUnique(t('integrations.google.reasonNeedsService'));
+    }
+  }
+
+  return labels;
+}
+
+function formatParsedLocalTime(parsed: CalendarEventParsedPreview | undefined): string {
+  if (!parsed?.localStartTime) return '—';
+  if (parsed.localEndTime) return `${parsed.localStartTime} – ${parsed.localEndTime}`;
+  return parsed.localStartTime;
+}
+
+function formatParsedDuration(
+  parsed: CalendarEventParsedPreview | undefined,
+  minutesLabel: (n: number) => string,
+): string {
+  if (parsed?.durationMinutes == null) return '—';
+  return minutesLabel(parsed.durationMinutes);
+}
+
+function formatParsedPhone(parsed: CalendarEventParsedPreview | undefined): string {
+  if (!parsed?.phone || parsed.phone.confidence === 'none') return '—';
+  const shown = parsed.phone.normalized || parsed.phone.value || '—';
+  return `${shown} (${parsed.phone.confidence})`;
+}
+
+function formatParsedPrice(parsed: CalendarEventParsedPreview | undefined): string {
+  if (!parsed?.priceCandidate || parsed.priceCandidate.confidence === 'none') return '—';
+  const v =
+    parsed.priceCandidate.value != null
+      ? String(parsed.priceCandidate.value)
+      : parsed.priceCandidate.raw || '—';
+  return `${v} (${parsed.priceCandidate.confidence})`;
+}
+
+function ParsedField({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-gray-500 dark:text-gray-400">{label}</dt>
+      <dd className="mt-0.5 break-words text-sm text-gray-900 dark:text-gray-100">{value}</dd>
+    </div>
+  );
 }
 
 export default function SalonIntegrations() {
@@ -530,6 +641,9 @@ export default function SalonIntegrations() {
                     <p className="text-sm text-amber-800 dark:text-amber-200">
                       {t('integrations.google.previewBanner')}
                     </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      {t('integrations.google.previewParseNote')}
+                    </p>
                     {googlePreviewError ? (
                       <p className="text-sm text-red-600 dark:text-red-400">
                         {googlePreviewError}
@@ -546,63 +660,102 @@ export default function SalonIntegrations() {
                       </p>
                     ) : null}
                     {googlePreviewEvents.length > 0 ? (
-                      <div className="max-h-96 overflow-auto rounded-md border border-gray-200 dark:border-gray-700">
-                        <table className="min-w-full divide-y divide-gray-200 text-left text-sm dark:divide-gray-700">
-                          <thead className="bg-gray-100 dark:bg-gray-900/60">
-                            <tr>
-                              <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
-                                {t('integrations.google.previewColStart')}
-                              </th>
-                              <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
-                                {t('integrations.google.previewColEnd')}
-                              </th>
-                              <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
-                                {t('integrations.google.previewColTitle')}
-                              </th>
-                              <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
-                                {t('integrations.google.previewColDuration')}
-                              </th>
-                              <th className="px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
-                                {t('integrations.google.previewColStatus')}
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                            {googlePreviewEvents.map((ev) => (
-                              <tr key={ev.id} className="align-top">
-                                <td className="px-3 py-2 whitespace-nowrap text-gray-900 dark:text-gray-100">
+                      <div className="max-h-[32rem] space-y-3 overflow-auto pr-1">
+                        {googlePreviewEvents.map((ev) => {
+                          const parsed = ev.parsed;
+                          const minutesLabel = (n: number) =>
+                            t('integrations.google.parsedMinutes').replace('{n}', String(n));
+                          return (
+                            <article
+                              key={ev.id}
+                              className="rounded-md border border-gray-200 p-3 dark:border-gray-700"
+                            >
+                              <div className="space-y-1">
+                                <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                  {t('integrations.google.parsedOriginal')}
+                                </p>
+                                <h3 className="text-base font-medium text-gray-900 dark:text-gray-100">
+                                  {ev.summary || '—'}
+                                </h3>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {t('integrations.google.parsedGoogleTime')}:{' '}
                                   {formatEventInstant(ev.start)}
-                                  {ev.start.allDay ? (
-                                    <span className="mt-1 block text-xs text-gray-500">
-                                      {t('integrations.google.previewAllDay')}
-                                    </span>
-                                  ) : null}
-                                </td>
-                                <td className="px-3 py-2 whitespace-nowrap text-gray-900 dark:text-gray-100">
+                                  {' → '}
                                   {formatEventInstant(ev.end)}
-                                </td>
-                                <td className="px-3 py-2 text-gray-900 dark:text-gray-100">
-                                  <div className="font-medium">{ev.summary || '—'}</div>
-                                  {ev.location ? (
-                                    <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                                      {ev.location}
-                                    </div>
-                                  ) : null}
-                                </td>
-                                <td className="px-3 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300">
+                                  {ev.start.allDay
+                                    ? ` · ${t('integrations.google.previewAllDay')}`
+                                    : ''}
+                                  {ev.status ? ` · ${ev.status}` : ''}
+                                  {' · '}
                                   {formatEventDuration(
                                     ev.start,
                                     ev.end,
                                     t('integrations.google.previewAllDay'),
                                   )}
-                                </td>
-                                <td className="px-3 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300">
-                                  {ev.status || '—'}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                                </p>
+                              </div>
+
+                              <div className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+                                <div className="mb-2 flex flex-wrap items-center gap-2">
+                                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                    {t('integrations.google.parsedSection')}
+                                  </p>
+                                  <span
+                                    className={`text-xs font-semibold ${importabilityClass(parsed?.importability)}`}
+                                  >
+                                    {t('integrations.google.parsedImportability')}:{' '}
+                                    {importabilityLabel(t, parsed?.importability)}
+                                  </span>
+                                </div>
+                                <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                  <ParsedField
+                                    label={t('integrations.google.parsedLocalDate')}
+                                    value={parsed?.localDate || '—'}
+                                  />
+                                  <ParsedField
+                                    label={t('integrations.google.parsedLocalTime')}
+                                    value={formatParsedLocalTime(parsed)}
+                                  />
+                                  <ParsedField
+                                    label={t('integrations.google.parsedDuration')}
+                                    value={formatParsedDuration(parsed, minutesLabel)}
+                                  />
+                                  <ParsedField
+                                    label={t('integrations.google.parsedClient')}
+                                    value={parsed?.clientNameCandidate || '—'}
+                                  />
+                                  <ParsedField
+                                    label={t('integrations.google.parsedPhone')}
+                                    value={formatParsedPhone(parsed)}
+                                  />
+                                  <ParsedField
+                                    label={t('integrations.google.parsedService')}
+                                    value={parsed?.serviceCandidate || '—'}
+                                  />
+                                  <ParsedField
+                                    label={t('integrations.google.parsedPrice')}
+                                    value={formatParsedPrice(parsed)}
+                                  />
+                                  <ParsedField
+                                    label={t('integrations.google.parsedStaff')}
+                                    value={t('integrations.google.parsedStaffUnset')}
+                                  />
+                                </dl>
+                                {(() => {
+                                  const reasonLabels = parsedReasonLabels(t, parsed);
+                                  if (reasonLabels.length === 0) return null;
+                                  return (
+                                    <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-gray-500 dark:text-gray-400">
+                                      {reasonLabels.map((label) => (
+                                        <li key={label}>{label}</li>
+                                      ))}
+                                    </ul>
+                                  );
+                                })()}
+                              </div>
+                            </article>
+                          );
+                        })}
                       </div>
                     ) : null}
                   </div>
