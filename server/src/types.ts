@@ -39,7 +39,13 @@ export interface Staff {
 }
 
 /** Origin of an appointment. Mapper falls back to 'owner' when DB value is null. */
-export type AppointmentSource = 'telegram' | 'owner' | 'apple' | 'whatsapp' | 'instagram';
+export type AppointmentSource =
+  | 'telegram'
+  | 'owner'
+  | 'apple'
+  | 'whatsapp'
+  | 'instagram'
+  | 'google';
 
 export interface Appointment {
   id: string;

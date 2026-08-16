@@ -39,7 +39,13 @@ export interface Staff {
 }
 
 /** Origin of an appointment. API falls back to 'owner' when DB value is null. */
-export type AppointmentSource = 'telegram' | 'owner' | 'apple' | 'whatsapp' | 'instagram';
+export type AppointmentSource =
+  | 'telegram'
+  | 'owner'
+  | 'apple'
+  | 'whatsapp'
+  | 'instagram'
+  | 'google';
 
 export interface Appointment {
   id: string;
@@ -416,7 +422,13 @@ export interface AppleCalendarConnectRequest {
 }
 
 export interface CalendarConnectionsResponse {
+  /**
+   * Legacy Apple-only field for existing Integrations UI.
+   * Prefer `connections` for multi-provider reads (GOOGLE-CAL-A2).
+   */
   connection: CalendarConnectionPublic | null;
+  /** Safe metadata for all providers present for this salon (apple, google, …). */
+  connections: CalendarConnectionPublic[];
 }
 
 export interface AppleCalendarConnectResponse {

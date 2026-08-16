@@ -26,7 +26,13 @@ export type SalonMemberRole = 'owner' | 'admin' | 'staff_readonly';
 export type PlatformUserRole = 'developer';
 
 /** Origin of an appointment row. NULL in DB = legacy/unknown. */
-export type AppointmentSource = 'telegram' | 'owner' | 'apple' | 'whatsapp' | 'instagram';
+export type AppointmentSource =
+  | 'telegram'
+  | 'owner'
+  | 'apple'
+  | 'whatsapp'
+  | 'instagram'
+  | 'google';
 
 export type CalendarProvider = 'apple' | 'google';
 
