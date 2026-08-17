@@ -110,20 +110,20 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-white/80 px-4 backdrop-blur-md dark:bg-gray-900/80 sm:px-6">
-      <div className="flex items-center gap-3">
-        <button onClick={onMenuClick} className="btn-ghost lg:hidden">
+    <header className="sticky top-0 z-30 flex h-16 min-w-0 items-center justify-between gap-2 border-b bg-white/80 px-4 backdrop-blur-md dark:bg-gray-900/80 sm:px-6">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <button onClick={onMenuClick} className="btn-ghost shrink-0 lg:hidden">
           <Menu className="h-5 w-5" />
         </button>
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h2>
+        <div className="min-w-0">
+          <h2 className="truncate text-lg font-semibold text-gray-900 dark:text-white">{title}</h2>
           {subtitle && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">{subtitle}</p>
+            <p className="truncate text-xs text-gray-500 dark:text-gray-400">{subtitle}</p>
           )}
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         {actions}
 
         {/* Кнопка уведомлений */}
@@ -145,14 +145,14 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
           {panelOpen && (
             <div
               ref={panelRef}
-              className="absolute right-0 top-full z-50 mt-2 w-80 overflow-hidden rounded-xl border bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+              className="fixed left-4 right-4 top-16 z-50 mt-2 flex max-h-[min(24rem,calc(100dvh-5rem))] min-w-0 flex-col overflow-hidden rounded-xl border bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:w-80 sm:max-h-none"
             >
               {/* Заголовок */}
-              <div className="flex items-center justify-between border-b px-4 py-3 dark:border-gray-700">
-                <div>
-                  <h3 className="font-semibold text-gray-900 dark:text-white">{t('header.reminders')}</h3>
+              <div className="flex min-w-0 items-center justify-between gap-2 border-b px-4 py-3 dark:border-gray-700">
+                <div className="min-w-0">
+                  <h3 className="break-words font-semibold text-gray-900 dark:text-white">{t('header.reminders')}</h3>
                   {!loading && (
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                    <p className="break-words text-xs text-gray-500 dark:text-gray-400">
                       {pending.length} {t('header.pending')}
                     </p>
                   )}
@@ -160,7 +160,7 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
                 <button
                   type="button"
                   onClick={close}
-                  className="btn-ghost p-1 text-gray-400"
+                  className="btn-ghost shrink-0 p-1 text-gray-400"
                   aria-label={t('header.closeNotifications')}
                 >
                   <X className="h-4 w-4" />
@@ -173,23 +173,23 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
                   <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
                 </div>
               ) : pending.length === 0 ? (
-                <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                <p className="break-words px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                   {t('header.noPendingReminders')}
                 </p>
               ) : (
-                <ul className="max-h-72 divide-y overflow-y-auto dark:divide-gray-700">
+                <ul className="min-h-0 flex-1 divide-y overflow-y-auto overflow-x-hidden dark:divide-gray-700 sm:max-h-72">
                   {pending.slice(0, 15).map((r) => (
                     <li key={r.id} className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                      <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      <p className="break-words text-sm font-medium text-gray-900 dark:text-white">
                         {r.clientName}
                       </p>
                       {r.appointmentDate && (
-                        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                        <p className="mt-0.5 break-words text-xs text-gray-500 dark:text-gray-400">
                           {formatDate(r.appointmentDate)}
                           {r.appointmentTime ? ` ${t('header.at')} ${formatTime(r.appointmentTime)}` : ''}
                         </p>
                       )}
-                      <p className="mt-0.5 truncate text-xs text-gray-400 dark:text-gray-500">
+                      <p className="mt-0.5 break-words text-xs text-gray-400 dark:text-gray-500">
                         {r.message}
                       </p>
                     </li>
@@ -228,7 +228,7 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
           {langOpen && (
             <div
               ref={langPanelRef}
-              className="absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-xl border bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+              className="absolute right-0 top-full z-50 mt-2 w-44 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
             >
               <div className="border-b px-3 py-2 dark:border-gray-700">
                 <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t('header.language')}</p>
@@ -271,7 +271,7 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
           aria-label={t('auth.signOut')}
         >
           <LogOut className="h-4 w-4 shrink-0" />
-          <span>{t('auth.signOut')}</span>
+          <span className="hidden sm:inline">{t('auth.signOut')}</span>
         </button>
 
         <div className="ml-2 hidden items-center gap-2 sm:flex">

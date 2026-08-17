@@ -430,7 +430,7 @@ export default function Products() {
 
           <div className="hidden sm:block">
             <div className="card overflow-hidden p-0">
-              <div className="overflow-x-auto">
+              <div className="table-scroll">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50">
@@ -573,7 +573,7 @@ export default function Products() {
               ) : null}
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="table-scroll">
               <table className="w-full min-w-[720px] text-sm">
                 <thead>
                   <tr className="border-b text-left text-gray-500 dark:border-gray-700 dark:text-gray-400">
@@ -678,7 +678,7 @@ export default function Products() {
               </table>
             </div>
           )}
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
             <button type="button" className="btn-secondary" onClick={() => setImportOpen(false)}>
               {t('common.cancel')}
             </button>
@@ -815,7 +815,7 @@ export default function Products() {
               {formError}
             </p>
           ) : null}
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
             <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">
               {t('common.cancel')}
             </button>

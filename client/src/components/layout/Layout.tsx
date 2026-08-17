@@ -34,15 +34,15 @@ export default function Layout() {
   const subtitle = keys.subtitle ? t(keys.subtitle) : '';
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen min-w-0 overflow-hidden">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header
           title={title}
           subtitle={subtitle || undefined}
           onMenuClick={() => setSidebarOpen(true)}
         />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <main className="min-w-0 flex-1 overflow-x-clip overflow-y-auto p-4 sm:p-6">
           <Outlet />
         </main>
       </div>

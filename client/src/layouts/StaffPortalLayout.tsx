@@ -33,7 +33,7 @@ export default function StaffPortalLayout() {
   }, []);
 
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50 dark:bg-surface-dark">
+    <div className="flex min-h-screen min-w-0 flex-col overflow-x-clip bg-gray-50 dark:bg-surface-dark">
       <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-gray-800 dark:bg-gray-900/95">
         <div className="mx-auto flex max-w-lg items-center justify-between gap-3">
           <div className="min-w-0">
@@ -53,7 +53,7 @@ export default function StaffPortalLayout() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-lg flex-1 px-4 py-4 pb-24">
+      <main className="mx-auto w-full min-w-0 max-w-lg flex-1 overflow-x-clip px-4 py-4 pb-24">
         <Outlet />
       </main>
 

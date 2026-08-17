@@ -43,7 +43,7 @@ function DeveloperSidebar({ open, onClose }: DeveloperSidebarProps) {
 
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r bg-white transition-transform duration-300 dark:bg-gray-900 lg:static lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 flex w-64 shrink-0 flex-col border-r bg-white transition-transform duration-300 dark:bg-gray-900 lg:static lg:translate-x-0',
           open ? 'translate-x-0' : '-translate-x-full'
         )}
       >
@@ -99,7 +99,7 @@ export default function DeveloperLayout() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen min-w-0 overflow-hidden">
       <DeveloperSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header
@@ -107,7 +107,7 @@ export default function DeveloperLayout() {
           subtitle={t(keys.subtitle)}
           onMenuClick={() => setSidebarOpen(true)}
         />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <main className="min-w-0 flex-1 overflow-x-clip overflow-y-auto p-4 sm:p-6">
           <Outlet />
         </main>
       </div>

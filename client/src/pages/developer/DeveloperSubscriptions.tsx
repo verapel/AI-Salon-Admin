@@ -172,7 +172,7 @@ export default function DeveloperSubscriptions() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="w-full min-w-0 max-w-full space-y-5 overflow-x-clip">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {t('developer.subscriptions.subtitle')}
@@ -203,7 +203,7 @@ export default function DeveloperSubscriptions() {
           onChange={(e) =>
             setStatusFilter(e.target.value as 'all' | SalonSubscriptionStatus)
           }
-          className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+          className="min-w-0 w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white lg:w-auto"
         >
           <option value="all">{t('developer.subscriptions.filterStatusAll')}</option>
           {(
@@ -217,7 +217,7 @@ export default function DeveloperSubscriptions() {
         <select
           value={aiFilter}
           onChange={(e) => setAiFilter(e.target.value as 'all' | 'allow' | 'deny')}
-          className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+          className="min-w-0 w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white lg:w-auto"
         >
           <option value="all">{t('developer.subscriptions.filterAiAll')}</option>
           <option value="allow">{t('developer.salons.subscription.aiAllowed')}</option>
@@ -253,7 +253,7 @@ export default function DeveloperSubscriptions() {
       ) : (
         <>
           {/* Desktop table */}
-          <div className="card hidden overflow-x-auto md:block">
+          <div className="table-scroll card hidden md:block">
             <table className="min-w-full text-left text-sm">
               <thead className="border-b border-gray-200 text-xs uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
                 <tr>

@@ -22,23 +22,27 @@ export default function Modal({ open, onClose, title, children, size = 'md' }: M
   if (!open) return null;
 
   const sizeClasses = {
-    sm: 'max-w-md',
-    md: 'max-w-lg',
-    lg: 'max-w-2xl',
-    xl: 'max-w-5xl',
+    sm: 'max-w-[min(28rem,calc(100vw-2rem))]',
+    md: 'max-w-[min(32rem,calc(100vw-2rem))]',
+    lg: 'max-w-[min(42rem,calc(100vw-2rem))]',
+    xl: 'max-w-[min(64rem,calc(100vw-2rem))]',
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-x-hidden p-4">
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className={`relative w-full ${sizeClasses[size]} animate-slide-up rounded-xl border bg-white shadow-2xl dark:bg-gray-900`}>
-        <div className="flex items-center justify-between border-b px-6 py-4">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
-          <button onClick={onClose} className="btn-ghost">
+      <div
+        className={`relative flex max-h-[min(90dvh,100%)] w-full min-w-0 flex-col overflow-hidden ${sizeClasses[size]} animate-slide-up rounded-xl border bg-white shadow-2xl dark:bg-gray-900`}
+      >
+        <div className="flex min-w-0 items-center justify-between gap-3 border-b px-4 py-4 sm:px-6">
+          <h3 className="min-w-0 truncate text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
+          <button onClick={onClose} className="btn-ghost shrink-0">
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className={`px-6 py-4 ${size === 'xl' ? 'max-h-[70vh] overflow-auto' : ''}`}>{children}</div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto px-4 py-4 sm:px-6">
+          {children}
+        </div>
       </div>
     </div>
   );

@@ -84,7 +84,7 @@ export default function Schedule() {
   if (loading) return <LoadingSpinner />;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
+    <div className="mx-auto w-full min-w-0 max-w-3xl space-y-8 overflow-x-clip">
       <section className="card space-y-4 p-4 sm:p-6">
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">

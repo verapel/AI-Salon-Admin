@@ -316,7 +316,7 @@ export default function Bookings() {
           {/* DESKTOP: table */}
           <div className="hidden sm:block">
             <div className="card overflow-hidden p-0">
-              <div className="overflow-x-auto">
+              <div className="table-scroll">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50">
