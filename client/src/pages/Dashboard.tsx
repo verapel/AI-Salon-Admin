@@ -8,10 +8,11 @@ import QuickBookingModal from '@/components/bookings/QuickBookingModal';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import { formatCurrency, getStatusColor } from '@/lib/utils';
-import type { DashboardStats, Appointment } from '@/types';
+import type { Appointment, DashboardStats, GoogleReviewCalendarItem } from '@/types';
 
 const fmt24 = (time: string) => time.slice(0, 5);
 
+/** Local YYYY-MM-DD — same helper as Calendar (avoids UTC shift from toISOString). */
 const toLocalDateStr = (date = new Date()) => {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -19,29 +20,74 @@ const toLocalDateStr = (date = new Date()) => {
   return `${y}-${m}-${d}`;
 };
 
+type TodayItem = {
+  id: string;
+  startTime: string;
+  title: string;
+  subtitle?: string;
+  staffName?: string;
+  kind: 'appointment' | 'google_review';
+  status?: Appointment['status'];
+};
+
 function statusLabel(status: Appointment['status'], t: (key: TranslationKey) => string) {
   return t(`appointmentStatus.${status}` as TranslationKey);
+}
+
+function appointmentToTodayItem(apt: Appointment): TodayItem {
+  return {
+    id: apt.id,
+    startTime: apt.startTime,
+    title: apt.clientName || '—',
+    subtitle: apt.serviceName,
+    staffName: apt.staffName,
+    kind: 'appointment',
+    status: apt.status,
+  };
+}
+
+function reviewToTodayItem(ev: GoogleReviewCalendarItem): TodayItem {
+  return {
+    id: ev.id,
+    startTime: ev.startTime,
+    title: ev.title,
+    subtitle: undefined,
+    staffName: ev.staffName,
+    kind: 'google_review',
+  };
+}
+
+function sortTodayItems(a: TodayItem, b: TodayItem): number {
+  const byTime = a.startTime.localeCompare(b.startTime);
+  if (byTime !== 0) return byTime;
+  return (a.staffName ?? '').localeCompare(b.staffName ?? '');
 }
 
 export default function Dashboard() {
   const { t } = useLanguage();
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [todayItems, setTodayItems] = useState<TodayItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [quickBookingOpen, setQuickBookingOpen] = useState(false);
 
   const loadData = useCallback(() => {
     setError(false);
-    Promise.all([api.stats.getDashboard(), api.appointments.getAll()])
-      .then(([dashboardStats, allAppointments]) => {
+    const today = toLocalDateStr();
+    Promise.all([
+      api.stats.getDashboard(),
+      api.appointments.getAll(),
+      api.calendar.getGoogleReviewEvents().catch(() => ({ events: [] as GoogleReviewCalendarItem[] })),
+    ])
+      .then(([dashboardStats, allAppointments, reviewData]) => {
         setStats(dashboardStats);
-        const today = toLocalDateStr();
-        setAppointments(
-          allAppointments
-            .filter((a) => a.date === today && a.status !== 'cancelled')
-            .sort((a, b) => a.startTime.localeCompare(b.startTime))
-        );
+        const appointments = allAppointments
+          .filter((a) => a.date === today && a.status !== 'cancelled')
+          .map(appointmentToTodayItem);
+        const reviews = (reviewData.events ?? [])
+          .filter((ev) => ev.date === today)
+          .map(reviewToTodayItem);
+        setTodayItems([...appointments, ...reviews].sort(sortTodayItems));
       })
       .catch((err) => {
         console.error(err);
@@ -85,7 +131,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="w-full min-w-0 max-w-full overflow-x-clip space-y-6 animate-fade-in">
+    <div className="w-full min-w-0 max-w-full space-y-6 animate-fade-in">
       <div className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <StatCard
           title={t('dashboard.totalClients')}
@@ -129,47 +175,54 @@ export default function Dashboard() {
         />
       </div>
 
-      <div className="grid min-w-0 gap-6 lg:grid-cols-3">
-        <div className="card min-w-0 lg:col-span-2">
+      <div className="grid w-full min-w-0 grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="card min-w-0 overflow-hidden lg:col-span-2">
           <div className="mb-4 flex min-w-0 items-center justify-between gap-2">
             <h3 className="text-base font-semibold text-gray-900 dark:text-white">
               {t('dashboard.todaySchedule')}
             </h3>
             <Link
               to="/calendar"
-              className="flex shrink-0 items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400"
+              className="relative z-10 flex shrink-0 items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400"
             >
               {t('dashboard.viewCalendar')} <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
 
-          {appointments.length === 0 ? (
+          {todayItems.length === 0 ? (
             <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
               {t('dashboard.noAppointments')}
             </p>
           ) : (
-            <div className="space-y-3">
-              {appointments.map((apt) => (
+            <div className="max-h-[28rem] space-y-3 overflow-y-auto overflow-x-hidden pr-1">
+              {todayItems.map((item) => (
                 <div
-                  key={apt.id}
+                  key={`${item.kind}:${item.id}`}
                   className="flex min-w-0 items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-gray-50 sm:gap-4 sm:p-4 dark:border-gray-700 dark:hover:bg-gray-800/50"
                 >
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700 dark:bg-brand-950/50 dark:text-brand-300">
-                    <span className="text-sm font-bold tabular-nums">{fmt24(apt.startTime)}</span>
+                    <span className="text-sm font-bold tabular-nums">{fmt24(item.startTime)}</span>
                   </div>
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <p className="min-w-0 truncate font-medium leading-tight text-gray-900 dark:text-white">
-                        {apt.clientName}
+                        {item.title}
                       </p>
-                      <span className={`badge shrink-0 text-xs ${getStatusColor(apt.status)}`}>
-                        {statusLabel(apt.status, t)}
-                      </span>
+                      {item.kind === 'google_review' ? (
+                        <span className="badge shrink-0 bg-amber-100 text-xs text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
+                          {t('calendar.googleNeedsReview')}
+                        </span>
+                      ) : (
+                        <span className={`badge shrink-0 text-xs ${getStatusColor(item.status || 'scheduled')}`}>
+                          {statusLabel(item.status || 'scheduled', t)}
+                        </span>
+                      )}
                     </div>
                     <p className="mt-1 truncate text-sm text-gray-500 dark:text-gray-400">
-                      {apt.serviceName}
-                      {apt.staffName ? ` · ${apt.staffName}` : ''}
+                      {item.kind === 'google_review'
+                        ? [t('calendar.googleSource'), item.staffName].filter(Boolean).join(' · ')
+                        : [item.subtitle, item.staffName].filter(Boolean).join(' · ')}
                     </p>
                   </div>
                 </div>
@@ -178,7 +231,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        <div className="min-w-0 space-y-4">
+        <div className="relative z-10 min-w-0 w-full space-y-4">
           <div className="card min-w-0">
             <h3 className="mb-4 text-base font-semibold text-gray-900 dark:text-white">
               {t('dashboard.quickActions')}
@@ -187,7 +240,7 @@ export default function Dashboard() {
               <button
                 type="button"
                 onClick={() => setQuickBookingOpen(true)}
-                className="flex min-h-[52px] w-full min-w-0 items-center justify-between gap-3 rounded-lg border p-3.5 text-left transition-colors hover:bg-gray-50 sm:min-h-0 sm:p-3 dark:border-gray-700 dark:hover:bg-gray-800/50"
+                className="relative z-10 flex min-h-[52px] w-full min-w-0 cursor-pointer items-center justify-between gap-3 rounded-lg border p-3.5 text-left transition-colors hover:bg-gray-50 sm:min-h-0 sm:p-3 dark:border-gray-700 dark:hover:bg-gray-800/50"
               >
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-900 dark:text-white">
@@ -203,7 +256,7 @@ export default function Dashboard() {
                 <Link
                   key={action.to}
                   to={action.to}
-                  className="flex min-h-[52px] min-w-0 items-center justify-between gap-3 rounded-lg border p-3.5 transition-colors hover:bg-gray-50 sm:min-h-0 sm:p-3 dark:border-gray-700 dark:hover:bg-gray-800/50"
+                  className="relative z-10 flex min-h-[52px] w-full min-w-0 cursor-pointer items-center justify-between gap-3 rounded-lg border p-3.5 transition-colors hover:bg-gray-50 sm:min-h-0 sm:p-3 dark:border-gray-700 dark:hover:bg-gray-800/50"
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-900 dark:text-white">
@@ -225,7 +278,7 @@ export default function Dashboard() {
             <div className="mt-3 flex flex-col gap-2">
               <a
                 href="mailto:support@aisalon.app?subject=Telegram%20Connection%20Help"
-                className="flex min-h-[44px] min-w-0 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800/50"
+                className="relative z-10 flex min-h-[44px] w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800/50"
               >
                 <Mail className="h-4 w-4 shrink-0 text-gray-400" />
                 <span className="truncate">{t('dashboard.emailSupport')}</span>
@@ -234,7 +287,7 @@ export default function Dashboard() {
                 href="https://t.me/BotFather"
                 target="_blank"
                 rel="noreferrer"
-                className="flex min-h-[44px] min-w-0 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800/50"
+                className="relative z-10 flex min-h-[44px] w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800/50"
               >
                 <MessageCircle className="h-4 w-4 shrink-0 text-gray-400" />
                 <span className="truncate">{t('dashboard.botFatherGuide')}</span>

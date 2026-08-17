@@ -614,14 +614,15 @@ describe('GOOGLE-CAL-FAST-7B all-event calendar coverage', () => {
     assert.equal(overlay.length, 0);
   });
 
-  it('main calendar fetches overlay; bookings/dashboard stay on appointments only', () => {
+  it('main calendar and dashboard fetch overlay; bookings stay on appointments only', () => {
     const calendar = read('client/src/pages/Calendar.tsx');
     const bookings = read('client/src/pages/Bookings.tsx');
     const dashboard = read('client/src/pages/Dashboard.tsx');
     assert.match(calendar, /getGoogleReviewEvents/);
     assert.match(calendar, /googleNeedsReview/);
+    assert.match(dashboard, /getGoogleReviewEvents/);
+    assert.match(dashboard, /google_review/);
     assert.doesNotMatch(bookings, /getGoogleReviewEvents/);
-    assert.doesNotMatch(dashboard, /getGoogleReviewEvents/);
     const route = read('server/src/routes/calendarConnections.ts');
     assert.match(route, /\/google\/review-events/);
   });
