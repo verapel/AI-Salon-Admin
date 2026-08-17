@@ -6,7 +6,7 @@ import { useLanguage, LANGUAGES, type LangCode } from '@/context/LanguageContext
 import { useAuth } from '@/context/AuthContext';
 import { api } from '@/lib/api';
 import { formatDate, formatTime } from '@/lib/utils';
-import type { Reminder } from '@/types';
+import type { InAppNotification, NotificationFeed } from '@/types';
 
 const LANG_ABBR: Record<LangCode, string> = {
   ru: 'RU',
@@ -35,22 +35,41 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
   const { language, setLanguage, t } = useLanguage();
   const [panelOpen, setPanelOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
-  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [items, setItems] = useState<InAppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const feedSeq = useRef(0);
 
   const bellRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const langRef = useRef<HTMLButtonElement>(null);
   const langPanelRef = useRef<HTMLDivElement>(null);
 
-  const pending = reminders.filter((r) => r.status === 'pending');
+  function applyFeed(feed: NotificationFeed) {
+    setItems(feed.items);
+    setUnreadCount(feed.unreadCount);
+  }
 
   useEffect(() => {
-    api.stats.getReminders()
-      .then((data) => setReminders(data))
+    api.notifications
+      .list()
+      .then(applyFeed)
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!panelOpen) return;
+    if (unreadCount > 0) setUnreadCount(0);
+    const seq = ++feedSeq.current;
+    api.notifications
+      .markRead()
+      .then((feed) => {
+        if (feedSeq.current === seq) applyFeed(feed);
+      })
+      .catch(console.error);
+  }, [panelOpen]);
 
   // Закрытие по клику снаружи — добавляем listener только когда панель открыта
   useEffect(() => {
@@ -99,6 +118,36 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
 
   const close = () => setPanelOpen(false);
 
+  async function handleDismissAll() {
+    if (busy || items.length === 0) return;
+    setBusy(true);
+    feedSeq.current += 1;
+    const seq = feedSeq.current;
+    try {
+      const feed = await api.notifications.dismissAll();
+      if (feedSeq.current === seq) applyFeed(feed);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDismissOne(id: string) {
+    if (busy) return;
+    setBusy(true);
+    feedSeq.current += 1;
+    const seq = feedSeq.current;
+    try {
+      const feed = await api.notifications.dismiss(id);
+      if (feedSeq.current === seq) applyFeed(feed);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function handleLanguageChange(code: LangCode) {
     setLanguage(code);
     setLangOpen(false);
@@ -135,9 +184,9 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
             aria-label={t('header.notifications')}
           >
             <Bell className="h-5 w-5" />
-            {!loading && pending.length > 0 && (
+            {!loading && unreadCount > 0 && (
               <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-brand-500 text-[9px] font-bold text-white">
-                {pending.length > 9 ? '9+' : pending.length}
+                {unreadCount > 9 ? '9+' : unreadCount}
               </span>
             )}
           </button>
@@ -150,10 +199,10 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
               {/* Заголовок */}
               <div className="flex min-w-0 items-center justify-between gap-2 border-b px-4 py-3 dark:border-gray-700">
                 <div className="min-w-0">
-                  <h3 className="break-words font-semibold text-gray-900 dark:text-white">{t('header.reminders')}</h3>
+                  <h3 className="break-words font-semibold text-gray-900 dark:text-white">{t('header.notifications')}</h3>
                   {!loading && (
                     <p className="break-words text-xs text-gray-500 dark:text-gray-400">
-                      {pending.length} {t('header.pending')}
+                      {unreadCount} {t('header.unread')}
                     </p>
                   )}
                 </div>
@@ -172,40 +221,60 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
                 <div className="flex justify-center py-8">
                   <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
                 </div>
-              ) : pending.length === 0 ? (
+              ) : items.length === 0 ? (
                 <p className="break-words px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                  {t('header.noPendingReminders')}
+                  {t('header.noNotifications')}
                 </p>
               ) : (
                 <ul className="min-h-0 flex-1 divide-y overflow-y-auto overflow-x-hidden dark:divide-gray-700 sm:max-h-72">
-                  {pending.slice(0, 15).map((r) => (
-                    <li key={r.id} className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                      <p className="break-words text-sm font-medium text-gray-900 dark:text-white">
-                        {r.clientName}
-                      </p>
-                      {r.appointmentDate && (
-                        <p className="mt-0.5 break-words text-xs text-gray-500 dark:text-gray-400">
-                          {formatDate(r.appointmentDate)}
-                          {r.appointmentTime ? ` ${t('header.at')} ${formatTime(r.appointmentTime)}` : ''}
+                  {items.slice(0, 15).map((r) => (
+                    <li key={r.id} className="flex items-start gap-2 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                      <div className="min-w-0 flex-1">
+                        <p className="break-words text-sm font-medium text-gray-900 dark:text-white">
+                          {r.clientName}
                         </p>
-                      )}
-                      <p className="mt-0.5 break-words text-xs text-gray-400 dark:text-gray-500">
-                        {r.message}
-                      </p>
+                        {r.appointmentDate && (
+                          <p className="mt-0.5 break-words text-xs text-gray-500 dark:text-gray-400">
+                            {formatDate(r.appointmentDate)}
+                            {r.appointmentTime ? ` ${t('header.at')} ${formatTime(r.appointmentTime)}` : ''}
+                          </p>
+                        )}
+                        <p className="mt-0.5 break-words text-xs text-gray-400 dark:text-gray-500">
+                          {r.message}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleDismissOne(r.id)}
+                        disabled={busy}
+                        className="btn-ghost shrink-0 p-1 text-gray-400"
+                        aria-label={t('header.dismissNotification')}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                     </li>
                   ))}
                 </ul>
               )}
 
-              {/* Ссылка на полную страницу */}
-              <div className="border-t px-4 py-2.5 dark:border-gray-700">
+              <div className="flex min-w-0 items-center justify-between gap-2 border-t px-4 py-2.5 dark:border-gray-700">
                 <Link
                   to="/reminders"
                   onClick={close}
-                  className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+                  className="min-w-0 truncate text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
                 >
                   {t('header.viewAllReminders')}
                 </Link>
+                {items.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDismissAll()}
+                    disabled={busy}
+                    className="shrink-0 text-xs font-medium text-gray-500 hover:text-gray-800 disabled:opacity-50 dark:text-gray-400 dark:hover:text-gray-200"
+                  >
+                    {t('header.clearAll')}
+                  </button>
+                ) : null}
               </div>
             </div>
           )}

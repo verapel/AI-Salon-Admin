@@ -636,6 +636,36 @@ export interface Database {
         };
         Relationships: [];
       };
+      reminder_notification_acks: {
+        Row: {
+          id: string;
+          salon_id: string;
+          user_id: string;
+          reminder_id: string;
+          read_at: string | null;
+          dismissed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          user_id: string;
+          reminder_id: string;
+          read_at?: string | null;
+          dismissed_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          user_id?: string;
+          reminder_id?: string;
+          read_at?: string | null;
+          dismissed_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       reminders: {
         Row: {
           id: string;

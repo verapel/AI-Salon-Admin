@@ -121,6 +121,15 @@ export interface Reminder {
   appointmentTime?: string;
 }
 
+export interface InAppNotification extends Reminder {
+  read: boolean;
+}
+
+export interface NotificationFeed {
+  items: InAppNotification[];
+  unreadCount: number;
+}
+
 export interface DashboardStats {
   totalClients: number;
   totalAppointments: number;

@@ -177,6 +177,15 @@ export const api = {
     getAnalytics: () => request<import('@/types').AnalyticsData>('/stats/analytics'),
     getReminders: () => request<import('@/types').Reminder[]>('/stats/reminders'),
   },
+  notifications: {
+    list: () => request<import('@/types').NotificationFeed>('/notifications'),
+    markRead: () =>
+      request<import('@/types').NotificationFeed>('/notifications/read', { method: 'POST' }),
+    dismissAll: () =>
+      request<import('@/types').NotificationFeed>('/notifications/dismiss-all', { method: 'POST' }),
+    dismiss: (id: string) =>
+      request<import('@/types').NotificationFeed>(`/notifications/${id}/dismiss`, { method: 'POST' }),
+  },
   schedule: {
     getWeekly: () =>
       request<import('@/types').ScheduleWeeklyResponse>('/schedule/weekly'),
