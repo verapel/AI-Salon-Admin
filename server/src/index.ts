@@ -427,7 +427,7 @@ app.use(cors());
 // Path-scoped only — does not change JSON parsing for Telegram or salon/developer APIs.
 app.use('/api/webhooks/whatsapp', whatsappWebhookRouter);
 app.use('/api/webhooks/instagram', instagramWebhookRouter);
-app.use(express.json());
+app.use(express.json({ limit: '8mb' }));
 async function generateAIResponse(
   ctx: TelegramSalonContext,
   chatId: number,

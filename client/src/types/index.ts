@@ -43,6 +43,27 @@ export interface Product {
   updatedAt: string;
 }
 
+export type ProductDraft = {
+  name: string;
+  brand: string;
+  line: string;
+  codeShade: string;
+  category: string;
+  quantity: number;
+  minQuantity: number;
+  unit: string;
+  price: number;
+  supplier: string;
+  markedForPurchase: boolean;
+};
+
+export type ProductImportResult = {
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: { name: string; message: string }[];
+};
+
 export interface Staff {
   id: string;
   name: string;

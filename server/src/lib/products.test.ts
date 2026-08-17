@@ -212,6 +212,7 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.match(page, /api\.products\.adjustQuantity/);
     assert.match(page, /products\.addPhoto/);
     assert.match(page, /products\.exportExcel/);
-    assert.doesNotMatch(page, /openai|vision|exceljs|SheetJS|xlsx/i);
+    assert.match(page, /api\.products\.parseImport/);
+    assert.match(page, /exportProductsXlsx/);
   });
 });

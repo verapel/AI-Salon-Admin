@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Camera,
   FileSpreadsheet,
@@ -7,6 +7,7 @@ import {
   Pencil,
   Plus,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import SearchInput from '@/components/ui/SearchInput';
 import Modal from '@/components/ui/Modal';
@@ -14,8 +15,9 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { api, ApiError } from '@/lib/api';
+import { exportProductsXlsx } from '@/lib/productExport';
 import { formatCurrency } from '@/lib/utils';
-import type { Product, ProductStockStatus } from '@/types';
+import type { Product, ProductDraft, ProductImportResult, ProductStockStatus } from '@/types';
 
 type StockFilter = 'all' | ProductStockStatus | 'purchase';
 
@@ -71,6 +73,13 @@ export default function Products() {
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [formError, setFormError] = useState('');
+  const [importOpen, setImportOpen] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [previewRows, setPreviewRows] = useState<ProductDraft[]>([]);
+  const [importError, setImportError] = useState('');
+  const [importResult, setImportResult] = useState<ProductImportResult | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const loadProducts = () => {
     api.products
@@ -185,6 +194,61 @@ export default function Products() {
     }
   };
 
+  const readFileAsBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result ?? '');
+        resolve(result.includes(',') ? result.slice(result.indexOf(',') + 1) : result);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+
+  const handleImportFile = async (file: File | undefined, kind: 'auto' | 'photo') => {
+    if (!file) return;
+    setImportBusy(true);
+    setImportError('');
+    setImportResult(null);
+    try {
+      const contentBase64 = await readFileAsBase64(file);
+      const payload = { filename: file.name, mimeType: file.type || 'application/octet-stream', contentBase64 };
+      const isSpreadsheet = /\.(xlsx|xls|csv)$/i.test(file.name);
+      const parsed =
+        kind === 'photo' || (!isSpreadsheet && file.type.startsWith('image/'))
+          ? await api.products.parsePhoto(payload)
+          : await api.products.parseImport(payload);
+      setPreviewRows(parsed.rows);
+      setImportOpen(true);
+      if (parsed.rows.length === 0) {
+        setImportError(t('products.noResults'));
+      }
+    } catch (err) {
+      setImportOpen(true);
+      setPreviewRows([]);
+      if (err instanceof ApiError) setImportError(err.message);
+      else setImportError(err instanceof Error ? err.message : t('common.serverUnavailable'));
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const confirmImport = async () => {
+    if (importBusy) return;
+    setImportBusy(true);
+    setImportError('');
+    try {
+      const result = await api.products.commitImport(previewRows);
+      setImportResult(result);
+      loadProducts();
+    } catch (err) {
+      if (err instanceof ApiError) setImportError(err.message);
+      else setImportError(err instanceof Error ? err.message : t('common.serverUnavailable'));
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
   const emptyTitle =
     products.length === 0 ? t('products.noProducts') : t('products.noResults');
   const emptyDescription =
@@ -204,18 +268,50 @@ export default function Products() {
             />
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+            <input
+              ref={importInputRef}
+              type="file"
+              className="hidden"
+              accept=".xlsx,.xls,.csv,image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                void handleImportFile(file, 'auto');
+              }}
+            />
+            <input
+              ref={photoInputRef}
+              type="file"
+              className="hidden"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                void handleImportFile(file, 'photo');
+              }}
+            />
             <button
               type="button"
-              disabled
-              title={t('products.comingSoon')}
+              onClick={() => importInputRef.current?.click()}
+              disabled={importBusy}
               className="btn-secondary w-full sm:w-auto"
+              aria-label={t('products.importAria')}
+            >
+              <Upload className="h-4 w-4" /> {t('products.import')}
+            </button>
+            <button
+              type="button"
+              onClick={() => photoInputRef.current?.click()}
+              disabled={importBusy}
+              className="btn-secondary w-full sm:w-auto"
+              aria-label={t('products.importPhotoAria')}
             >
               <Camera className="h-4 w-4" /> {t('products.addPhoto')}
             </button>
             <button
               type="button"
-              disabled
-              title={t('products.comingSoon')}
+              onClick={() => exportProductsXlsx(filtered)}
               className="btn-secondary w-full sm:w-auto"
             >
               <FileSpreadsheet className="h-4 w-4" /> {t('products.exportExcel')}
@@ -446,6 +542,159 @@ export default function Products() {
           </div>
         </>
       )}
+
+      <Modal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        title={importResult ? t('products.importResult') : t('products.previewTitle')}
+        size="xl"
+      >
+        <div className="space-y-4">
+          {!importResult ? <p className="text-sm text-gray-500 dark:text-gray-400">{t('products.previewHint')}</p> : null}
+          {importError ? (
+            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+              {importError}
+            </p>
+          ) : null}
+          {importResult ? (
+            <div className="space-y-1 text-sm text-gray-700 dark:text-gray-300">
+              <p>{t('products.resultCreated').replace('{count}', String(importResult.created))}</p>
+              <p>{t('products.resultUpdated').replace('{count}', String(importResult.updated))}</p>
+              <p>{t('products.resultSkipped').replace('{count}', String(importResult.skipped))}</p>
+              <p>{t('products.resultErrors').replace('{count}', String(importResult.errors.length))}</p>
+              {importResult.errors.length > 0 ? (
+                <ul className="list-disc pl-5 text-red-600 dark:text-red-400">
+                  {importResult.errors.map((item, index) => (
+                    <li key={`${item.name}-${index}`}>
+                      {item.name}: {item.message}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead>
+                  <tr className="border-b text-left text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    <th className="py-2 pr-2">{t('products.fieldName')}</th>
+                    <th className="py-2 pr-2">{t('products.fieldBrand')}</th>
+                    <th className="py-2 pr-2">{t('products.fieldLine')}</th>
+                    <th className="py-2 pr-2">{t('products.fieldCodeShade')}</th>
+                    <th className="py-2 pr-2">{t('products.fieldQuantity')}</th>
+                    <th className="py-2 pr-2">{t('products.fieldPrice')}</th>
+                    <th className="py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewRows.map((row, index) => (
+                    <tr key={index} className="border-b dark:border-gray-800">
+                      <td className="py-1 pr-2">
+                        <input
+                          className="input-field"
+                          value={row.name}
+                          onChange={(e) =>
+                            setPreviewRows((prev) =>
+                              prev.map((item, i) => (i === index ? { ...item, name: e.target.value } : item))
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <input
+                          className="input-field"
+                          value={row.brand}
+                          onChange={(e) =>
+                            setPreviewRows((prev) =>
+                              prev.map((item, i) => (i === index ? { ...item, brand: e.target.value } : item))
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <input
+                          className="input-field"
+                          value={row.line}
+                          onChange={(e) =>
+                            setPreviewRows((prev) =>
+                              prev.map((item, i) => (i === index ? { ...item, line: e.target.value } : item))
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <input
+                          className="input-field"
+                          value={row.codeShade}
+                          onChange={(e) =>
+                            setPreviewRows((prev) =>
+                              prev.map((item, i) => (i === index ? { ...item, codeShade: e.target.value } : item))
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <input
+                          className="input-field"
+                          type="number"
+                          min={0}
+                          value={row.quantity}
+                          onChange={(e) =>
+                            setPreviewRows((prev) =>
+                              prev.map((item, i) =>
+                                i === index ? { ...item, quantity: Number(e.target.value) } : item
+                              )
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <input
+                          className="input-field"
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={row.price}
+                          onChange={(e) =>
+                            setPreviewRows((prev) =>
+                              prev.map((item, i) => (i === index ? { ...item, price: Number(e.target.value) } : item))
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="py-1">
+                        <button
+                          type="button"
+                          className="btn-ghost p-1.5 text-red-500"
+                          aria-label={t('products.removeRow')}
+                          onClick={() => setPreviewRows((prev) => prev.filter((_, i) => i !== index))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" className="btn-secondary" onClick={() => setImportOpen(false)}>
+              {t('common.cancel')}
+            </button>
+            {!importResult ? (
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={importBusy || previewRows.length === 0}
+                onClick={() => void confirmImport()}
+              >
+                {t('products.confirmImport')}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={modalOpen}

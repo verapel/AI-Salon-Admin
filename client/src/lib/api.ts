@@ -102,6 +102,21 @@ export const api = {
       }),
     delete: (id: string) =>
       request<void>(`/products/${id}`, { method: 'DELETE' }),
+    parseImport: (data: { filename: string; mimeType: string; contentBase64: string }) =>
+      request<{ source: 'excel'; rows: import('@/types').ProductDraft[] }>('/products/import/parse', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    parsePhoto: (data: { filename: string; mimeType: string; contentBase64: string }) =>
+      request<{ source: 'photo'; model?: string; rows: import('@/types').ProductDraft[] }>(
+        '/products/import/photo',
+        { method: 'POST', body: JSON.stringify(data) }
+      ),
+    commitImport: (rows: import('@/types').ProductDraft[]) =>
+      request<import('@/types').ProductImportResult>('/products/import/commit', {
+        method: 'POST',
+        body: JSON.stringify({ rows }),
+      }),
   },
   staff: {
     getAll: () => request<import('@/types').Staff[]>('/staff'),

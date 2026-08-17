@@ -12,6 +12,14 @@ import {
   parseNonNegativeInt,
   parseNonNegativeNumber,
 } from '../lib/products.js';
+import {
+  draftIsEmpty,
+  parseSpreadsheetBuffer,
+  sanitizeDraft,
+  type ImportExisting,
+  type ProductDraft,
+} from '../lib/productImport.js';
+import { extractProductDraftsFromImage, productPhotoVisionModel } from '../lib/productPhotoVision.js';
 
 const router = Router();
 
@@ -43,6 +51,194 @@ router.get('/', async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
   res.json((data ?? []).map((row) => mapProduct(row)));
+});
+
+const MAX_IMPORT_BYTES = 6 * 1024 * 1024;
+
+function decodeBase64File(body: { filename?: string; mimeType?: string; contentBase64?: string }) {
+  const contentBase64 = String(body.contentBase64 ?? '').replace(/^data:[^;]+;base64,/, '');
+  if (!contentBase64) return { error: 'File content is required' as const };
+  if (contentBase64.length > MAX_IMPORT_BYTES * 2) return { error: 'File is too large' as const };
+  const buffer = Buffer.from(contentBase64, 'base64');
+  if (!buffer.length) return { error: 'File content is required' as const };
+  if (buffer.length > MAX_IMPORT_BYTES) return { error: 'File is too large' as const };
+  return {
+    buffer,
+    filename: String(body.filename ?? ''),
+    mimeType: String(body.mimeType ?? ''),
+  };
+}
+
+router.post('/import/parse', requireSalonWriteAccess, async (req, res) => {
+  getSalonId(req);
+  const decoded = decodeBase64File(req.body ?? {});
+  if ('error' in decoded) return res.status(400).json({ error: decoded.error });
+  const name = decoded.filename.toLowerCase();
+  if (!name.endsWith('.xlsx') && !name.endsWith('.xls') && !name.endsWith('.csv')) {
+    return res.status(400).json({ error: 'Upload an .xlsx, .xls, or .csv file' });
+  }
+  try {
+    const rows = parseSpreadsheetBuffer(decoded.buffer);
+    res.json({ source: 'excel', rows });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Could not parse spreadsheet';
+    return res.status(400).json({ error: message });
+  }
+});
+
+router.post('/import/photo', requireSalonWriteAccess, async (req, res) => {
+  getSalonId(req);
+  const decoded = decodeBase64File(req.body ?? {});
+  if ('error' in decoded) return res.status(400).json({ error: decoded.error });
+  const mime = decoded.mimeType || 'image/jpeg';
+  if (!mime.startsWith('image/')) {
+    return res.status(400).json({ error: 'Upload an image from camera or gallery' });
+  }
+  try {
+    const rows = await extractProductDraftsFromImage({
+      mimeType: mime,
+      contentBase64: decoded.buffer.toString('base64'),
+    });
+    res.json({ source: 'photo', model: productPhotoVisionModel(), rows });
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === 'AI_NOT_CONFIGURED') {
+      return res.status(503).json({ error: 'Photo import is not configured', code });
+    }
+    const message = err instanceof Error ? err.message : 'Photo analysis failed';
+    return res.status(502).json({ error: message });
+  }
+});
+
+router.post('/import/commit', requireSalonWriteAccess, async (req, res) => {
+  const salonId = getSalonId(req);
+  const incoming = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  const drafts: ProductDraft[] = incoming.map((row: Partial<ProductDraft>) => sanitizeDraft(row));
+
+  const { data: currentRows, error: loadError } = await supabase
+    .from('products')
+    .select('*')
+    .eq('salon_id', salonId);
+
+  if (loadError) return res.status(500).json({ error: loadError.message });
+
+  const existing: ImportExisting[] = (currentRows ?? []).map((row) => ({
+    id: row.id,
+    salon_id: row.salon_id,
+    brand: row.brand,
+    line: row.line,
+    code_shade: row.code_shade,
+    name: row.name,
+    quantity: row.quantity,
+  }));
+
+  const now = new Date().toISOString();
+  const result = {
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    errors: [] as { name: string; message: string }[],
+  };
+
+  for (const raw of drafts) {
+    const draft = sanitizeDraft(raw);
+    if (draftIsEmpty(draft) || !draft.name) {
+      result.skipped += 1;
+      continue;
+    }
+
+    const match = findIdentityConflict(existing, {
+      salonId,
+      brand: draft.brand,
+      line: draft.line,
+      codeShade: draft.codeShade,
+    });
+
+    if (match) {
+      const current = (currentRows ?? []).find((row) => row.id === match.id);
+      if (!current) {
+        result.errors.push({ name: draft.name, message: 'Product not found' });
+        continue;
+      }
+      const nextQuantity = current.quantity + draft.quantity;
+      const { data, error } = await supabase
+        .from('products')
+        .update({
+          quantity: nextQuantity,
+          marked_for_purchase: current.marked_for_purchase || draft.markedForPurchase,
+          updated_at: now,
+        })
+        .eq('id', match.id)
+        .eq('salon_id', salonId)
+        .select('id')
+        .single();
+      if (error || !data) {
+        result.errors.push({ name: draft.name, message: error?.message || 'Update failed' });
+        continue;
+      }
+      current.quantity = nextQuantity;
+      const working = existing.find((row) => row.id === match.id);
+      if (working) working.quantity = nextQuantity;
+      result.updated += 1;
+      continue;
+    }
+
+    const { data, error } = await supabase
+      .from('products')
+      .insert({
+        salon_id: salonId,
+        name: draft.name,
+        brand: draft.brand,
+        line: draft.line,
+        code_shade: draft.codeShade,
+        category: draft.category,
+        quantity: draft.quantity,
+        min_quantity: draft.minQuantity,
+        unit: draft.unit,
+        price: draft.price,
+        supplier: draft.supplier,
+        marked_for_purchase: draft.markedForPurchase,
+        created_at: now,
+        updated_at: now,
+      })
+      .select('id')
+      .single();
+
+    if (error || !data) {
+      result.errors.push({ name: draft.name, message: error?.message || 'Create failed' });
+      continue;
+    }
+
+    existing.push({
+      id: data.id,
+      salon_id: salonId,
+      brand: draft.brand,
+      line: draft.line,
+      code_shade: draft.codeShade,
+      name: draft.name,
+      quantity: draft.quantity,
+    });
+    (currentRows ?? []).push({
+      id: data.id,
+      salon_id: salonId,
+      name: draft.name,
+      brand: draft.brand,
+      line: draft.line,
+      code_shade: draft.codeShade,
+      category: draft.category,
+      quantity: draft.quantity,
+      min_quantity: draft.minQuantity,
+      unit: draft.unit,
+      price: draft.price,
+      supplier: draft.supplier,
+      marked_for_purchase: draft.markedForPurchase,
+      created_at: now,
+      updated_at: now,
+    } as ProductRow);
+    result.created += 1;
+  }
+
+  res.json(result);
 });
 
 router.post('/', requireSalonWriteAccess, async (req, res) => {
