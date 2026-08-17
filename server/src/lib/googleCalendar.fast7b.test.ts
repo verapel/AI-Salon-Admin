@@ -622,6 +622,7 @@ describe('GOOGLE-CAL-FAST-7B all-event calendar coverage', () => {
     assert.match(calendar, /googleNeedsReview/);
     assert.match(dashboard, /getGoogleReviewEvents/);
     assert.match(dashboard, /google_review/);
+    assert.match(dashboard, /value=\{todayItems\.length\}/);
     assert.doesNotMatch(bookings, /getGoogleReviewEvents/);
     const route = read('server/src/routes/calendarConnections.ts');
     assert.match(route, /\/google\/review-events/);

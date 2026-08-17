@@ -144,7 +144,7 @@ export default function Dashboard() {
         />
         <StatCard
           title={t('dashboard.todayAppointments')}
-          value={stats?.todayAppointments ?? 0}
+          value={todayItems.length}
           icon={Calendar}
           color="brand"
           to="/calendar"
