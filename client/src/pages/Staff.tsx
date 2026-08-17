@@ -55,7 +55,9 @@ export default function Staff() {
     loadServices();
   }, []);
 
-  const activeStaff = staff.filter((s) => s.active);
+  const activeStaff = staff
+    .filter((s) => s.active)
+    .sort((a, b) => Number(Boolean(b.isPrimary)) - Number(Boolean(a.isPrimary)));
 
   const query = search.trim().toLowerCase();
   const filtered = query
