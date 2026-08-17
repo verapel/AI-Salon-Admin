@@ -140,12 +140,14 @@ export default function Dashboard() {
           color="blue"
           trend={t('dashboard.trendClients')}
           trendUp
+          to="/clients"
         />
         <StatCard
           title={t('dashboard.todayAppointments')}
           value={stats?.todayAppointments ?? 0}
           icon={Calendar}
           color="brand"
+          to="/calendar"
         />
         <StatCard
           title={t('dashboard.monthlyRevenue')}
@@ -154,12 +156,14 @@ export default function Dashboard() {
           color="green"
           trend={t('dashboard.trendRevenue')}
           trendUp
+          to="/statistics"
         />
         <StatCard
           title={t('dashboard.totalAppointments')}
           value={stats?.totalAppointments ?? 0}
           icon={Calendar}
           color="purple"
+          to="/calendar"
         />
         <StatCard
           title={t('dashboard.completionRate')}
@@ -172,6 +176,7 @@ export default function Dashboard() {
           value={stats?.upcomingReminders ?? 0}
           icon={Bell}
           color="orange"
+          to="/reminders"
         />
       </div>
 
