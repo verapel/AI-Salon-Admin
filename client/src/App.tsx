@@ -8,6 +8,7 @@ import Dashboard from '@/pages/Dashboard';
 import Calendar from '@/pages/Calendar';
 import Clients from '@/pages/Clients';
 import Services from '@/pages/Services';
+import Products from '@/pages/Products';
 import Schedule from '@/pages/Schedule';
 import Bookings from '@/pages/Bookings';
 import Statistics from '@/pages/Statistics';
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="/calendar" element={<Calendar />} />
           <Route path="/clients" element={<Clients />} />
           <Route path="/services" element={<Services />} />
+          <Route path="/products" element={<Products />} />
           <Route path="/schedule" element={<Schedule />} />
           <Route path="/bookings" element={<Bookings />} />
           <Route path="/statistics" element={<Statistics />} />

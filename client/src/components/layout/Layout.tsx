@@ -10,6 +10,7 @@ const pageKeys: Record<string, { title: TranslationKey; subtitle: TranslationKey
   '/calendar': { title: 'pages.calendar.title', subtitle: 'pages.calendar.subtitle' },
   '/clients': { title: 'pages.clients.title', subtitle: 'pages.clients.subtitle' },
   '/services': { title: 'pages.services.title', subtitle: 'pages.services.subtitle' },
+  '/products': { title: 'pages.products.title', subtitle: 'pages.products.subtitle' },
   '/staff': { title: 'pages.staff.title', subtitle: 'pages.staff.subtitle' },
   '/staff-access': { title: 'pages.staffAccess.title', subtitle: 'pages.staffAccess.subtitle' },
   '/schedule': { title: 'pages.schedule.title', subtitle: 'pages.schedule.subtitle' },

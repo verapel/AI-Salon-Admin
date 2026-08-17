@@ -12,6 +12,7 @@ import cors from 'cors';
 import fs from 'fs';
 import clientsRouter from './routes/clients.js';
 import servicesRouter from './routes/services.js';
+import productsRouter from './routes/products.js';
 import staffRouter from './routes/staff.js';
 import appointmentsRouter from './routes/appointments.js';
 import statsRouter from './routes/stats.js';
@@ -1187,6 +1188,7 @@ const developerAuth = API_AUTH_REQUIRED ? requireDeveloperAuth : noopAuth;
 
 app.use('/api/clients', salonAuth, requireSalonCabinetAccess, clientsRouter);
 app.use('/api/services', salonAuth, requireSalonCabinetAccess, servicesRouter);
+app.use('/api/products', salonAuth, requireSalonCabinetAccess, productsRouter);
 app.use('/api/staff', salonAuth, requireSalonCabinetAccess, staffRouter);
 app.use('/api/appointments', salonAuth, requireSalonCabinetAccess, appointmentsRouter);
 app.use('/api/stats', salonAuth, requireSalonCabinetAccess, statsRouter);

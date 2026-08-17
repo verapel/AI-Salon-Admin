@@ -249,6 +249,60 @@ export interface Database {
         };
         Relationships: [];
       };
+      products: {
+        Row: {
+          id: string;
+          salon_id: string;
+          name: string;
+          brand: string;
+          line: string;
+          code_shade: string;
+          category: string;
+          quantity: number;
+          min_quantity: number;
+          unit: string;
+          price: number;
+          supplier: string;
+          marked_for_purchase: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          salon_id: string;
+          name: string;
+          brand?: string;
+          line?: string;
+          code_shade?: string;
+          category?: string;
+          quantity?: number;
+          min_quantity?: number;
+          unit?: string;
+          price?: number;
+          supplier?: string;
+          marked_for_purchase?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          salon_id?: string;
+          name?: string;
+          brand?: string;
+          line?: string;
+          code_shade?: string;
+          category?: string;
+          quantity?: number;
+          min_quantity?: number;
+          unit?: string;
+          price?: number;
+          supplier?: string;
+          marked_for_purchase?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       staff: {
         Row: {
           id: string;

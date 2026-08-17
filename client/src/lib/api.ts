@@ -89,6 +89,20 @@ export const api = {
       request<import('@/types').Service>(`/services/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) => request<import('@/types').Service>(`/services/${id}`, { method: 'DELETE' }),
   },
+  products: {
+    getAll: () => request<import('@/types').Product[]>('/products'),
+    create: (data: Partial<import('@/types').Product>) =>
+      request<import('@/types').Product>('/products', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: Partial<import('@/types').Product>) =>
+      request<import('@/types').Product>(`/products/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    adjustQuantity: (id: string, delta: number) =>
+      request<import('@/types').Product>(`/products/${id}/quantity`, {
+        method: 'POST',
+        body: JSON.stringify({ delta }),
+      }),
+    delete: (id: string) =>
+      request<void>(`/products/${id}`, { method: 'DELETE' }),
+  },
   staff: {
     getAll: () => request<import('@/types').Staff[]>('/staff'),
     create: (data: Partial<import('@/types').Staff>) =>

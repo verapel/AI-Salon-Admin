@@ -4,7 +4,9 @@ import type {
   Staff,
   Appointment,
   Reminder,
+  Product,
 } from '../types.js';
+import { deriveProductStockStatus } from './products.js';
 
 /** Normalize PostgreSQL TIME ("09:00:00") to API format ("09:00"). */
 export function formatTimeValue(value: string): string {
@@ -58,6 +60,41 @@ export function mapService(row: {
     price: Number(row.price),
     category: row.category,
     active: row.active,
+  };
+}
+
+export function mapProduct(row: {
+  id: string;
+  name: string;
+  brand: string;
+  line: string;
+  code_shade: string;
+  category: string;
+  quantity: number;
+  min_quantity: number;
+  unit: string;
+  price: number;
+  supplier: string;
+  marked_for_purchase: boolean;
+  created_at: string;
+  updated_at: string;
+}): Product {
+  return {
+    id: row.id,
+    name: row.name,
+    brand: row.brand ?? '',
+    line: row.line ?? '',
+    codeShade: row.code_shade ?? '',
+    category: row.category ?? '',
+    quantity: row.quantity,
+    minQuantity: row.min_quantity,
+    unit: row.unit ?? '',
+    price: Number(row.price),
+    supplier: row.supplier ?? '',
+    markedForPurchase: Boolean(row.marked_for_purchase),
+    stockStatus: deriveProductStockStatus(row.quantity, row.min_quantity),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 

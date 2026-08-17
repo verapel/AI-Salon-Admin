@@ -23,6 +23,26 @@ export interface Service {
   active: boolean;
 }
 
+export type ProductStockStatus = 'in_stock' | 'low' | 'out';
+
+export interface Product {
+  id: string;
+  name: string;
+  brand: string;
+  line: string;
+  codeShade: string;
+  category: string;
+  quantity: number;
+  minQuantity: number;
+  unit: string;
+  price: number;
+  supplier: string;
+  markedForPurchase: boolean;
+  stockStatus: ProductStockStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Staff {
   id: string;
   name: string;
