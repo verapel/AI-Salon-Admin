@@ -6,6 +6,7 @@ import { requireSalonWriteAccess } from '../middleware/auth.js';
 import type { Database } from '../types/database.js';
 import {
   applyQuantityDelta,
+  compareProductCodeShade,
   findIdentityConflict,
   isUniqueViolation,
   normalizeIdentityPart,
@@ -46,11 +47,14 @@ router.get('/', async (req, res) => {
   const { data, error } = await supabase
     .from('products')
     .select('*')
-    .eq('salon_id', salonId)
-    .order('name');
+    .eq('salon_id', salonId);
 
   if (error) return res.status(500).json({ error: error.message });
-  res.json((data ?? []).map((row) => mapProduct(row)));
+  const products = (data ?? []).map((row) => mapProduct(row));
+  products.sort(
+    (a, b) => compareProductCodeShade(a.codeShade, b.codeShade) || a.name.localeCompare(b.name, 'en')
+  );
+  res.json(products);
 });
 
 const MAX_IMPORT_BYTES = 6 * 1024 * 1024;

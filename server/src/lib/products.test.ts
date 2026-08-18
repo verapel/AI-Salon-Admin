@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   applyQuantityDelta,
+  compareProductCodeShade,
   deriveProductStockStatus,
   findIdentityConflict,
   findProductInSalon,
@@ -39,6 +40,25 @@ function row(
 }
 
 describe('PRODUCTS-1 products foundation', () => {
+  it('sorts code/shade numerically, with prefixes after numbers and empty last', () => {
+    const shuffled = ['SL12.0', '10', '2', '5.18', '', '0', '12', '1', '5.01', '8.11'];
+    shuffled.sort(compareProductCodeShade);
+    assert.deepEqual(shuffled, ['0', '1', '2', '5.01', '5.18', '8.11', '10', '12', 'SL12.0', '']);
+
+    assert.ok(compareProductCodeShade('2', '10') < 0);
+    assert.ok(compareProductCodeShade('5.01', '5.18') < 0);
+    assert.ok(compareProductCodeShade('12', 'SL12.0') < 0);
+    assert.ok(compareProductCodeShade('SL2', 'SL12.0') < 0);
+    assert.ok(compareProductCodeShade('SL12.0', '') < 0);
+  });
+
+  it('GET products list sorts in memory by code_shade, not by name', () => {
+    const route = read('server/src/routes/products.ts');
+    const getAll = route.slice(route.indexOf("router.get('/',"), route.indexOf('const MAX_IMPORT_BYTES'));
+    assert.match(getAll, /compareProductCodeShade/);
+    assert.doesNotMatch(getAll, /\.order\(/);
+  });
+
   it('derives stock status from quantity and min_quantity', () => {
     assert.equal(deriveProductStockStatus(0, 2), 'out');
     assert.equal(deriveProductStockStatus(1, 2), 'low');

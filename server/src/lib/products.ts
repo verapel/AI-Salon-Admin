@@ -75,6 +75,69 @@ export function parseNonNegativeNumber(value: unknown, fallback: number): number
   return n;
 }
 
+type ParsedCodeShade = {
+  empty: boolean;
+  group: 0 | 1;
+  prefix: string;
+  value: number | null;
+  rest: string;
+  raw: string;
+};
+
+function parseProductCodeShade(input: string): ParsedCodeShade {
+  const raw = String(input ?? '').trim();
+  if (!raw) {
+    return { empty: true, group: 1, prefix: '', value: null, rest: '', raw };
+  }
+
+  const numeric = raw.match(/^(\d+(?:\.\d+)?)(.*)$/);
+  if (numeric) {
+    return {
+      empty: false,
+      group: 0,
+      prefix: '',
+      value: Number(numeric[1]),
+      rest: numeric[2] ?? '',
+      raw,
+    };
+  }
+
+  const prefixed = raw.match(/^(.*?)(\d+(?:\.\d+)?)(.*)$/);
+  if (prefixed?.[2]) {
+    return {
+      empty: false,
+      group: 1,
+      prefix: prefixed[1] ?? '',
+      value: Number(prefixed[2]),
+      rest: prefixed[3] ?? '',
+      raw,
+    };
+  }
+
+  return { empty: false, group: 1, prefix: raw, value: null, rest: '', raw };
+}
+
+/** Natural code/shade order: numeric codes, then prefixes like SL12.0, empty last. */
+export function compareProductCodeShade(a: string, b: string): number {
+  const left = parseProductCodeShade(a);
+  const right = parseProductCodeShade(b);
+  if (left.empty !== right.empty) return left.empty ? 1 : -1;
+  if (left.group !== right.group) return left.group - right.group;
+
+  const prefixCmp = left.prefix.localeCompare(right.prefix, 'en', { sensitivity: 'base' });
+  if (prefixCmp !== 0) return prefixCmp;
+
+  if (left.value !== right.value) {
+    if (left.value == null) return 1;
+    if (right.value == null) return -1;
+    return left.value - right.value;
+  }
+
+  const restCmp = left.rest.localeCompare(right.rest, 'en', { numeric: true, sensitivity: 'base' });
+  if (restCmp !== 0) return restCmp;
+  return left.raw.localeCompare(right.raw, 'en', { sensitivity: 'base' });
+}
+
 export function isUniqueViolation(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
   if (error.code === '23505') return true;
