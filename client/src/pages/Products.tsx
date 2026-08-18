@@ -350,7 +350,7 @@ export default function Products() {
 
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-clip space-y-4 animate-fade-in">
-      <div className="flex flex-col gap-3">
+      <div className="flex w-full min-w-0 max-w-full flex-col gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <button
             type="button"
@@ -364,7 +364,7 @@ export default function Products() {
             {section === 'paint' ? t('products.sectionPaint') : t('products.sectionCare')}
           </h2>
         </div>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex w-full min-w-0 max-w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="w-full min-w-0 max-w-full sm:max-w-xs">
             <SearchInput
               value={search}
@@ -372,7 +372,7 @@ export default function Products() {
               placeholder={t('products.searchPlaceholder')}
             />
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+          <div className="flex w-full min-w-0 max-w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
             <input
               ref={importInputRef}
               type="file"
@@ -427,7 +427,7 @@ export default function Products() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex w-full min-w-0 max-w-full flex-wrap gap-2">
           {STOCK_FILTERS.map((item) => (
             <button
               key={item}
