@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js';
 import { mapClient } from '../lib/mappers.js';
 import { getSalonId } from '../lib/salonContext.js';
 import { requireSalonWriteAccess } from '../middleware/auth.js';
+import { buildClientCreateRow, buildClientUpdate } from '../lib/clientWrite.js';
 import type { Database } from '../types/database.js';
 
 const router = Router();
@@ -35,21 +36,12 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
-  const { name, email, phone, notes, birthday } = req.body;
-  if (!name || !email) return res.status(400).json({ error: 'Name and email are required' });
+  const built = buildClientCreateRow(req.body, salonId);
+  if ('error' in built) return res.status(400).json({ error: built.error });
 
   const { data, error } = await supabase
     .from('clients')
-    .insert({
-      name,
-      email,
-      phone: phone || '',
-      notes: notes || '',
-      birthday: birthday || null,
-      total_visits: 0,
-      last_visit: null,
-      salon_id: salonId,
-    })
+    .insert(built.row)
     .select('*')
     .single();
 
@@ -60,16 +52,9 @@ router.post('/', requireSalonWriteAccess, async (req, res) => {
 router.put('/:id', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
   const id = req.params.id as string;
-  const { name, email, phone, notes, totalVisits, lastVisit, birthday } = req.body;
-
-  const updates: Database['public']['Tables']['clients']['Update'] = {};
-  if (name !== undefined) updates.name = name;
-  if (email !== undefined) updates.email = email;
-  if (phone !== undefined) updates.phone = phone;
-  if (notes !== undefined) updates.notes = notes;
-  if (totalVisits !== undefined) updates.total_visits = totalVisits;
-  if (lastVisit !== undefined) updates.last_visit = lastVisit;
-  if (birthday !== undefined) updates.birthday = birthday || null;
+  const built = buildClientUpdate(req.body);
+  if ('error' in built) return res.status(400).json({ error: built.error });
+  const updates: Database['public']['Tables']['clients']['Update'] = built.updates;
 
   const { data, error } = await supabase
     .from('clients')

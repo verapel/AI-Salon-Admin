@@ -30,7 +30,7 @@ export function mapClient(row: {
   return {
     id: row.id,
     name: row.name,
-    email: row.email,
+    email: row.email ?? '',
     phone: row.phone,
     notes: row.notes,
     totalVisits: row.total_visits,
