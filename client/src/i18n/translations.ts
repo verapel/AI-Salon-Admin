@@ -684,6 +684,8 @@ const en = {
     'All imported appointments are assigned to Tatev for now.',
   'integrations.google.backfillRunning': 'Syncing Google Calendar…',
   'integrations.google.backfillWait': 'This can take a minute. Please wait.',
+  'integrations.google.backfillProgressCount': 'Processed {processed} of {total} events',
+  'integrations.google.backfillProgressListing': 'Loading Google events…',
   'integrations.google.backfillConfirmTitle':
     'Events from the last 30 days and all future events will be processed.',
   'integrations.google.backfillConfirmGoogleUnchanged': 'Google Calendar will not be changed.',
@@ -1870,6 +1872,8 @@ const ru: Record<TranslationKey, string> = {
     'Все импортированные записи пока назначаются мастеру Tatev.',
   'integrations.google.backfillRunning': 'Синхронизация Google Calendar…',
   'integrations.google.backfillWait': 'Это может занять минуту. Подождите.',
+  'integrations.google.backfillProgressCount': 'Обработано {processed} из {total} событий',
+  'integrations.google.backfillProgressListing': 'Загружаем события Google…',
   'integrations.google.backfillConfirmTitle':
     'Будут обработаны записи за последние 30 дней и все будущие записи.',
   'integrations.google.backfillConfirmGoogleUnchanged': 'Google Calendar не будет изменён.',
@@ -3044,6 +3048,8 @@ const hy: Record<TranslationKey, string> = {
     'Բոլոր ներմուծված գրանցումները առայժմ նշանակվում են Tatev մասնագետին։',
   'integrations.google.backfillRunning': 'Google Calendar-ը համաժամեցվում է…',
   'integrations.google.backfillWait': 'Սա կարող է տևել մոտ մեկ րոպե։ Սպասեք։',
+  'integrations.google.backfillProgressCount': 'Մշակված է {processed}՝ {total}-ից',
+  'integrations.google.backfillProgressListing': 'Բեռնում ենք Google իրադարձությունները…',
   'integrations.google.backfillConfirmTitle':
     'Կմշակվեն վերջին 30 օրվա և բոլոր ապագա գրանցումները։',
   'integrations.google.backfillConfirmGoogleUnchanged': 'Google Calendar-ը չի փոխվի։',

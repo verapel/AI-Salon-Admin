@@ -2,7 +2,6 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CalendarDays, ShieldCheck } from 'lucide-react';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
-import IndeterminateProgress from '@/components/ui/IndeterminateProgress';
 import Modal from '@/components/ui/Modal';
 import { useLanguage } from '@/context/LanguageContext';
 import { api, ApiError } from '@/lib/api';
@@ -14,6 +13,7 @@ import type {
   CalendarParseImportability,
   GoogleCalendarListItem,
   GoogleBackfillLast30DaysResult,
+  GoogleBackfillProgress,
   GoogleEventPreviewItem,
   GoogleEventTimePreview,
   GoogleImportStaffOption,
@@ -639,6 +639,8 @@ export default function SalonIntegrations() {
   const [googleBackfillError, setGoogleBackfillError] = useState<string | null>(null);
   const [googleBackfillResult, setGoogleBackfillResult] =
     useState<GoogleBackfillLast30DaysResult | null>(null);
+  const [googleBackfillProgress, setGoogleBackfillProgress] =
+    useState<GoogleBackfillProgress | null>(null);
 
   const refreshConnections = useCallback(async () => {
     const data = await api.calendar.getConnections();
@@ -881,15 +883,35 @@ export default function SalonIntegrations() {
     if (googleBackfillRunning) return;
     setGoogleBackfillRunning(true);
     setGoogleBackfillError(null);
+    setGoogleBackfillProgress({
+      processed: 0,
+      total: null,
+      percent: 0,
+      status: 'listing',
+    });
+    const poll = window.setInterval(() => {
+      void api.calendar
+        .getGoogleBackfillProgress()
+        .then((next) => {
+          if (next.status !== 'idle') setGoogleBackfillProgress(next);
+        })
+        .catch(() => undefined);
+    }, 400);
     try {
       const result = await api.calendar.importGoogleLast30Days();
       setGoogleBackfillResult(result);
-      setGoogleBackfillConfirmOpen(false);
+      setGoogleBackfillProgress({
+        processed: result.scanned,
+        total: result.scanned,
+        percent: 100,
+        status: 'done',
+      });
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : t('integrations.google.backfillError');
       setGoogleBackfillError(message || t('integrations.google.backfillError'));
     } finally {
+      window.clearInterval(poll);
       setGoogleBackfillRunning(false);
     }
   };
@@ -1094,6 +1116,7 @@ export default function SalonIntegrations() {
                       disabled={googleBackfillRunning}
                       onClick={() => {
                         setGoogleBackfillError(null);
+                        setGoogleBackfillProgress(null);
                         setGoogleBackfillConfirmOpen(true);
                       }}
                     >
@@ -1660,11 +1683,48 @@ export default function SalonIntegrations() {
         size="sm"
       >
         <div className="space-y-3 text-sm text-gray-800 dark:text-gray-200">
-          {googleBackfillRunning ? (
-            <IndeterminateProgress
-              label={t('integrations.google.backfillRunning')}
-              detail={t('integrations.google.backfillWait')}
-            />
+          {googleBackfillRunning || googleBackfillProgress?.status === 'done' ? (
+            <div className="space-y-3">
+              {googleBackfillProgress?.total == null ? (
+                <p className="font-medium">{t('integrations.google.backfillProgressListing')}</p>
+              ) : (
+                <p className="font-medium">
+                  {t('integrations.google.backfillProgressCount')
+                    .replace('{processed}', String(googleBackfillProgress.processed))
+                    .replace('{total}', String(googleBackfillProgress.total))}
+                </p>
+              )}
+              <div
+                className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={googleBackfillProgress?.percent ?? 0}
+              >
+                <div
+                  className="h-full rounded-full bg-brand-600 transition-[width] duration-200"
+                  style={{ width: `${googleBackfillProgress?.percent ?? 0}%` }}
+                />
+              </div>
+              <p className="tabular-nums text-sm text-gray-600 dark:text-gray-300">
+                {googleBackfillProgress?.percent ?? 0}%
+              </p>
+              {googleBackfillResult && googleBackfillProgress?.status === 'done' ? (
+                <div className="space-y-1">
+                  <p className="font-medium">{t('integrations.google.backfillDone')}</p>
+                  <p>
+                    {t('integrations.google.backfillScanned')}: {googleBackfillResult.scanned}
+                  </p>
+                  <p>
+                    {t('integrations.google.backfillImported')}: {googleBackfillResult.imported}
+                  </p>
+                  <p>
+                    {t('integrations.google.backfillReviewEvents')}:{' '}
+                    {googleBackfillResult.reviewEvents}
+                  </p>
+                </div>
+              ) : null}
+            </div>
           ) : (
             <>
               <p>{t('integrations.google.backfillConfirmGoogleUnchanged')}</p>

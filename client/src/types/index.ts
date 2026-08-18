@@ -700,6 +700,13 @@ export interface GoogleReviewCalendarItem {
   clientId?: string | null;
 }
 
+export interface GoogleBackfillProgress {
+  processed: number;
+  total: number | null;
+  percent: number;
+  status: 'idle' | 'listing' | 'processing' | 'done' | 'error';
+}
+
 /** Compact FAST-7D coverage summary (no appointment/client rows). */
 export interface GoogleBackfillLast30DaysResult {
   scanned: number;

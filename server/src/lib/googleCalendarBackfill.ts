@@ -375,6 +375,7 @@ export async function importGoogleCalendarLast30Days(params: {
   salonTimeZone?: string;
   maxPages?: number;
   maxEvents?: number;
+  onProgress?: (progress: { processed: number; total: number }) => void;
 }): Promise<GoogleBackfillResult> {
   const salonId = params.salonId.trim();
   const now = params.now ?? new Date();
@@ -481,6 +482,7 @@ export async function importGoogleCalendarLast30Days(params: {
 
   summary.truncated = truncated;
   const events = selectGoogleEventsForBackfill(listedEvents, window);
+  params.onProgress?.({ processed: 0, total: events.length });
 
   let salonTimeZone: string;
   if (params.salonTimeZone) {
@@ -664,6 +666,8 @@ export async function importGoogleCalendarLast30Days(params: {
           code,
         });
       }
+    } finally {
+      params.onProgress?.({ processed: summary.scanned, total: events.length });
     }
   }
 

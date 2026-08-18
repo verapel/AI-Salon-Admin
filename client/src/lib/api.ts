@@ -268,6 +268,10 @@ export const api = {
         '/calendar/google/events/import-last-30-days',
         { method: 'POST' },
       ),
+    getGoogleBackfillProgress: () =>
+      request<import('@/types').GoogleBackfillProgress>(
+        '/calendar/google/events/import-last-30-days/progress',
+      ),
     setGoogleImportEnabled: (enabled: boolean) =>
       request<{
         connection: import('@/types').CalendarConnectionPublic | null;

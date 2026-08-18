@@ -49,6 +49,11 @@ import {
 } from '../lib/googleCalendarAutoImport.js';
 import { importGoogleCalendarLast30Days } from '../lib/googleCalendarBackfill.js';
 import {
+  beginGoogleBackfillProgress,
+  getGoogleBackfillProgress,
+  updateGoogleBackfillProgress,
+} from '../lib/googleCalendarBackfillProgress.js';
+import {
   listGoogleReviewCalendarItems,
   resolveGoogleCalendarReviewIssue,
 } from '../lib/googleCalendarReviewOverlay.js';
@@ -946,19 +951,42 @@ router.get('/google/review-events', async (req, res) => {
 });
 
 /**
+ * GET /api/calendar/google/events/import-last-30-days/progress
+ * Live processed/total for the in-flight manual sync of this salon.
+ */
+router.get('/google/events/import-last-30-days/progress', async (req, res) => {
+  const salonId = getSalonId(req);
+  return res.json(getGoogleBackfillProgress(salonId));
+});
+
+/**
  * POST /api/calendar/google/events/import-last-30-days
  * GOOGLE-CAL-FAST-7: Manual historical backfill. Salon/staff derived on the server.
  * Browser must not send salonId or staff authority. Isolated from FAST-6 watermarks.
  */
 router.post('/google/events/import-last-30-days', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
+  beginGoogleBackfillProgress(salonId);
   try {
     const result = await importGoogleCalendarLast30Days({
       db: supabase as any,
       salonId,
+      onProgress: ({ processed, total }) => {
+        updateGoogleBackfillProgress(salonId, {
+          status: 'processing',
+          processed,
+          total,
+        });
+      },
+    });
+    updateGoogleBackfillProgress(salonId, {
+      status: 'done',
+      processed: result.scanned,
+      total: result.scanned,
     });
     return res.json(result);
   } catch (err) {
+    updateGoogleBackfillProgress(salonId, { status: 'error' });
     if (err instanceof CalendarMatchCatalogError) {
       console.error('[calendar] google 30-day backfill catalog failed', {
         salonId,

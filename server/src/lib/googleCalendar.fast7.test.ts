@@ -900,9 +900,27 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
     assert.match(ui, /disabled=\{googleBackfillRunning\}/);
     assert.match(ui, /setGoogleBackfillConfirmOpen\(true\)/);
     assert.match(ui, /importGoogleLast30Days/);
-    assert.match(ui, /IndeterminateProgress/);
-    assert.match(ui, /integrations\.google\.backfillWait/);
-    assert.doesNotMatch(ui, /%\s*\}|percent|percentage/i);
+    assert.match(ui, /getGoogleBackfillProgress/);
+    assert.match(ui, /backfillProgressCount/);
+    assert.match(ui, /googleBackfillProgress\?\.percent/);
+  });
+
+  it('reports live processed/total without changing import counts', async () => {
+    const ticks: { processed: number; total: number }[] = [];
+    const events = [
+      previewEvent({ id: 'p1' }),
+      previewEvent({ id: 'p2' }),
+      previewEvent({ id: 'p3' }),
+    ];
+    const result = await runBackfill({
+      events,
+      onProgress: (progress) => ticks.push({ ...progress }),
+    });
+    assert.equal(result.scanned, 3);
+    assert.deepEqual(ticks[0], { processed: 0, total: 3 });
+    assert.equal(ticks.at(-1)?.processed, 3);
+    assert.equal(ticks.at(-1)?.total, 3);
+    assert.ok(ticks.some((tick) => tick.processed === 1 && tick.total === 3));
   });
 
   it('invalid time is skipped and Tatev abort happens before any import', async () => {
