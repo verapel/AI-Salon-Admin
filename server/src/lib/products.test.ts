@@ -18,6 +18,11 @@ import {
   type ProductIdentityRow,
 } from './products.js';
 import { mapProduct } from './mappers.js';
+import {
+  categoryForProductSection,
+  isProductInSection,
+  resolveProductSection,
+} from '../../../client/src/lib/productSection.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '../../..');
@@ -234,5 +239,47 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.match(page, /products\.exportExcel/);
     assert.match(page, /api\.products\.parseImport/);
     assert.match(page, /exportProductsXlsx/);
+    assert.match(page, /isProductInSection/);
+    assert.match(page, /openSection\('paint'\)/);
+    assert.match(page, /openSection\('care'\)/);
+    assert.match(ru, /'products\.sectionPaint': 'Краска'/);
+    assert.match(ru, /'products\.sectionCare': 'Уход'/);
+    assert.doesNotMatch(page, /CREATE TABLE/);
+  });
+
+  it('paint and care sections split on category without a new table', () => {
+    assert.equal(resolveProductSection('Color'), 'paint');
+    assert.equal(resolveProductSection('краска'), 'paint');
+    assert.equal(resolveProductSection('paint'), 'paint');
+    assert.equal(resolveProductSection('уход'), 'care');
+    assert.equal(resolveProductSection('care'), 'care');
+    assert.equal(resolveProductSection('shampoo'), 'care');
+    assert.equal(resolveProductSection('', '5.01'), 'paint');
+    assert.equal(resolveProductSection('', ''), 'care');
+
+    const rows = [
+      { category: 'Color', codeShade: '10', name: 'Dark' },
+      { category: 'уход', codeShade: '', name: 'Mask' },
+      { category: 'paint', codeShade: '2', name: 'Light' },
+      { category: 'care', codeShade: '', name: 'Shampoo' },
+      { category: '', codeShade: '5.01', name: 'Shade' },
+    ];
+    const paint = rows.filter((row) => isProductInSection(row, 'paint')).map((row) => row.name);
+    const care = rows.filter((row) => isProductInSection(row, 'care')).map((row) => row.name);
+    assert.deepEqual(paint, ['Dark', 'Light', 'Shade']);
+    assert.deepEqual(care, ['Mask', 'Shampoo']);
+    assert.equal(paint.includes('Mask'), false);
+    assert.equal(care.includes('Dark'), false);
+
+    assert.equal(categoryForProductSection('paint'), 'paint');
+    assert.equal(categoryForProductSection('care', 'Уход'), 'Уход');
+    assert.equal(categoryForProductSection('paint', 'уход'), 'paint');
+
+    const sql = read('supabase/migrations/20260817000001_products_foundation.sql');
+    assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.products/);
+    assert.equal(
+      [...sql.matchAll(/CREATE TABLE IF NOT EXISTS public\.products/g)].length,
+      1
+    );
   });
 });

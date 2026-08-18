@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  ArrowLeft,
   Camera,
+  Droplets,
   FileSpreadsheet,
   Minus,
   Package,
   Pencil,
   Plus,
+  Sparkles,
   Trash2,
   Upload,
 } from 'lucide-react';
@@ -16,6 +19,11 @@ import EmptyState from '@/components/ui/EmptyState';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { api, ApiError } from '@/lib/api';
 import { exportProductsXlsx } from '@/lib/productExport';
+import {
+  categoryForProductSection,
+  isProductInSection,
+  type ProductSection,
+} from '@/lib/productSection';
 import { formatCurrency } from '@/lib/utils';
 import type { Product, ProductDraft, ProductImportResult, ProductStockStatus } from '@/types';
 
@@ -67,6 +75,7 @@ export default function Products() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<StockFilter>('all');
+  const [section, setSection] = useState<ProductSection | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -93,15 +102,19 @@ export default function Products() {
     loadProducts();
   }, []);
 
+  const sectionProducts = section
+    ? products.filter((product) => isProductInSection(product, section))
+    : [];
+
   const statusFiltered =
     filter === 'all'
-      ? products
+      ? sectionProducts
       : filter === 'purchase'
-        ? products.filter((p) => p.markedForPurchase)
-        : products.filter((p) => p.stockStatus === filter);
+        ? sectionProducts.filter((p) => p.markedForPurchase)
+        : sectionProducts.filter((p) => p.stockStatus === filter);
 
   const query = search.trim().toLowerCase();
-  const filtered = query
+  const searched = query
     ? statusFiltered.filter((product) =>
         [
           product.name,
@@ -114,9 +127,21 @@ export default function Products() {
       )
     : statusFiltered;
 
+  const filtered =
+    section === 'care'
+      ? [...searched].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+      : searched;
+
+  const openSection = (next: ProductSection) => {
+    setSection(next);
+    setSearch('');
+    setFilter('all');
+  };
+
   const openCreate = () => {
+    if (!section) return;
     setEditing(null);
-    setForm(emptyForm());
+    setForm({ ...emptyForm(), category: categoryForProductSection(section) });
     setFormError('');
     setModalOpen(true);
   };
@@ -146,10 +171,13 @@ export default function Products() {
     setSubmitting(true);
     setFormError('');
     try {
+      const payload = section
+        ? { ...form, category: categoryForProductSection(section, form.category) }
+        : form;
       if (editing) {
-        await api.products.update(editing.id, form);
+        await api.products.update(editing.id, payload);
       } else {
-        await api.products.create(form);
+        await api.products.create(payload);
       }
       setModalOpen(false);
       setEditing(null);
@@ -238,7 +266,13 @@ export default function Products() {
     setImportBusy(true);
     setImportError('');
     try {
-      const result = await api.products.commitImport(previewRows);
+      const rows = section
+        ? previewRows.map((row) => ({
+            ...row,
+            category: categoryForProductSection(section, row.category),
+          }))
+        : previewRows;
+      const result = await api.products.commitImport(rows);
       setImportResult(result);
       loadProducts();
     } catch (err) {
@@ -250,15 +284,71 @@ export default function Products() {
   };
 
   const emptyTitle =
-    products.length === 0 ? t('products.noProducts') : t('products.noResults');
+    sectionProducts.length === 0 ? t('products.noProducts') : t('products.noResults');
   const emptyDescription =
-    products.length === 0 ? t('products.noProductsDesc') : t('products.noResultsDesc');
+    sectionProducts.length === 0 ? t('products.noProductsDesc') : t('products.noResultsDesc');
 
   if (loading) return <LoadingSpinner />;
+
+  if (!section) {
+    return (
+      <div className="w-full min-w-0 max-w-full overflow-x-clip space-y-4 animate-fade-in">
+        <div className="grid w-full min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => openSection('paint')}
+            className="card flex min-h-[88px] w-full min-w-0 items-start gap-3 p-4 text-left hover:shadow-card-hover sm:p-6"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/50 dark:text-brand-300">
+              <Droplets className="h-5 w-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block font-semibold text-gray-900 dark:text-white">
+                {t('products.sectionPaint')}
+              </span>
+              <span className="mt-1 block text-sm text-gray-500 dark:text-gray-400">
+                {t('products.sectionPaintDesc')}
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => openSection('care')}
+            className="card flex min-h-[88px] w-full min-w-0 items-start gap-3 p-4 text-left hover:shadow-card-hover sm:p-6"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/50 dark:text-brand-300">
+              <Sparkles className="h-5 w-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block font-semibold text-gray-900 dark:text-white">
+                {t('products.sectionCare')}
+              </span>
+              <span className="mt-1 block text-sm text-gray-500 dark:text-gray-400">
+                {t('products.sectionCareDesc')}
+              </span>
+            </span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-clip space-y-4 animate-fade-in">
       <div className="flex flex-col gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setSection(null)}
+            className="btn-ghost min-h-[44px] min-w-[44px] shrink-0 p-2 sm:min-h-0 sm:min-w-0"
+            aria-label={t('products.sectionBack')}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </button>
+          <h2 className="min-w-0 truncate text-lg font-semibold text-gray-900 dark:text-white">
+            {section === 'paint' ? t('products.sectionPaint') : t('products.sectionCare')}
+          </h2>
+        </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="w-full min-w-0 max-w-full sm:max-w-xs">
             <SearchInput
@@ -345,7 +435,7 @@ export default function Products() {
           title={emptyTitle}
           description={emptyDescription}
           action={
-            products.length === 0 ? (
+            sectionProducts.length === 0 ? (
               <button onClick={openCreate} className="btn-primary">
                 <Plus className="h-4 w-4" /> {t('products.add')}
               </button>
