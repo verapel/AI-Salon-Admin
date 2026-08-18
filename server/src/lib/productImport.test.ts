@@ -208,5 +208,9 @@ describe('PRODUCTS-2 excel and photo import', () => {
     assert.match(ru, /'products\.import': 'Импорт'/);
     assert.match(ru, /'products\.addPhoto': 'Добавить по фото'/);
     assert.match(ru, /'products\.exportExcel': 'Экспорт Excel'/);
+    assert.match(page, /products\.photoProcessing/);
+    assert.match(page, /photoStage === 'upload'/);
+    assert.match(page, /photoStage === 'recognition'/);
+    assert.match(page, /if \(!file \|\| importBusy\) return/);
   });
 });

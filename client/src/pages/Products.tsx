@@ -15,6 +15,7 @@ import {
 import SearchInput from '@/components/ui/SearchInput';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import IndeterminateProgress from '@/components/ui/IndeterminateProgress';
 import EmptyState from '@/components/ui/EmptyState';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { api, ApiError } from '@/lib/api';
@@ -87,6 +88,8 @@ export default function Products() {
   const [previewRows, setPreviewRows] = useState<ProductDraft[]>([]);
   const [importError, setImportError] = useState('');
   const [importResult, setImportResult] = useState<ProductImportResult | null>(null);
+  const [photoProcessingOpen, setPhotoProcessingOpen] = useState(false);
+  const [photoStage, setPhotoStage] = useState<'upload' | 'recognition' | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
@@ -249,28 +252,51 @@ export default function Products() {
     });
 
   const handleImportFile = async (file: File | undefined, kind: 'auto' | 'photo') => {
-    if (!file) return;
+    if (!file || importBusy) return;
     setImportBusy(true);
     setImportError('');
     setImportResult(null);
+    const isSpreadsheet = /\.(xlsx|xls|csv)$/i.test(file.name);
+    const isPhoto = kind === 'photo' || (!isSpreadsheet && file.type.startsWith('image/'));
+    if (isPhoto) {
+      setPhotoProcessingOpen(true);
+      setPhotoStage('upload');
+    }
     try {
-      const contentBase64 = await readFileAsBase64(file);
-      const payload = { filename: file.name, mimeType: file.type || 'application/octet-stream', contentBase64 };
-      const isSpreadsheet = /\.(xlsx|xls|csv)$/i.test(file.name);
-      const parsed =
-        kind === 'photo' || (!isSpreadsheet && file.type.startsWith('image/'))
-          ? await api.products.parsePhoto(payload)
-          : await api.products.parseImport(payload);
-      setPreviewRows(parsed.rows);
-      setImportOpen(true);
-      if (parsed.rows.length === 0) {
-        setImportError(t('products.noResults'));
+      if (isPhoto) {
+        const contentBase64 = await readFileAsBase64(file);
+        setPhotoStage('recognition');
+        const payload = { filename: file.name, mimeType: file.type || 'image/jpeg', contentBase64 };
+        const parsed = await api.products.parsePhoto(payload);
+        setPreviewRows(parsed.rows);
+        setPhotoProcessingOpen(false);
+        setPhotoStage(null);
+        setImportOpen(true);
+        if (parsed.rows.length === 0) {
+          setImportError(t('products.noResults'));
+        }
+      } else {
+        const contentBase64 = await readFileAsBase64(file);
+        const payload = { filename: file.name, mimeType: file.type || 'application/octet-stream', contentBase64 };
+        const parsed = await api.products.parseImport(payload);
+        setPreviewRows(parsed.rows);
+        setImportOpen(true);
+        if (parsed.rows.length === 0) {
+          setImportError(t('products.noResults'));
+        }
       }
     } catch (err) {
-      setImportOpen(true);
-      setPreviewRows([]);
-      if (err instanceof ApiError) setImportError(err.message);
-      else setImportError(err instanceof Error ? err.message : t('common.serverUnavailable'));
+      if (isPhoto) {
+        setPhotoStage(null);
+        setPreviewRows([]);
+        if (err instanceof ApiError) setImportError(err.message);
+        else setImportError(err instanceof Error ? err.message : t('common.serverUnavailable'));
+      } else {
+        setImportOpen(true);
+        setPreviewRows([]);
+        if (err instanceof ApiError) setImportError(err.message);
+        else setImportError(err instanceof Error ? err.message : t('common.serverUnavailable'));
+      }
     } finally {
       setImportBusy(false);
     }
@@ -652,6 +678,59 @@ export default function Products() {
           </div>
         </>
       )}
+
+      <Modal
+        open={photoProcessingOpen}
+        onClose={() => {
+          if (importBusy) return;
+          setPhotoProcessingOpen(false);
+        }}
+        title={t('products.addPhoto')}
+        size="sm"
+      >
+        <div className="space-y-4">
+          {importBusy ? (
+            <IndeterminateProgress
+              label={t('products.photoProcessing')}
+              detail={
+                photoStage === 'upload'
+                  ? t('products.photoStageUpload')
+                  : photoStage === 'recognition'
+                    ? t('products.photoStageRecognition')
+                    : undefined
+              }
+            />
+          ) : (
+            <>
+              {importError ? (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+                  {importError}
+                </p>
+              ) : null}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setPhotoProcessingOpen(false)}
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => {
+                    setPhotoProcessingOpen(false);
+                    setImportError('');
+                    photoInputRef.current?.click();
+                  }}
+                >
+                  {t('products.photoRetry')}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
 
       <Modal
         open={importOpen}

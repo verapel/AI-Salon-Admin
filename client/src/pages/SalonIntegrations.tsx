@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CalendarDays, ShieldCheck } from 'lucide-react';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import IndeterminateProgress from '@/components/ui/IndeterminateProgress';
 import Modal from '@/components/ui/Modal';
 import { useLanguage } from '@/context/LanguageContext';
 import { api, ApiError } from '@/lib/api';
@@ -1659,10 +1660,19 @@ export default function SalonIntegrations() {
         size="sm"
       >
         <div className="space-y-3 text-sm text-gray-800 dark:text-gray-200">
-          <p>{t('integrations.google.backfillConfirmGoogleUnchanged')}</p>
-          <p>{t('integrations.google.backfillConfirmSkipImported')}</p>
-          <p>{t('integrations.google.backfillConfirmSkipUnsafe')}</p>
-          <p>{t('integrations.google.backfillConfirmTatev')}</p>
+          {googleBackfillRunning ? (
+            <IndeterminateProgress
+              label={t('integrations.google.backfillRunning')}
+              detail={t('integrations.google.backfillWait')}
+            />
+          ) : (
+            <>
+              <p>{t('integrations.google.backfillConfirmGoogleUnchanged')}</p>
+              <p>{t('integrations.google.backfillConfirmSkipImported')}</p>
+              <p>{t('integrations.google.backfillConfirmSkipUnsafe')}</p>
+              <p>{t('integrations.google.backfillConfirmTatev')}</p>
+            </>
+          )}
           {googleBackfillError ? (
             <p className="text-red-600 dark:text-red-400">{googleBackfillError}</p>
           ) : null}

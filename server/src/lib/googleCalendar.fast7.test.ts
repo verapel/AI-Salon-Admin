@@ -900,6 +900,9 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
     assert.match(ui, /disabled=\{googleBackfillRunning\}/);
     assert.match(ui, /setGoogleBackfillConfirmOpen\(true\)/);
     assert.match(ui, /importGoogleLast30Days/);
+    assert.match(ui, /IndeterminateProgress/);
+    assert.match(ui, /integrations\.google\.backfillWait/);
+    assert.doesNotMatch(ui, /%\s*\}|percent|percentage/i);
   });
 
   it('invalid time is skipped and Tatev abort happens before any import', async () => {

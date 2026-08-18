@@ -203,6 +203,10 @@ const en = {
   'products.import': 'Import',
   'products.importAria': 'Import spreadsheet or photo',
   'products.importPhotoAria': 'Add products from photo',
+  'products.photoProcessing': 'Processing photo...',
+  'products.photoStageUpload': 'Uploading photo',
+  'products.photoStageRecognition': 'Recognizing products',
+  'products.photoRetry': 'Try again',
   'products.previewTitle': 'Import preview',
   'products.previewHint': 'Edit or remove rows, then confirm. Nothing is saved until you confirm.',
   'products.confirmImport': 'Confirm and save',
@@ -679,6 +683,7 @@ const en = {
   'integrations.google.backfillPilotNote':
     'All imported appointments are assigned to Tatev for now.',
   'integrations.google.backfillRunning': 'Syncing Google Calendar…',
+  'integrations.google.backfillWait': 'This can take a minute. Please wait.',
   'integrations.google.backfillConfirmTitle':
     'Events from the last 30 days and all future events will be processed.',
   'integrations.google.backfillConfirmGoogleUnchanged': 'Google Calendar will not be changed.',
@@ -1382,6 +1387,10 @@ const ru: Record<TranslationKey, string> = {
   'products.import': 'Импорт',
   'products.importAria': 'Импорт таблицы или фото',
   'products.importPhotoAria': 'Добавить продукцию по фото',
+  'products.photoProcessing': 'Обрабатываем фото...',
+  'products.photoStageUpload': 'Загружаем фото',
+  'products.photoStageRecognition': 'Распознаём товары',
+  'products.photoRetry': 'Повторить',
   'products.previewTitle': 'Предпросмотр импорта',
   'products.previewHint': 'Исправьте или удалите строки, затем подтвердите. До подтверждения ничего не сохраняется.',
   'products.confirmImport': 'Подтвердить и сохранить',
@@ -1860,6 +1869,7 @@ const ru: Record<TranslationKey, string> = {
   'integrations.google.backfillPilotNote':
     'Все импортированные записи пока назначаются мастеру Tatev.',
   'integrations.google.backfillRunning': 'Синхронизация Google Calendar…',
+  'integrations.google.backfillWait': 'Это может занять минуту. Подождите.',
   'integrations.google.backfillConfirmTitle':
     'Будут обработаны записи за последние 30 дней и все будущие записи.',
   'integrations.google.backfillConfirmGoogleUnchanged': 'Google Calendar не будет изменён.',
@@ -2556,6 +2566,10 @@ const hy: Record<TranslationKey, string> = {
   'products.import': 'Ներմուծում',
   'products.importAria': 'Ներմուծել աղյուսակ կամ լուսանկար',
   'products.importPhotoAria': 'Ավելացնել ապրանքներ լուսանկարով',
+  'products.photoProcessing': 'Մշակում ենք լուսանկարը...',
+  'products.photoStageUpload': 'Բեռնում ենք լուսանկարը',
+  'products.photoStageRecognition': 'Ճանաչում ենք ապրանքները',
+  'products.photoRetry': 'Կրկնել',
   'products.previewTitle': 'Ներմուծման նախադիտում',
   'products.previewHint': 'Խմբագրեք կամ հեռացրեք տողերը, ապա հաստատեք։ Մինչև հաստատումը ոչինչ չի պահպանվում։',
   'products.confirmImport': 'Հաստատել և պահել',
@@ -3029,6 +3043,7 @@ const hy: Record<TranslationKey, string> = {
   'integrations.google.backfillPilotNote':
     'Բոլոր ներմուծված գրանցումները առայժմ նշանակվում են Tatev մասնագետին։',
   'integrations.google.backfillRunning': 'Google Calendar-ը համաժամեցվում է…',
+  'integrations.google.backfillWait': 'Սա կարող է տևել մոտ մեկ րոպե։ Սպասեք։',
   'integrations.google.backfillConfirmTitle':
     'Կմշակվեն վերջին 30 օրվա և բոլոր ապագա գրանցումները։',
   'integrations.google.backfillConfirmGoogleUnchanged': 'Google Calendar-ը չի փոխվի։',
