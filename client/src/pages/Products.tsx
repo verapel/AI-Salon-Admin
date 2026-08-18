@@ -222,6 +222,21 @@ export default function Products() {
     }
   };
 
+  const handlePurchaseToggle = async (product: Product) => {
+    if (actionBusy) return;
+    setActionBusy(product.id);
+    try {
+      const updated = await api.products.update(product.id, {
+        markedForPurchase: !product.markedForPurchase,
+      });
+      setProducts((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
   const readFileAsBase64 = (file: File) =>
     new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -462,11 +477,19 @@ export default function Products() {
                     {statusLabel(product.stockStatus, t)}
                   </span>
                 </div>
-                {product.markedForPurchase ? (
-                  <span className="badge bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-300">
-                    {t('products.markedForPurchase')}
-                  </span>
-                ) : null}
+                <button
+                  type="button"
+                  onClick={() => handlePurchaseToggle(product)}
+                  disabled={actionBusy === product.id}
+                  aria-pressed={product.markedForPurchase}
+                  className={`min-h-[44px] w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+                    product.markedForPurchase
+                      ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-300'
+                      : 'border border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-400'
+                  }`}
+                >
+                  {t('products.markedForPurchase')}
+                </button>
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <button

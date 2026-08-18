@@ -245,6 +245,17 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.match(ru, /'products\.sectionPaint': 'Краска'/);
     assert.match(ru, /'products\.sectionCare': 'Уход'/);
     assert.doesNotMatch(page, /CREATE TABLE/);
+
+    const toggle = page.slice(page.indexOf('const handlePurchaseToggle'), page.indexOf('const readFileAsBase64'));
+    assert.match(toggle, /api\.products\.update\(product\.id/);
+    assert.match(toggle, /markedForPurchase:\s*!product\.markedForPurchase/);
+    assert.doesNotMatch(toggle, /openEdit|setModalOpen\(true\)/);
+
+    const mobileCards = page.slice(page.indexOf('space-y-3 sm:hidden'), page.indexOf('hidden sm:block'));
+    const desktopTable = page.slice(page.indexOf('hidden sm:block'));
+    assert.match(mobileCards, /handlePurchaseToggle\(product\)/);
+    assert.match(mobileCards, /aria-pressed=\{product\.markedForPurchase\}/);
+    assert.doesNotMatch(desktopTable, /handlePurchaseToggle/);
   });
 
   it('paint and care sections split on category without a new table', () => {
