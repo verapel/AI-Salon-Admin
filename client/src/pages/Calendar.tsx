@@ -75,6 +75,34 @@ const HOURS = Array.from({ length: 12 }, (_, i) => i + 8);
 /** Shared desktop week grid: fixed time column + 7 equal day columns */
 const WEEK_GRID_CLASS = 'grid grid-cols-[3.5rem_repeat(7,minmax(0,1fr))]';
 
+type MobileCalendarView = 'today' | 'week' | 'month';
+
+function startOfWeekSunday(anchor: Date): Date {
+  const start = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+  start.setDate(start.getDate() - start.getDay());
+  return start;
+}
+
+function weekDaysFrom(anchor: Date): Date[] {
+  const start = startOfWeekSunday(anchor);
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    return d;
+  });
+}
+
+function monthGridFrom(anchor: Date): (Date | null)[] {
+  const y = anchor.getFullYear();
+  const m = anchor.getMonth();
+  const days = new Date(y, m + 1, 0).getDate();
+  const leading = new Date(y, m, 1).getDay();
+  const cells: (Date | null)[] = Array.from({ length: leading }, () => null);
+  for (let day = 1; day <= days; day += 1) cells.push(new Date(y, m, day));
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
 function statusLabel(status: Appointment['status'], t: (key: TranslationKey) => string) {
   return t(`appointmentStatus.${status}` as TranslationKey);
 }
@@ -168,6 +196,8 @@ export default function Calendar() {
   const [staffFilter, setStaffFilter] = useState<'all' | string>('all');
   const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [mobileView, setMobileView] = useState<MobileCalendarView>('today');
+  const [mobileMonthDay, setMobileMonthDay] = useState(() => toLocalDateStr(new Date()));
   const [reviewOpen, setReviewOpen] = useState<GoogleReviewCalendarItem | null>(null);
 
   const calendarBlocks = useMemo(() => {
@@ -182,27 +212,38 @@ export default function Calendar() {
     [calendarBlocks, staffFilter]
   );
 
-  const weekDays = useMemo(() => {
-    const start = new Date(currentDate);
-    const day = start.getDay();
-    start.setDate(start.getDate() - day);
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(start);
-      d.setDate(d.getDate() + i);
-      return d;
-    });
-  }, [currentDate]);
+  const weekDays = useMemo(() => weekDaysFrom(currentDate), [currentDate]);
 
-  const dayAppointments = useMemo(() => {
-    const dateStr = toLocalDateStr(currentDate);
-    return filteredAppointments
-      .filter((a) => a.date === dateStr)
-      .sort(sortBlocksForDisplay);
-  }, [filteredAppointments, currentDate]);
+  const todayDate = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }, []);
+
+  const todayStr = toLocalDateStr(todayDate);
+  const mobileWeekDays = useMemo(() => weekDaysFrom(todayDate), [todayDate]);
+  const mobileMonthCells = useMemo(() => monthGridFrom(todayDate), [todayDate]);
+
+  const todayAppointments = useMemo(
+    () => filteredAppointments.filter((a) => a.date === todayStr).sort(sortBlocksForDisplay),
+    [filteredAppointments, todayStr]
+  );
+
+  const monthSelectedAppointments = useMemo(
+    () =>
+      filteredAppointments
+        .filter((a) => a.date === mobileMonthDay)
+        .sort(sortBlocksForDisplay),
+    [filteredAppointments, mobileMonthDay]
+  );
 
   const mobileTimeGroups = useMemo(
-    () => groupBlocksByTime(dayAppointments),
-    [dayAppointments]
+    () => groupBlocksByTime(todayAppointments),
+    [todayAppointments]
+  );
+
+  const monthSelectedTimeGroups = useMemo(
+    () => groupBlocksByTime(monthSelectedAppointments),
+    [monthSelectedAppointments]
   );
 
   const showStaffOnCards = staffFilter === 'all';
@@ -233,23 +274,84 @@ export default function Calendar() {
     setCurrentDate(newDate);
   };
 
-  const navigateDay = (direction: number) => {
-    const newDate = new Date(currentDate);
-    newDate.setDate(newDate.getDate() + direction);
-    setCurrentDate(newDate);
-  };
-
   const isToday = (date: Date) => date.toDateString() === new Date().toDateString();
 
   const formatMobileDate = (date: Date) =>
     date.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'long' });
 
   const emptyDayMessage =
-    staffFilter !== 'all'
-      ? t('calendar.noAppointmentsForStaff')
-      : isToday(currentDate)
-        ? t('calendar.noAppointmentsToday')
-        : t('calendar.noAppointmentsDay');
+    staffFilter !== 'all' ? t('calendar.noAppointmentsForStaff') : t('calendar.noAppointmentsDay');
+  const emptyTodayMessage =
+    staffFilter !== 'all' ? t('calendar.noAppointmentsForStaff') : t('calendar.noAppointmentsToday');
+
+  const renderMobileBlocks = (blocks: CalendarBlock[], groups: [string, CalendarBlock[]][], emptyMessage: string) => {
+    if (blocks.length === 0) {
+      return (
+        <div className="card py-12 text-center">
+          <p className="text-sm text-gray-500 dark:text-gray-400">{emptyMessage}</p>
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-3">
+        {groups.map(([time, appts]) => (
+          <div key={time} className="card flex w-full min-w-0 max-w-full items-start gap-3 p-4">
+            <div className="flex shrink-0 flex-col items-center justify-center rounded-lg bg-brand-50 px-3 py-2 text-center dark:bg-brand-950/30">
+              <span className="whitespace-nowrap text-sm font-bold tabular-nums text-brand-700 dark:text-brand-300">
+                {time}
+              </span>
+            </div>
+            <div className="min-w-0 flex-1 space-y-3">
+              {appts.map((apt, index) => (
+                <div
+                  key={apt.id}
+                  className={`relative ${index > 0 ? 'border-t border-gray-100 pt-3 dark:border-gray-800' : ''}`}
+                  role={apt.kind === 'google_review' ? 'button' : undefined}
+                  onClick={
+                    apt.kind === 'google_review' && apt.review
+                      ? () => setReviewOpen(apt.review ?? null)
+                      : undefined
+                  }
+                >
+                  <BirthdayIndicator
+                    visible={isBirthdayIndicatorVisible(apt.date, apt.clientBirthday)}
+                  />
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="truncate text-base font-semibold text-gray-900 dark:text-white">
+                      {apt.title}
+                    </p>
+                    {apt.kind === 'google_review' ? (
+                      <span className="badge shrink-0 text-xs bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
+                        {t('calendar.googleNeedsReview')}
+                      </span>
+                    ) : (
+                      <span className={`badge shrink-0 text-xs ${getStatusColor(apt.status || 'scheduled')}`}>
+                        {statusLabel(apt.status || 'scheduled', t)}
+                      </span>
+                    )}
+                  </div>
+                  {apt.kind === 'google_review' ? (
+                    <p className="mt-1 truncate text-sm text-gray-600 dark:text-gray-400">
+                      {formatTime24(apt.startTime)}–{formatTime24(apt.endTime)} · {t('calendar.googleSource')}
+                    </p>
+                  ) : (
+                    <p className="mt-1 truncate text-sm text-gray-600 dark:text-gray-400">
+                      {apt.subtitle}
+                    </p>
+                  )}
+                  {showStaffOnCards && apt.staffName && (
+                    <p className="mt-0.5 truncate text-xs text-gray-400 dark:text-gray-500">
+                      {t('calendar.staffPrefix')} {apt.staffName}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   if (loading) return <LoadingSpinner />;
 
@@ -258,38 +360,25 @@ export default function Calendar() {
 
       {/* MOBILE HEADER — below lg */}
       <div className="lg:hidden">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-1">
+        <div className="flex w-full min-w-0 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-gray-800">
+          {([
+            ['today', 'calendar.today'],
+            ['week', 'calendar.week'],
+            ['month', 'calendar.month'],
+          ] as const).map(([view, key]) => (
             <button
-              onClick={() => navigateDay(-1)}
-              className="btn-ghost shrink-0 p-1.5"
-              aria-label={t('calendar.prevDay')}
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <p
-              className={`min-w-0 truncate px-1 text-sm font-semibold ${
-                isToday(currentDate)
-                  ? 'text-brand-600 dark:text-brand-400'
-                  : 'text-gray-900 dark:text-white'
+              key={view}
+              type="button"
+              onClick={() => setMobileView(view)}
+              className={`min-h-[44px] min-w-0 flex-1 truncate rounded-md px-2 text-sm font-medium ${
+                mobileView === view
+                  ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-900 dark:text-white'
+                  : 'text-gray-600 dark:text-gray-400'
               }`}
             >
-              {formatMobileDate(currentDate)}
-            </p>
-            <button
-              onClick={() => navigateDay(1)}
-              className="btn-ghost shrink-0 p-1.5"
-              aria-label={t('calendar.nextDay')}
-            >
-              <ChevronRight className="h-5 w-5" />
+              {t(key)}
             </button>
-          </div>
-          <button
-            onClick={() => setCurrentDate(new Date())}
-            className="btn-secondary shrink-0 px-2.5 py-1 text-xs"
-          >
-            {t('calendar.today')}
-          </button>
+          ))}
         </div>
       </div>
 
@@ -347,74 +436,91 @@ export default function Calendar() {
         </div>
       </div>
 
-      {/* MOBILE: day list */}
+      {/* MOBILE: today / week / month */}
       <div className="lg:hidden">
-        <div className="space-y-3">
-          {dayAppointments.length === 0 ? (
-            <div className="card py-12 text-center">
-              <p className="text-sm text-gray-500 dark:text-gray-400">{emptyDayMessage}</p>
-            </div>
-          ) : (
-            mobileTimeGroups.map(([time, appts]) => (
-              <div
-                key={time}
-                className="card flex w-full min-w-0 max-w-full items-start gap-3 p-4"
-              >
-                <div className="flex shrink-0 flex-col items-center justify-center rounded-lg bg-brand-50 px-3 py-2 text-center dark:bg-brand-950/30">
-                  <span className="whitespace-nowrap text-sm font-bold tabular-nums text-brand-700 dark:text-brand-300">
-                    {time}
-                  </span>
+        {mobileView === 'today'
+          ? renderMobileBlocks(todayAppointments, mobileTimeGroups, emptyTodayMessage)
+          : null}
+
+        {mobileView === 'week' ? (
+          <div className="w-full min-w-0 space-y-4">
+            {mobileWeekDays.map((day) => {
+              const dayBlocks = getAppointmentsForDay(day).sort(sortBlocksForDisplay);
+              return (
+                <div key={toLocalDateStr(day)} className="w-full min-w-0">
+                  <p
+                    className={`mb-2 truncate text-sm font-semibold ${
+                      isToday(day)
+                        ? 'text-brand-600 dark:text-brand-400'
+                        : 'text-gray-900 dark:text-white'
+                    }`}
+                  >
+                    {formatMobileDate(day)}
+                  </p>
+                  {dayBlocks.length === 0 ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{emptyDayMessage}</p>
+                  ) : (
+                    renderMobileBlocks(dayBlocks, groupBlocksByTime(dayBlocks), emptyDayMessage)
+                  )}
                 </div>
-                <div className="min-w-0 flex-1 space-y-3">
-                  {appts.map((apt, index) => (
-                    <div
-                      key={apt.id}
-                      className={`relative ${index > 0 ? 'border-t border-gray-100 pt-3 dark:border-gray-800' : ''}`}
-                      role={apt.kind === 'google_review' ? 'button' : undefined}
-                      onClick={
-                        apt.kind === 'google_review' && apt.review
-                          ? () => setReviewOpen(apt.review ?? null)
-                          : undefined
-                      }
-                    >
-                      <BirthdayIndicator
-                        visible={isBirthdayIndicatorVisible(apt.date, apt.clientBirthday)}
+              );
+            })}
+          </div>
+        ) : null}
+
+        {mobileView === 'month' ? (
+          <div className="w-full min-w-0 space-y-4">
+            <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+              {todayDate.toLocaleDateString(locale, { month: 'long', year: 'numeric' })}
+            </p>
+            <div className="grid w-full min-w-0 grid-cols-7 gap-1">
+              {mobileWeekDays.map((day) => (
+                <div
+                  key={`lbl-${day.toISOString()}`}
+                  className="min-w-0 truncate text-center text-[11px] font-medium text-gray-500 dark:text-gray-400"
+                >
+                  {day.toLocaleDateString(locale, { weekday: 'narrow' })}
+                </div>
+              ))}
+              {mobileMonthCells.map((day, index) => {
+                if (!day) {
+                  return <div key={`empty-${index}`} className="min-h-[40px] min-w-0" />;
+                }
+                const dateStr = toLocalDateStr(day);
+                const hasEvents = filteredAppointments.some((apt) => apt.date === dateStr);
+                const selected = dateStr === mobileMonthDay;
+                return (
+                  <button
+                    key={dateStr}
+                    type="button"
+                    onClick={() => setMobileMonthDay(dateStr)}
+                    className={`flex min-h-[40px] min-w-0 flex-col items-center justify-center rounded-md text-xs tabular-nums ${
+                      selected
+                        ? 'bg-brand-600 text-white'
+                        : isToday(day)
+                          ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-300'
+                          : 'text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    {day.getDate()}
+                    {hasEvents ? (
+                      <span
+                        className={`mt-0.5 h-1 w-1 rounded-full ${selected ? 'bg-white' : 'bg-brand-500'}`}
                       />
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="truncate text-base font-semibold text-gray-900 dark:text-white">
-                          {apt.title}
-                        </p>
-                        {apt.kind === 'google_review' ? (
-                          <span className="badge shrink-0 text-xs bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
-                            {t('calendar.googleNeedsReview')}
-                          </span>
-                        ) : (
-                          <span className={`badge shrink-0 text-xs ${getStatusColor(apt.status || 'scheduled')}`}>
-                            {statusLabel(apt.status || 'scheduled', t)}
-                          </span>
-                        )}
-                      </div>
-                      {apt.kind === 'google_review' ? (
-                        <p className="mt-1 truncate text-sm text-gray-600 dark:text-gray-400">
-                          {formatTime24(apt.startTime)}–{formatTime24(apt.endTime)} · {t('calendar.googleSource')}
-                        </p>
-                      ) : (
-                        <p className="mt-1 truncate text-sm text-gray-600 dark:text-gray-400">
-                          {apt.subtitle}
-                        </p>
-                      )}
-                      {showStaffOnCards && apt.staffName && (
-                        <p className="mt-0.5 truncate text-xs text-gray-400 dark:text-gray-500">
-                          {t('calendar.staffPrefix')} {apt.staffName}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+                    ) : (
+                      <span className="mt-0.5 h-1 w-1" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {renderMobileBlocks(
+              monthSelectedAppointments,
+              monthSelectedTimeGroups,
+              emptyDayMessage
+            )}
+          </div>
+        ) : null}
       </div>
 
       {/* DESKTOP: week grid — lg+ */}
