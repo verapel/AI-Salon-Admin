@@ -477,19 +477,16 @@ export default function Products() {
                     {statusLabel(product.stockStatus, t)}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handlePurchaseToggle(product)}
-                  disabled={actionBusy === product.id}
-                  aria-pressed={product.markedForPurchase}
-                  className={`min-h-[44px] w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
-                    product.markedForPurchase
-                      ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-300'
-                      : 'border border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-400'
-                  }`}
-                >
+                <label className="flex min-h-[44px] items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                    checked={product.markedForPurchase}
+                    disabled={actionBusy === product.id}
+                    onChange={() => handlePurchaseToggle(product)}
+                  />
                   {t('products.markedForPurchase')}
-                </button>
+                </label>
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <button

@@ -253,8 +253,11 @@ describe('PRODUCTS-1 products foundation', () => {
 
     const mobileCards = page.slice(page.indexOf('space-y-3 sm:hidden'), page.indexOf('hidden sm:block'));
     const desktopTable = page.slice(page.indexOf('hidden sm:block'));
-    assert.match(mobileCards, /handlePurchaseToggle\(product\)/);
-    assert.match(mobileCards, /aria-pressed=\{product\.markedForPurchase\}/);
+    assert.match(mobileCards, /type="checkbox"/);
+    assert.match(mobileCards, /checked=\{product\.markedForPurchase\}/);
+    assert.match(mobileCards, /onChange=\{\(\) => handlePurchaseToggle\(product\)\}/);
+    assert.doesNotMatch(mobileCards, /w-full rounded-lg px-3 py-2/);
+    assert.doesNotMatch(mobileCards, /aria-pressed/);
     assert.doesNotMatch(desktopTable, /handlePurchaseToggle/);
   });
 
