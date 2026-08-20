@@ -241,8 +241,10 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.match(page, /exportProductsXlsx/);
     assert.match(page, /isProductInSection/);
     assert.match(page, /openSection\('paint'\)/);
+    assert.match(page, /openSection\('oxide'\)/);
     assert.match(page, /openSection\('care'\)/);
     assert.match(ru, /'products\.sectionPaint': 'Краска'/);
+    assert.match(ru, /'products\.sectionOxide': 'Оксид'/);
     assert.match(ru, /'products\.sectionCare': 'Уход'/);
     assert.doesNotMatch(page, /CREATE TABLE/);
 
@@ -261,7 +263,7 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.doesNotMatch(desktopTable, /handlePurchaseToggle/);
   });
 
-  it('paint and care sections split on category without a new table', () => {
+  it('paint, oxide, and care sections split on category without a new table', () => {
     assert.equal(resolveProductSection('Color'), 'paint');
     assert.equal(resolveProductSection('краска'), 'paint');
     assert.equal(resolveProductSection('paint'), 'paint');
@@ -270,6 +272,9 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.equal(resolveProductSection('shampoo'), 'care');
     assert.equal(resolveProductSection('', '5.01'), 'paint');
     assert.equal(resolveProductSection('', ''), 'care');
+    assert.equal(resolveProductSection('оксид'), 'oxide');
+    assert.equal(resolveProductSection('oxide'), 'oxide');
+    assert.equal(resolveProductSection('developer'), 'oxide');
 
     const rows = [
       { category: 'Color', codeShade: '10', name: 'Dark' },
@@ -277,17 +282,28 @@ describe('PRODUCTS-1 products foundation', () => {
       { category: 'paint', codeShade: '2', name: 'Light' },
       { category: 'care', codeShade: '', name: 'Shampoo' },
       { category: '', codeShade: '5.01', name: 'Shade' },
+      { category: 'оксид', codeShade: '9%', name: 'Ox 9' },
+      { category: 'oxide', codeShade: '', name: 'Ox 3' },
     ];
     const paint = rows.filter((row) => isProductInSection(row, 'paint')).map((row) => row.name);
+    const oxide = rows.filter((row) => isProductInSection(row, 'oxide')).map((row) => row.name);
     const care = rows.filter((row) => isProductInSection(row, 'care')).map((row) => row.name);
     assert.deepEqual(paint, ['Dark', 'Light', 'Shade']);
+    assert.deepEqual(oxide, ['Ox 9', 'Ox 3']);
     assert.deepEqual(care, ['Mask', 'Shampoo']);
+    assert.equal(paint.includes('Ox 9'), false);
     assert.equal(paint.includes('Mask'), false);
     assert.equal(care.includes('Dark'), false);
+    assert.equal(care.includes('Ox 3'), false);
+    assert.equal(oxide.includes('Dark'), false);
+    assert.equal(oxide.includes('Shampoo'), false);
 
     assert.equal(categoryForProductSection('paint'), 'paint');
+    assert.equal(categoryForProductSection('oxide'), 'oxide');
     assert.equal(categoryForProductSection('care', 'Уход'), 'Уход');
     assert.equal(categoryForProductSection('paint', 'уход'), 'paint');
+    assert.equal(categoryForProductSection('oxide', 'Color'), 'oxide');
+    assert.equal(categoryForProductSection('oxide', 'оксид 6%'), 'оксид 6%');
 
     const sql = read('supabase/migrations/20260817000001_products_foundation.sql');
     assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.products/);

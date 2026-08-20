@@ -4,6 +4,7 @@ import {
   Camera,
   Droplets,
   FileSpreadsheet,
+  FlaskConical,
   Minus,
   Package,
   Pencil,
@@ -334,7 +335,7 @@ export default function Products() {
   if (!section) {
     return (
       <div className="w-full min-w-0 max-w-full overflow-x-clip space-y-4 animate-fade-in">
-        <div className="grid w-full min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid w-full min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
           <button
             type="button"
             onClick={() => openSection('paint')}
@@ -349,6 +350,23 @@ export default function Products() {
               </span>
               <span className="mt-1 block text-sm text-gray-500 dark:text-gray-400">
                 {t('products.sectionPaintDesc')}
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => openSection('oxide')}
+            className="card flex min-h-[88px] w-full min-w-0 items-start gap-3 p-4 text-left hover:shadow-card-hover sm:p-6"
+          >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900/50 dark:text-brand-300">
+              <FlaskConical className="h-5 w-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block font-semibold text-gray-900 dark:text-white">
+                {t('products.sectionOxide')}
+              </span>
+              <span className="mt-1 block text-sm text-gray-500 dark:text-gray-400">
+                {t('products.sectionOxideDesc')}
               </span>
             </span>
           </button>
@@ -387,7 +405,11 @@ export default function Products() {
             <ArrowLeft className="h-4 w-4" />
           </button>
           <h2 className="min-w-0 truncate text-lg font-semibold text-gray-900 dark:text-white">
-            {section === 'paint' ? t('products.sectionPaint') : t('products.sectionCare')}
+            {section === 'paint'
+              ? t('products.sectionPaint')
+              : section === 'oxide'
+                ? t('products.sectionOxide')
+                : t('products.sectionCare')}
           </h2>
         </div>
         <div className="flex w-full min-w-0 max-w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
