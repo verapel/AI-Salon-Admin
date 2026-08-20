@@ -1,7 +1,8 @@
-export type ProductSection = 'paint' | 'care';
+export type ProductSection = 'paint' | 'oxide' | 'care';
 
 export const PRODUCT_SECTION_CATEGORY: Record<ProductSection, string> = {
   paint: 'paint',
+  oxide: 'oxide',
   care: 'care',
 };
 
@@ -10,6 +11,13 @@ function normalizeCategory(value: string): string {
     .trim()
     .toLowerCase()
     .replace(/ё/g, 'е');
+}
+
+function looksOxide(normalized: string): boolean {
+  if (!normalized) return false;
+  return ['oxide', 'oxid', 'oxyd', 'оксид', 'окисл', 'developer'].some(
+    (token) => normalized === token || normalized.includes(token)
+  );
 }
 
 function looksPaint(normalized: string): boolean {
@@ -23,10 +31,6 @@ function looksPaint(normalized: string): boolean {
     'dye',
     'toner',
     'bleach',
-    'оксид',
-    'окисл',
-    'oxid',
-    'developer',
   ].some((token) => normalized === token || normalized.includes(token));
 }
 
@@ -51,9 +55,10 @@ function looksCare(normalized: string): boolean {
   ].some((token) => normalized === token || normalized.includes(token));
 }
 
-/** Map free-text category (+ optional code/shade) onto paint vs care. */
+/** Map free-text category (+ optional code/shade) onto paint / oxide / care. */
 export function resolveProductSection(category: string, codeShade = ''): ProductSection {
   const normalized = normalizeCategory(category);
+  if (looksOxide(normalized)) return 'oxide';
   const paint = looksPaint(normalized);
   const care = looksCare(normalized);
   if (paint && !care) return 'paint';
