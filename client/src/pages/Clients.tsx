@@ -1,13 +1,13 @@
-import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, Users, Mail, Phone, Ban, ShieldCheck, Cake } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Plus, Pencil, Trash2, Users, Mail, Phone, Ban, ShieldCheck, Cake, Upload } from 'lucide-react';
 import SearchInput from '@/components/ui/SearchInput';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
 import { useLanguage } from '@/context/LanguageContext';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
-import type { Client } from '@/types';
+import type { Client, ClientImportDraft, ClientImportPreviewRow, ClientImportResult } from '@/types';
 import type { TranslationKey } from '@/i18n/translations';
 
 type ClientFilter = 'all' | 'active' | 'blacklist';
@@ -20,6 +20,23 @@ const FILTER_KEYS: Record<ClientFilter, TranslationKey> = {
 
 const FILTERS: ClientFilter[] = ['all', 'active', 'blacklist'];
 
+const REASON_KEYS: Record<ClientImportPreviewRow['reason'], TranslationKey> = {
+  new: 'clients.reasonNew',
+  phone_match: 'clients.reasonPhoneMatch',
+  email_match: 'clients.reasonEmailMatch',
+  missing_name: 'clients.reasonMissingName',
+  empty: 'clients.reasonEmpty',
+};
+
+function actionLabel(
+  action: ClientImportPreviewRow['action'],
+  t: (key: TranslationKey) => string
+) {
+  if (action === 'create') return t('clients.actionCreate');
+  if (action === 'reuse') return t('clients.actionReuse');
+  return t('clients.actionSkip');
+}
+
 export default function Clients() {
   const { t } = useLanguage();
   const [clients, setClients] = useState<Client[]>([]);
@@ -29,6 +46,13 @@ export default function Clients() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
   const [form, setForm] = useState({ name: '', email: '', phone: '', notes: '', birthday: '' });
+  const [importOpen, setImportOpen] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [previewRows, setPreviewRows] = useState<ClientImportPreviewRow[]>([]);
+  const [importError, setImportError] = useState('');
+  const [importResult, setImportResult] = useState<ClientImportResult | null>(null);
+  const [previewDirty, setPreviewDirty] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const loadClients = () => {
     api.clients
@@ -114,6 +138,97 @@ export default function Clients() {
     }
   };
 
+  const readFileAsBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result ?? '');
+        resolve(result.includes(',') ? result.slice(result.indexOf(',') + 1) : result);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+
+  const handleImportFile = async (file: File | undefined) => {
+    if (!file || importBusy) return;
+    setImportBusy(true);
+    setImportError('');
+    setImportResult(null);
+    setPreviewDirty(false);
+    try {
+      const contentBase64 = await readFileAsBase64(file);
+      const parsed = await api.clients.parseImport({
+        filename: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        contentBase64,
+      });
+      setPreviewRows(parsed.rows);
+      setImportOpen(true);
+      if (parsed.rows.length === 0) {
+        setImportError(t('clients.noResults'));
+      }
+    } catch (err) {
+      setImportOpen(true);
+      setPreviewRows([]);
+      if (err instanceof ApiError) setImportError(err.message);
+      else setImportError(err instanceof Error ? err.message : t('common.serverUnavailable'));
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const draftKey = useMemo(
+    () =>
+      previewRows
+        .map(
+          (row) =>
+            `${row.draft.name}|${row.draft.phone}|${row.draft.email}|${row.draft.birthday ?? ''}|${row.draft.notes}`
+        )
+        .join('\n'),
+    [previewRows]
+  );
+
+  useEffect(() => {
+    if (!importOpen || importResult || !previewDirty || previewRows.length === 0) return;
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const drafts = previewRows.map((row) => row.draft);
+          const planned = await api.clients.previewImport(drafts);
+          setPreviewRows(planned.rows);
+          setPreviewDirty(false);
+        } catch (err) {
+          if (err instanceof ApiError) setImportError(err.message);
+        }
+      })();
+    }, 400);
+    return () => window.clearTimeout(handle);
+  }, [draftKey, importOpen, importResult, previewDirty, previewRows]);
+
+  const updateDraft = (index: number, patch: Partial<ClientImportDraft>) => {
+    setPreviewRows((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, draft: { ...item.draft, ...patch } } : item))
+    );
+    setPreviewDirty(true);
+  };
+
+  const confirmImport = async () => {
+    if (importBusy) return;
+    setImportBusy(true);
+    setImportError('');
+    try {
+      const result = await api.clients.commitImport(previewRows.map((row) => row.draft));
+      setImportResult(result);
+      setPreviewDirty(false);
+      loadClients();
+    } catch (err) {
+      if (err instanceof ApiError) setImportError(err.message);
+      else setImportError(err instanceof Error ? err.message : t('common.serverUnavailable'));
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
   const handleUnblock = async (client: Client) => {
     try {
       await api.clients.unblock(client.id);
@@ -149,9 +264,31 @@ export default function Clients() {
             placeholder={t('clients.searchPlaceholder')}
           />
         </div>
-        <button onClick={openCreate} className="btn-primary w-full sm:w-auto">
-          <Plus className="h-4 w-4" /> {t('common.addClient')}
-        </button>
+        <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:justify-end">
+          <input
+            ref={importInputRef}
+            type="file"
+            className="hidden"
+            accept=".xlsx,.xls,.csv"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              void handleImportFile(file);
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => importInputRef.current?.click()}
+            disabled={importBusy}
+            className="btn-secondary w-full sm:w-auto"
+            aria-label={t('clients.importAria')}
+          >
+            <Upload className="h-4 w-4" /> {t('clients.import')}
+          </button>
+          <button onClick={openCreate} className="btn-primary w-full sm:w-auto">
+            <Plus className="h-4 w-4" /> {t('common.addClient')}
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -298,6 +435,148 @@ export default function Clients() {
           ))}
         </div>
       )}
+
+      <Modal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        title={importResult ? t('clients.importResult') : t('clients.previewTitle')}
+        size="xl"
+      >
+        <div className="space-y-4">
+          {!importResult ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400">{t('clients.previewHint')}</p>
+          ) : null}
+          {importError ? (
+            <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+              {importError}
+            </p>
+          ) : null}
+          {importResult ? (
+            <div className="space-y-1 text-sm text-gray-700 dark:text-gray-300">
+              <p>{t('clients.resultCreated').replace('{count}', String(importResult.created))}</p>
+              <p>{t('clients.resultReused').replace('{count}', String(importResult.reused))}</p>
+              <p>{t('clients.resultUpdated').replace('{count}', String(importResult.updated))}</p>
+              <p>{t('clients.resultSkipped').replace('{count}', String(importResult.skipped))}</p>
+              <p>{t('clients.resultErrors').replace('{count}', String(importResult.errors.length))}</p>
+              {importResult.errors.length > 0 ? (
+                <ul className="list-disc pl-5 text-red-600 dark:text-red-400">
+                  {importResult.errors.map((item, index) => (
+                    <li key={`${item.name}-${index}`}>
+                      {item.name}: {item.message}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : (
+            <div className="table-scroll">
+              <table className="w-full min-w-[880px] text-sm">
+                <thead>
+                  <tr className="border-b text-left text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                    <th className="py-2 pr-2">{t('clients.importAction')}</th>
+                    <th className="py-2 pr-2">{t('clients.importReason')}</th>
+                    <th className="py-2 pr-2">{t('clients.fieldName')}</th>
+                    <th className="py-2 pr-2">{t('clients.fieldPhone')}</th>
+                    <th className="py-2 pr-2">{t('clients.fieldEmail')}</th>
+                    <th className="py-2 pr-2">{t('clients.fieldBirthday')}</th>
+                    <th className="py-2 pr-2">{t('clients.fieldNotes')}</th>
+                    <th className="py-2 pr-2">{t('clients.colExisting')}</th>
+                    <th className="py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewRows.map((row, index) => (
+                    <tr key={index} className="border-b align-top dark:border-gray-800">
+                      <td className="py-1 pr-2 font-semibold">
+                        <span
+                          className={
+                            row.action === 'create'
+                              ? 'text-green-700 dark:text-green-300'
+                              : row.action === 'reuse'
+                                ? 'text-amber-700 dark:text-amber-300'
+                                : 'text-gray-500'
+                          }
+                        >
+                          {actionLabel(row.action, t)}
+                        </span>
+                      </td>
+                      <td className="py-1 pr-2 text-xs text-gray-500 dark:text-gray-400">
+                        {t(REASON_KEYS[row.reason])}
+                      </td>
+                      <td className="py-1 pr-2">
+                        <input
+                          className="input-field"
+                          value={row.draft.name}
+                          onChange={(e) => updateDraft(index, { name: e.target.value })}
+                        />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <input
+                          className="input-field"
+                          value={row.draft.phone}
+                          onChange={(e) => updateDraft(index, { phone: e.target.value })}
+                        />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <input
+                          className="input-field"
+                          type="email"
+                          value={row.draft.email}
+                          onChange={(e) => updateDraft(index, { email: e.target.value })}
+                        />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <input
+                          className="input-field"
+                          type="date"
+                          value={row.draft.birthday ?? ''}
+                          onChange={(e) => updateDraft(index, { birthday: e.target.value || null })}
+                        />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <textarea
+                          className="input-field"
+                          rows={2}
+                          value={row.draft.notes}
+                          onChange={(e) => updateDraft(index, { notes: e.target.value })}
+                        />
+                      </td>
+                      <td className="max-w-[140px] truncate py-1 pr-2 text-xs text-gray-500">
+                        {row.existingClientName || '—'}
+                      </td>
+                      <td className="py-1">
+                        <button
+                          type="button"
+                          className="btn-ghost p-1.5 text-red-500"
+                          aria-label={t('clients.removeRow')}
+                          onClick={() => setPreviewRows((prev) => prev.filter((_, i) => i !== index))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
+            <button type="button" className="btn-secondary" onClick={() => setImportOpen(false)}>
+              {t('common.cancel')}
+            </button>
+            {!importResult ? (
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={importBusy || previewRows.length === 0}
+                onClick={() => void confirmImport()}
+              >
+                {t('clients.confirmImport')}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={modalOpen}

@@ -80,6 +80,24 @@ export const api = {
     unblock: (id: string) =>
       request<import('@/types').Client>(`/clients/${id}/unblock`, { method: 'POST' }),
     delete: (id: string) => request<void>(`/clients/${id}`, { method: 'DELETE' }),
+    parseImport: (data: { filename: string; mimeType: string; contentBase64: string }) =>
+      request<{ source: 'excel'; rows: import('@/types').ClientImportPreviewRow[] }>(
+        '/clients/import/parse',
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }
+      ),
+    previewImport: (rows: import('@/types').ClientImportDraft[]) =>
+      request<{ rows: import('@/types').ClientImportPreviewRow[] }>('/clients/import/preview', {
+        method: 'POST',
+        body: JSON.stringify({ rows }),
+      }),
+    commitImport: (rows: import('@/types').ClientImportDraft[]) =>
+      request<import('@/types').ClientImportResult>('/clients/import/commit', {
+        method: 'POST',
+        body: JSON.stringify({ rows }),
+      }),
   },
   services: {
     getAll: () => request<import('@/types').Service[]>('/services'),
