@@ -122,6 +122,45 @@ export function buildGoogleOccurrenceKey(params: {
 }
 
 /**
+ * FIX-3: Recurring occurrences match only uid+recurrence (never a bare series id).
+ * One-off events keep bare uid for existing links.
+ */
+export function googleStoredOccurrenceKeys(params: {
+  calendarId?: string | null;
+  eventId: string;
+  recurrenceId?: string | null;
+}): string[] {
+  const uid = params.eventId.trim();
+  if (!uid) return [];
+  const rec = (params.recurrenceId || '').trim();
+  const cal = (params.calendarId || '').trim();
+  if (rec) {
+    const keys = [`${uid}:${rec}`];
+    if (cal) keys.unshift(`${cal}:${uid}:${rec}`);
+    return keys;
+  }
+  const keys = [uid];
+  if (cal) keys.unshift(`${cal}:${uid}`);
+  return keys;
+}
+
+export function googleOccurrenceLookupKeys(ev: {
+  id: string;
+  calendarId?: string | null;
+  recurringEventId?: string | null;
+  originalStartTime?: {
+    dateTime?: string | null;
+    date?: string | null;
+  } | null;
+}): string[] {
+  return googleStoredOccurrenceKeys({
+    calendarId: ev.calendarId,
+    eventId: ev.id,
+    recurrenceId: buildGoogleOccurrenceRecurrenceId(ev),
+  });
+}
+
+/**
  * Deterministic NEW-client name suggestion from original title:
  * take text before the first +phone-like token; collapse whitespace.
  * Always editable in UI — never auto-committed without confirmation.
@@ -287,10 +326,13 @@ export async function loadGoogleImportedOccurrenceKeys(
     const cal =
       typeof row?.external_calendar_id === 'string' ? row.external_calendar_id.trim() : '';
     if (!uid) continue;
-    // Keys match buildGoogleOccurrenceKey(calendarId, eventId=uid, recurrenceId).
-    set.add(rec ? `${cal}:${uid}:${rec}` : `${cal}:${uid}`);
-    // Also index by uid+rec alone for calendar-id-null legacy safety.
-    set.add(rec ? `${uid}:${rec}` : uid);
+    for (const key of googleStoredOccurrenceKeys({
+      calendarId: cal,
+      eventId: uid,
+      recurrenceId: rec,
+    })) {
+      set.add(key);
+    }
   }
   return set;
 }

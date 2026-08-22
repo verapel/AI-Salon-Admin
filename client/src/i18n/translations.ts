@@ -711,6 +711,12 @@ const en = {
   'integrations.google.backfillAlready': 'Already imported',
   'integrations.google.backfillSkipped': 'Skipped',
   'integrations.google.backfillFailed': 'Errors',
+  'integrations.google.backfillExcluded': 'Excluded',
+  'integrations.google.backfillExcludedCancelled': 'Cancelled',
+  'integrations.google.backfillExcludedAllDay': 'All-day',
+  'integrations.google.backfillExcludedInvalidTime': 'Invalid time',
+  'integrations.google.backfillInconsistent':
+    'Sync accounting was inconsistent. Not all scanned events were classified.',
   'integrations.google.backfillTruncated':
     'The scan reached a safety limit. Some events may not have been reviewed.',
   'integrations.google.backfillError': 'Could not sync Google Calendar.',
@@ -1907,6 +1913,12 @@ const ru: Record<TranslationKey, string> = {
   'integrations.google.backfillAlready': 'Уже были импортированы',
   'integrations.google.backfillSkipped': 'Пропущено',
   'integrations.google.backfillFailed': 'Ошибок',
+  'integrations.google.backfillExcluded': 'Исключено',
+  'integrations.google.backfillExcludedCancelled': 'Отменено',
+  'integrations.google.backfillExcludedAllDay': 'Весь день',
+  'integrations.google.backfillExcludedInvalidTime': 'Некорректное время',
+  'integrations.google.backfillInconsistent':
+    'Учёт синхронизации несовместим. Не все найденные события получили категорию.',
   'integrations.google.backfillTruncated':
     'Достигнут безопасный лимит сканирования. Часть событий могла не быть просмотрена.',
   'integrations.google.backfillError': 'Не удалось синхронизировать Google Calendar.',
@@ -3091,6 +3103,12 @@ const hy: Record<TranslationKey, string> = {
   'integrations.google.backfillAlready': 'Արդեն ներմուծված էին',
   'integrations.google.backfillSkipped': 'Բաց է թողնված',
   'integrations.google.backfillFailed': 'Սխալներ',
+  'integrations.google.backfillExcluded': 'Բացառված',
+  'integrations.google.backfillExcludedCancelled': 'Չեղարկված',
+  'integrations.google.backfillExcludedAllDay': 'Ամբողջ օր',
+  'integrations.google.backfillExcludedInvalidTime': 'Սխալ ժամ',
+  'integrations.google.backfillInconsistent':
+    'Համաժամեցման հաշվառումը անհամատեղելի է։ Բոլոր գտնված իրադարձությունները չեն դասակարգվել։',
   'integrations.google.backfillTruncated':
     'Հասել է սկանավորման անվտանգ սահմանին։ Ավելի հին իրադարձությունների մի մասը կարող է չդիտարկված մնալ։',
   'integrations.google.backfillError': 'Չհաջողվեց համաժամեցնել Google Calendar-ը։',

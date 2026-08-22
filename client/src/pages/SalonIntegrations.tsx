@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { CalendarDays, ShieldCheck } from 'lucide-react';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import Modal from '@/components/ui/Modal';
-import { useLanguage } from '@/context/LanguageContext';
+import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 import { api, ApiError } from '@/lib/api';
 import type {
   CalendarConnectionPublic,
@@ -32,6 +32,67 @@ function formatEventInstant(time: GoogleEventTimePreview): string {
   if (time.dateTime) return time.dateTime;
   if (time.date) return time.date;
   return '—';
+}
+
+function renderGoogleBackfillResult(
+  result: GoogleBackfillLast30DaysResult,
+  t: (key: TranslationKey) => string,
+) {
+  const review =
+    result.reviewEvents ??
+    (result.terminals
+      ? result.terminals.newReviewOverlay +
+        result.terminals.updatedReviewOverlay +
+        result.terminals.unchangedReviewOverlay +
+        result.terminals.conflictReview
+      : 0);
+  return (
+    <div className="space-y-1">
+      {result.inconsistent ? (
+        <p className="text-sm text-red-600 dark:text-red-400">
+          {t('integrations.google.backfillInconsistent')}
+        </p>
+      ) : (
+        <p className="font-medium">{t('integrations.google.backfillDone')}</p>
+      )}
+      <p>
+        {t('integrations.google.backfillScanned')}: {result.scanned}
+      </p>
+      <p>
+        {t('integrations.google.backfillNewEvents')}: {result.newEvents ?? result.imported}
+      </p>
+      <p>
+        {t('integrations.google.backfillUpdatedEvents')}: {result.updatedEvents ?? 0}
+      </p>
+      <p>
+        {t('integrations.google.backfillUnchangedEvents')}:{' '}
+        {result.unchangedEvents ?? result.alreadyImported}
+      </p>
+      <p>
+        {t('integrations.google.backfillReviewEvents')}: {review}
+      </p>
+      <p>
+        {t('integrations.google.backfillExcluded')}: {result.excluded}
+      </p>
+      <p>
+        {t('integrations.google.backfillExcludedCancelled')}: {result.reasons.cancelled}
+      </p>
+      <p>
+        {t('integrations.google.backfillExcludedAllDay')}: {result.reasons.allDay}
+      </p>
+      <p>
+        {t('integrations.google.backfillExcludedInvalidTime')}: {result.reasons.invalidTime}
+      </p>
+      <p>
+        {t('integrations.google.backfillFailed')}: {result.failed}
+      </p>
+      {result.truncated ? (
+        <p className="text-amber-800 dark:text-amber-200">
+          {t('integrations.google.backfillTruncated')}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function formatEventDuration(
@@ -1185,31 +1246,7 @@ export default function SalonIntegrations() {
                     </button>
                     {googleBackfillResult ? (
                       <div className="space-y-1 text-sm text-gray-800 dark:text-gray-200">
-                        <p className="font-medium">{t('integrations.google.backfillDone')}</p>
-                        <p>
-                          {t('integrations.google.backfillScanned')}: {googleBackfillResult.scanned}
-                        </p>
-                        <p>
-                          {t('integrations.google.backfillNewEvents')}:{' '}
-                          {googleBackfillResult.newEvents ?? googleBackfillResult.imported}
-                        </p>
-                        <p>
-                          {t('integrations.google.backfillUpdatedEvents')}:{' '}
-                          {googleBackfillResult.updatedEvents ?? 0}
-                        </p>
-                        <p>
-                          {t('integrations.google.backfillUnchangedEvents')}:{' '}
-                          {googleBackfillResult.unchangedEvents ??
-                            googleBackfillResult.alreadyImported}
-                        </p>
-                        <p>
-                          {t('integrations.google.backfillFailed')}: {googleBackfillResult.failed}
-                        </p>
-                        {googleBackfillResult.truncated ? (
-                          <p className="text-amber-800 dark:text-amber-200">
-                            {t('integrations.google.backfillTruncated')}
-                          </p>
-                        ) : null}
+                        {renderGoogleBackfillResult(googleBackfillResult, t)}
                       </div>
                     ) : null}
                     {googleBackfillError ? (
@@ -1776,28 +1813,11 @@ export default function SalonIntegrations() {
                   {googleBackfillProgress?.percent ?? 0}%
                 </p>
               ) : null}
-              {googleBackfillResult && googleBackfillProgress?.status === 'done' ? (
-                <div className="space-y-1">
-                  <p className="font-medium">{t('integrations.google.backfillDone')}</p>
-                  <p>
-                    {t('integrations.google.backfillScanned')}: {googleBackfillResult.scanned}
-                  </p>
-                  <p>
-                    {t('integrations.google.backfillNewEvents')}:{' '}
-                    {googleBackfillResult.newEvents ?? googleBackfillResult.imported}
-                  </p>
-                  <p>
-                    {t('integrations.google.backfillUpdatedEvents')}:{' '}
-                    {googleBackfillResult.updatedEvents ?? 0}
-                  </p>
-                  <p>
-                    {t('integrations.google.backfillUnchangedEvents')}:{' '}
-                    {googleBackfillResult.unchangedEvents ??
-                      googleBackfillResult.alreadyImported}
-                  </p>
-                  <p>
-                    {t('integrations.google.backfillFailed')}: {googleBackfillResult.failed}
-                  </p>
+              {googleBackfillResult &&
+              (googleBackfillProgress?.status === 'done' ||
+                googleBackfillProgress?.status === 'error') ? (
+                <div className="space-y-1 text-sm text-gray-800 dark:text-gray-200">
+                  {renderGoogleBackfillResult(googleBackfillResult, t)}
                 </div>
               ) : null}
             </div>

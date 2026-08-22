@@ -96,6 +96,18 @@ function previewEvent(overrides: Partial<GoogleEventPreviewItem> = {}): GoogleEv
   };
 }
 
+function visibleImportedAppointment(id = 'appt-hist') {
+  return {
+    id,
+    date: '2026-08-06',
+    start_time: '10:00:00',
+    end_time: '12:00:00',
+    staff_id: STAFF,
+    client_id: CLIENT,
+    status: 'scheduled',
+  };
+}
+
 function backfillDb(opts: {
   connected?: boolean;
   selectedCalendarId?: string | null;
@@ -105,7 +117,9 @@ function backfillDb(opts: {
     external_uid: string;
     recurrence_id?: string;
     external_calendar_id?: string;
+    appointment_id?: string;
   }>;
+  appointments?: Array<Record<string, unknown>>;
   clients?: Array<{ id: string; name: string; phone: string; notes?: string }>;
 } = {}) {
   const updates: Record<string, unknown>[] = [];
@@ -113,8 +127,11 @@ function backfillDb(opts: {
     { id: STAFF, name: 'Tatev Mikaelyan', active: true },
   ];
   const importedLinkRows = opts.importedLinkRows ?? [];
+  const appointments = opts.appointments ?? [];
+  const issues: any[] = [];
   const clients = opts.clients ?? [];
   let clientSeq = 1;
+  let issueSeq = 1;
   const cfg = opts.providerConfig ?? {
     [GOOGLE_AUTO_IMPORT_STAFF_CONFIG_KEY]: STAFF,
     [GOOGLE_AUTO_IMPORT_SINCE_CONFIG_KEY]: WATERMARK,
@@ -124,7 +141,87 @@ function backfillDb(opts: {
   return {
     updates,
     clients,
+    issues,
+    appointments,
     from(table: string) {
+      if (table === 'calendar_import_issues') {
+        return {
+          select() {
+            const filters: Record<string, string> = {};
+            const chain: any = {
+              eq(col: string, val: string) {
+                filters[col] = val;
+                return chain;
+              },
+              maybeSingle: async () => ({
+                data:
+                  issues.find((r) =>
+                    Object.entries(filters).every(([k, v]) => String(r[k] ?? '') === String(v)),
+                  ) ?? null,
+                error: null,
+              }),
+              then: async (resolve: any) =>
+                resolve({
+                  data: issues.filter((r) =>
+                    Object.entries(filters).every(([k, v]) => String(r[k] ?? '') === String(v)),
+                  ),
+                  error: null,
+                }),
+            };
+            return chain;
+          },
+          insert(row: any) {
+            issues.push({
+              id: `issue-${issueSeq++}`,
+              ...row,
+              recurrence_id: row.recurrence_id || '',
+              status: row.status || 'open',
+            });
+            return { then: async (resolve: any) => resolve({ error: null }) };
+          },
+          update(payload: any) {
+            const filters: Record<string, string> = {};
+            const chain: any = {
+              eq(col: string, val: string) {
+                filters[col] = val;
+                return chain;
+              },
+              then: async (resolve: any) => {
+                for (const row of issues) {
+                  const match = Object.entries(filters).every(
+                    ([k, v]) => String(row[k] ?? '') === String(v),
+                  );
+                  if (match) Object.assign(row, payload);
+                }
+                return resolve({ error: null });
+              },
+            };
+            return chain;
+          },
+        };
+      }
+      if (table === 'appointments') {
+        return {
+          select() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then: async (resolve: any) => resolve({ data: appointments, error: null }),
+            };
+            return chain;
+          },
+          update() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then: async (resolve: any) => resolve({ error: null }),
+            };
+            return chain;
+          },
+        };
+      }
       if (table === 'clients') {
         return {
           select() {
@@ -472,8 +569,13 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
     const result = await runBackfill({
       db: backfillDb({
         importedLinkRows: [
-          { external_uid: 'evt-hist', external_calendar_id: 'primary' },
+          {
+            external_uid: 'evt-hist',
+            external_calendar_id: 'primary',
+            appointment_id: 'appt-hist',
+          },
         ],
+        appointments: [visibleImportedAppointment()],
       }),
       executeImport: async () => {
         calls += 1;
@@ -496,8 +598,10 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
       external_uid: string;
       recurrence_id?: string;
       external_calendar_id?: string;
+      appointment_id?: string;
     }> = [];
-    const db = backfillDb({ importedLinkRows: links });
+    const appointments: Array<Record<string, unknown>> = [];
+    const db = backfillDb({ importedLinkRows: links, appointments });
     const imported: string[] = [];
     const executeImport: Parameters<typeof importGoogleCalendarLast30Days>[0]['executeImport'] =
       async ({ body }) => {
@@ -514,7 +618,9 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
         links.push({
           external_uid: body.eventId,
           external_calendar_id: 'primary',
+          appointment_id: `a-${body.eventId}`,
         });
+        appointments.push(visibleImportedAppointment(`a-${body.eventId}`));
         return {
           appointmentId: `a-${body.eventId}`,
           clientId: 'c1',
@@ -589,6 +695,7 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
     assert.equal(calls, 0);
     assert.equal(result.imported, 0);
     assert.equal(result.reasons.noPhone, 1);
+    assert.equal(result.terminals.newReviewOverlay, 1);
     assert.equal(result.skipped, 1);
   });
 
@@ -679,6 +786,7 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
       },
     });
     assert.equal(result.reasons.conflict, 1);
+    assert.equal(result.terminals.conflictReview, 1);
     assert.equal(result.skipped, 1);
     assert.equal(result.imported, 0);
   });
@@ -782,8 +890,9 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
     });
     assert.deepEqual(imported, ['good']);
     assert.equal(result.imported, 1);
-    assert.equal(result.failed, 1);
-    assert.equal(result.reasons.other, 1);
+    assert.equal(result.terminals.newReviewOverlay, 1);
+    assert.equal(result.failed, 0);
+    assert.equal(result.represented, 2);
   });
 
   it('21. Google Calendar remains read-only', () => {

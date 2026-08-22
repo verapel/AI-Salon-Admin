@@ -61,10 +61,16 @@ function previewEvent(overrides: Partial<GoogleEventPreviewItem> = {}): GoogleEv
 }
 
 function coverageDb(opts: {
-  imported?: Array<{ external_uid: string; external_calendar_id?: string }>;
+  imported?: Array<{
+    external_uid: string;
+    external_calendar_id?: string;
+    appointment_id?: string;
+  }>;
+  appointments?: Array<Record<string, unknown>>;
   clients?: Array<{ id: string; name: string; phone: string; notes?: string; deleted_at?: string | null }>;
 } = {}) {
   const importedLinkRows = opts.imported ?? [];
+  const appointments = opts.appointments ?? [];
   const clients = opts.clients ?? [];
   const issues: any[] = [];
   let issueSeq = 1;
@@ -73,6 +79,7 @@ function coverageDb(opts: {
     clients,
     issues,
     importedLinkRows,
+    appointments,
     from(table: string) {
       if (table === 'clients') {
         return {
@@ -158,6 +165,28 @@ function coverageDb(opts: {
                 }
                 return resolve({ error: null });
               },
+            };
+            return chain;
+          },
+        };
+      }
+      if (table === 'appointments') {
+        return {
+          select() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then: async (resolve: any) => resolve({ data: appointments, error: null }),
+            };
+            return chain;
+          },
+          update() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then: async (resolve: any) => resolve({ error: null }),
             };
             return chain;
           },
@@ -381,7 +410,24 @@ describe('GOOGLE-CAL-FAST-7D client + past/future coverage', () => {
 
   it('N. existing imported appointment does not duplicate client', async () => {
     const db = coverageDb({
-      imported: [{ external_uid: 'evt-1', external_calendar_id: 'primary' }],
+      imported: [
+        {
+          external_uid: 'evt-1',
+          external_calendar_id: 'primary',
+          appointment_id: 'appt-1',
+        },
+      ],
+      appointments: [
+        {
+          id: 'appt-1',
+          date: '2026-08-06',
+          start_time: '10:00:00',
+          end_time: '12:00:00',
+          staff_id: STAFF,
+          client_id: 'already',
+          status: 'scheduled',
+        },
+      ],
       clients: [{ id: 'already', name: 'Agunik Yeganian', phone: '+380632022810' }],
     });
     const { result } = await runSync({ db, events: [previewEvent()] });

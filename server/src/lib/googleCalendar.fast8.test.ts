@@ -72,13 +72,20 @@ function previewEvent(overrides: Partial<GoogleEventPreviewItem> = {}): GoogleEv
 function autoDb(opts: {
   importEnabled?: boolean;
   watermark?: string;
-  imported?: Array<{ external_uid: string; external_calendar_id?: string; recurrence_id?: string }>;
+  imported?: Array<{
+    external_uid: string;
+    external_calendar_id?: string;
+    recurrence_id?: string;
+    appointment_id?: string;
+  }>;
+  appointments?: Array<Record<string, unknown>>;
   clients?: Array<{ id: string; name: string; phone: string; notes?: string; deleted_at?: string | null }>;
   issues?: any[];
 } = {}) {
   const importEnabled = { value: opts.importEnabled !== false };
   const watermark = { value: opts.watermark ?? WATERMARK };
   const importedLinkRows = opts.imported ?? [];
+  const appointments = opts.appointments ?? [];
   const clients = opts.clients ?? [];
   const issues = opts.issues ?? [];
   let issueSeq = issues.length + 1;
@@ -89,6 +96,7 @@ function autoDb(opts: {
     clients,
     issues,
     importedLinkRows,
+    appointments,
     importEnabled,
     watermark,
     saved,
@@ -177,6 +185,28 @@ function autoDb(opts: {
                 }
                 return resolve({ error: null });
               },
+            };
+            return chain;
+          },
+        };
+      }
+      if (table === 'appointments') {
+        return {
+          select() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then: async (resolve: any) => resolve({ data: appointments, error: null }),
+            };
+            return chain;
+          },
+          update() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then: async (resolve: any) => resolve({ error: null }),
             };
             return chain;
           },
@@ -351,7 +381,24 @@ describe('GOOGLE-CAL-FAST-8 automatic sync after manual import', () => {
       updated: '2026-08-16T18:30:00.000Z',
     });
     const db = autoDb({
-      imported: [{ external_uid: 'manual-old', external_calendar_id: 'primary' }],
+      imported: [
+        {
+          external_uid: 'manual-old',
+          external_calendar_id: 'primary',
+          appointment_id: 'appt-manual-old',
+        },
+      ],
+      appointments: [
+        {
+          id: 'appt-manual-old',
+          date: '2026-08-20',
+          start_time: '06:00:00',
+          end_time: '08:00:00',
+          staff_id: STAFF,
+          client_id: EXISTING_CLIENT,
+          status: 'scheduled',
+        },
+      ],
       clients: [{ id: EXISTING_CLIENT, name: 'Agunik Yeganian', phone: '+380632022810' }],
     });
     const { pulled, overlay, imports } = await pull({ events: [ev], db });
@@ -437,7 +484,24 @@ describe('GOOGLE-CAL-FAST-8 automatic sync after manual import', () => {
   it('G. existing appointment_external_link does not create a second appointment', async () => {
     const ev = previewEvent({ id: 'linked-new' });
     const db = autoDb({
-      imported: [{ external_uid: 'linked-new', external_calendar_id: 'primary' }],
+      imported: [
+        {
+          external_uid: 'linked-new',
+          external_calendar_id: 'primary',
+          appointment_id: 'appt-linked-new',
+        },
+      ],
+      appointments: [
+        {
+          id: 'appt-linked-new',
+          date: '2026-08-20',
+          start_time: '06:00:00',
+          end_time: '08:00:00',
+          staff_id: STAFF,
+          client_id: EXISTING_CLIENT,
+          status: 'scheduled',
+        },
+      ],
     });
     const { pulled, imports, overlay } = await pull({ events: [ev], db });
     assert.equal(imports.length, 0);

@@ -731,6 +731,20 @@ export interface GoogleBackfillLast30DaysResult {
   reviewEventsCreated?: number;
   reviewEventsUpdated?: number;
   conflicts?: number;
+  inconsistent?: boolean;
+  terminals?: {
+    newAppointment: number;
+    newReviewOverlay: number;
+    updatedAppointment: number;
+    updatedReviewOverlay: number;
+    unchangedAppointment: number;
+    unchangedReviewOverlay: number;
+    excludedCancelled: number;
+    excludedAllDay: number;
+    excludedInvalidTime: number;
+    conflictReview: number;
+    failed: number;
+  };
   reasons: {
     noPhone: number;
     unsafeClientName: number;

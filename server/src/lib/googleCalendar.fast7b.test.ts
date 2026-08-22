@@ -80,11 +80,14 @@ function coverageDb(opts: {
     external_uid: string;
     recurrence_id?: string;
     external_calendar_id?: string;
+    appointment_id?: string;
   }>;
+  appointments?: Array<Record<string, unknown>>;
   issues?: IssueRow[];
   clients?: Array<{ id: string; name: string; phone: string; notes?: string; deleted_at?: string | null }>;
 } = {}) {
   const importedLinkRows = opts.importedLinkRows ?? [];
+  const appointments = opts.appointments ?? [];
   const issues = opts.issues ?? [];
   const clients = opts.clients ?? [];
   let issueSeq = 1;
@@ -93,6 +96,7 @@ function coverageDb(opts: {
   return {
     issues,
     importedLinkRows,
+    appointments,
     clients,
     from(table: string) {
       if (table === 'clients') {
@@ -190,6 +194,28 @@ function coverageDb(opts: {
                 }
                 return resolve({ error: null });
               },
+            };
+            return chain;
+          },
+        };
+      }
+      if (table === 'appointments') {
+        return {
+          select() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then: async (resolve: any) => resolve({ data: appointments, error: null }),
+            };
+            return chain;
+          },
+          update() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then: async (resolve: any) => resolve({ error: null }),
             };
             return chain;
           },
@@ -373,7 +399,24 @@ describe('GOOGLE-CAL-FAST-7B all-event calendar coverage', () => {
 
   it('7. imported event is appointment-only with no duplicate overlay', async () => {
     const db = coverageDb({
-      importedLinkRows: [{ external_uid: 'evt-hist', external_calendar_id: 'primary' }],
+      importedLinkRows: [
+        {
+          external_uid: 'evt-hist',
+          external_calendar_id: 'primary',
+          appointment_id: 'appt-hist',
+        },
+      ],
+      appointments: [
+        {
+          id: 'appt-hist',
+          date: '2026-08-06',
+          start_time: '10:00:00',
+          end_time: '12:00:00',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          status: 'scheduled',
+        },
+      ],
     });
     const { result, overlay } = await runCoverage({
       db,
@@ -540,6 +583,7 @@ describe('GOOGLE-CAL-FAST-7B all-event calendar coverage', () => {
     assert.equal(googleSkipReasonNeedsCalendarOverlay('all_day'), false);
     assert.equal(googleSkipReasonNeedsCalendarOverlay('already_imported'), false);
     assert.equal(googleSkipReasonNeedsCalendarOverlay('before_auto_import'), false);
+    assert.equal(googleSkipReasonNeedsCalendarOverlay('mystery_reason'), true);
   });
 
   it('overlay item maps Google title and Tatev without fake client/service ids', () => {
@@ -593,6 +637,16 @@ describe('GOOGLE-CAL-FAST-7B all-event calendar coverage', () => {
     db.importedLinkRows.push({
       external_uid: 'dup',
       external_calendar_id: 'primary',
+      appointment_id: 'appt-dup',
+    });
+    db.appointments.push({
+      id: 'appt-dup',
+      date: '2026-08-06',
+      start_time: '10:00:00',
+      end_time: '12:00:00',
+      staff_id: STAFF,
+      client_id: CLIENT,
+      status: 'scheduled',
     });
     overlay = await listGoogleReviewCalendarItems({
       db,

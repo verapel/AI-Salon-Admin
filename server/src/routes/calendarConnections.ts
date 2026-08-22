@@ -989,7 +989,7 @@ router.post('/google/events/import-last-30-days', requireSalonWriteAccess, async
   })
     .then((result) => {
       updateGoogleBackfillProgress(salonId, {
-        status: 'done',
+        status: result.inconsistent ? 'error' : 'done',
         processed: result.scanned,
         total: result.scanned,
         result,

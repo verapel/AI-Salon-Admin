@@ -7,9 +7,9 @@
 import { parseExternalCalendarEvent, resolveParserTimezone } from './calendarEventParser.js';
 import type { CalendarEventMatchingPreview } from './calendarEventMatcher.js';
 import {
-  buildGoogleOccurrenceKey,
   buildGoogleOccurrenceRecurrenceId,
-  loadGoogleImportedOccurrenceKeys,
+  googleOccurrenceLookupKeys,
+  googleStoredOccurrenceKeys,
 } from './googleCalendarImport.js';
 import type { GoogleEventPreviewItem } from './googleCalendarOAuth.js';
 
@@ -17,40 +17,23 @@ function isImportedGoogleOccurrence(
   ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>,
   importedKeys: Set<string>,
 ): boolean {
-  const recurrenceId = buildGoogleOccurrenceRecurrenceId(ev);
-  const full = buildGoogleOccurrenceKey({
-    calendarId: ev.calendarId || '',
-    eventId: ev.id,
-    recurrenceId,
-  });
-  const keys = recurrenceId ? [full, ev.id, `${ev.id}:${recurrenceId}`] : [full, ev.id];
-  return keys.some((k) => importedKeys.has(k));
+  return googleOccurrenceLookupKeys(ev).some((k) => importedKeys.has(k));
 }
 
 export const GOOGLE_REVIEW_ISSUE_PROVIDER = 'google' as const;
 
-const OVERLAY_SKIP_REASONS = new Set([
-  'no_exact_phone',
-  'unsafe_client_name',
-  'client_ambiguous',
-  'service_not_matched',
-  'service_inactive_or_invalid',
-  'appointment_conflict',
-  'overnight',
-  'invalid_time',
-  'import_bound',
-  'client_review_required',
-  'service_review_required',
-  'service_invalid',
-  'google_event_not_importable',
-]);
-
-const HIDDEN_SKIP_REASONS = new Set([
+/** Only non-displayable / already-handled identities may skip overlay. */
+const EXCLUDED_SKIP_REASONS = new Set([
   'cancelled',
   'google_event_cancelled',
   'all_day',
   'already_imported',
   'google_event_already_imported',
+  'invalid_time',
+  'overnight',
+]);
+
+const WATERMARK_SKIP_REASONS = new Set([
   'before_auto_import',
   'created_unknown',
   'import_disabled',
@@ -112,10 +95,11 @@ export function isGoogleEventAllDay(ev: Pick<GoogleEventPreviewItem, 'start' | '
  * All-day and cancelled/deleted events are not shown as active blocks.
  */
 export function googleReviewOccurrenceLookupKeys(
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>,
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'> & {
+    calendarId?: string | null;
+  },
 ): string[] {
-  const rec = buildGoogleOccurrenceRecurrenceId(ev);
-  return rec ? [ev.id, `${ev.id}:${rec}`] : [ev.id];
+  return googleOccurrenceLookupKeys(ev);
 }
 
 export type GoogleReviewOverlayRecord = {
@@ -162,7 +146,7 @@ export async function loadGoogleReviewCoverageIndex(params: {
         typeof row?.recurrence_id === 'string' && row.recurrence_id.trim()
           ? row.recurrence_id.trim()
           : '';
-      const keys = rec ? [uid, `${uid}:${rec}`] : [uid];
+      const keys = googleStoredOccurrenceKeys({ eventId: uid, recurrenceId: rec });
       for (const key of keys) overlayKeys.add(key);
       const parsed = row?.parsed_event;
       const raw = row?.raw_event;
@@ -264,9 +248,22 @@ export function isGoogleEventEligibleForSalonCalendarDisplay(
 }
 
 export function googleSkipReasonNeedsCalendarOverlay(reason: string | null | undefined): boolean {
-  if (!reason) return false;
-  if (HIDDEN_SKIP_REASONS.has(reason)) return false;
-  return OVERLAY_SKIP_REASONS.has(reason) || reason === 'other';
+  if (!reason) return true;
+  if (EXCLUDED_SKIP_REASONS.has(reason)) return false;
+  if (WATERMARK_SKIP_REASONS.has(reason)) return false;
+  return true;
+}
+
+export function googleReviewOverlayRecordIsVisible(
+  record: Pick<GoogleReviewOverlayRecord, 'date' | 'startTime' | 'endTime' | 'staffId'> | null | undefined,
+): boolean {
+  if (!record) return false;
+  return Boolean(
+    record.date?.trim() &&
+      record.startTime?.trim() &&
+      record.endTime?.trim() &&
+      record.staffId?.trim(),
+  );
 }
 
 export function formatClockInTimeZone(iso: string, timeZone: string): {
@@ -443,9 +440,7 @@ export function representedInSalonCalendar(params: {
 }): boolean {
   if (!isGoogleEventEligibleForSalonCalendarDisplay(params.ev)) return false;
   if (isImportedGoogleOccurrence(params.ev, params.importedKeys)) return true;
-  const rec = buildGoogleOccurrenceRecurrenceId(params.ev);
-  const keys = rec ? [params.ev.id, `${params.ev.id}:${rec}`] : [params.ev.id];
-  return keys.some((k) => params.overlayEventIds.has(k));
+  return googleOccurrenceLookupKeys(params.ev).some((k) => params.overlayEventIds.has(k));
 }
 
 export async function upsertGoogleCalendarReviewIssue(params: {
@@ -462,9 +457,6 @@ export async function upsertGoogleCalendarReviewIssue(params: {
   clientId?: string | null;
 }): Promise<boolean> {
   if (!isGoogleEventEligibleForSalonCalendarDisplay(params.ev)) return false;
-  if (!googleSkipReasonNeedsCalendarOverlay(params.reasonCode) && params.reasonCode !== 'other') {
-    return false;
-  }
   const snapshot = buildGoogleReviewSnapshot({
     ev: params.ev,
     salonTimeZone: params.salonTimeZone,
@@ -566,6 +558,72 @@ export async function resolveGoogleCalendarReviewIssue(params: {
   }
 }
 
+async function loadVisibleImportedOccurrenceKeys(params: {
+  db: any;
+  salonId: string;
+  calendarConnectionId: string;
+}): Promise<Set<string>> {
+  const keys = new Set<string>();
+  try {
+    const { data, error } = await params.db
+      .from('appointment_external_links')
+      .select('appointment_id, external_uid, recurrence_id, external_calendar_id')
+      .eq('salon_id', params.salonId)
+      .eq('calendar_connection_id', params.calendarConnectionId)
+      .eq('provider', 'google');
+    if (error || !Array.isArray(data) || data.length === 0) return keys;
+    const appointmentIds = [
+      ...new Set(
+        data
+          .map((row: { appointment_id?: string }) =>
+            typeof row.appointment_id === 'string' ? row.appointment_id : '',
+          )
+          .filter(Boolean),
+      ),
+    ];
+    if (appointmentIds.length === 0) return keys;
+    const loaded = await params.db
+      .from('appointments')
+      .select('id, date, start_time, end_time, status')
+      .eq('salon_id', params.salonId);
+    const rows = Array.isArray(loaded?.data) ? loaded.data : [];
+    const visibleIds = new Set(
+      rows
+        .filter((row: { id?: string; date?: string; start_time?: string; end_time?: string; status?: string }) => {
+          const status = String(row.status || 'scheduled').toLowerCase();
+          return (
+            Boolean(row.id && row.date && row.start_time && row.end_time) &&
+            status !== 'cancelled' &&
+            status !== 'deleted'
+          );
+        })
+        .map((row: { id: string }) => row.id),
+    );
+    for (const row of data) {
+      const appointmentId = typeof row.appointment_id === 'string' ? row.appointment_id : '';
+      if (!appointmentId || !visibleIds.has(appointmentId)) continue;
+      const uid = typeof row.external_uid === 'string' ? row.external_uid : '';
+      if (!uid) continue;
+      const rec =
+        typeof row.recurrence_id === 'string' && row.recurrence_id.trim()
+          ? row.recurrence_id.trim()
+          : '';
+      const cal =
+        typeof row.external_calendar_id === 'string' ? row.external_calendar_id.trim() : '';
+      for (const key of googleStoredOccurrenceKeys({
+        calendarId: cal,
+        eventId: uid,
+        recurrenceId: rec,
+      })) {
+        keys.add(key);
+      }
+    }
+  } catch {
+    return keys;
+  }
+  return keys;
+}
+
 export async function listGoogleReviewCalendarItems(params: {
   db: any;
   salonId: string;
@@ -593,15 +651,11 @@ export async function listGoogleReviewCalendarItems(params: {
 
   const items: GoogleReviewCalendarItem[] = [];
   for (const [connId, rows] of byConnection) {
-    let importedKeys = new Set<string>();
-    try {
-      importedKeys = await loadGoogleImportedOccurrenceKeys(params.db, {
-        salonId: params.salonId,
-        calendarConnectionId: connId,
-      });
-    } catch {
-      importedKeys = new Set();
-    }
+    const visibleImportedKeys = await loadVisibleImportedOccurrenceKeys({
+      db: params.db,
+      salonId: params.salonId,
+      calendarConnectionId: connId,
+    });
     for (const row of rows) {
       const mapped = mapGoogleReviewIssueToCalendarItem(row);
       if (!mapped) continue;
@@ -613,14 +667,7 @@ export async function listGoogleReviewCalendarItems(params: {
           ? { dateTime: mapped.recurrenceId, date: null, timeZone: null, allDay: false }
           : null,
       };
-      if (
-        isImportedGoogleOccurrence(
-          synthetic as GoogleEventPreviewItem,
-          importedKeys,
-        ) ||
-        importedKeys.has(mapped.eventId) ||
-        (mapped.recurrenceId && importedKeys.has(`${mapped.eventId}:${mapped.recurrenceId}`))
-      ) {
+      if (isImportedGoogleOccurrence(synthetic as GoogleEventPreviewItem, visibleImportedKeys)) {
         continue;
       }
       items.push(mapped);
@@ -641,8 +688,10 @@ export async function persistGoogleReviewOrResolve(params: {
   matching?: CalendarEventMatchingPreview;
   importedKeys: Set<string>;
   clientId?: string | null;
-}): Promise<'overlay' | 'resolved' | 'hidden'> {
-  if (isImportedGoogleOccurrence(params.ev, params.importedKeys)) {
+  /** Stale/conflict paths still need an open overlay even if a link key exists. */
+  ignoreImportedLink?: boolean;
+}): Promise<'overlay' | 'resolved' | 'excluded' | 'failed'> {
+  if (!params.ignoreImportedLink && isImportedGoogleOccurrence(params.ev, params.importedKeys)) {
     await resolveGoogleCalendarReviewIssue({
       db: params.db,
       salonId: params.salonId,
@@ -651,8 +700,25 @@ export async function persistGoogleReviewOrResolve(params: {
     });
     return 'resolved';
   }
-  if (!isGoogleEventEligibleForSalonCalendarDisplay(params.ev)) return 'hidden';
-  if (!googleSkipReasonNeedsCalendarOverlay(params.reasonCode)) return 'hidden';
+  if (!isGoogleEventEligibleForSalonCalendarDisplay(params.ev)) return 'excluded';
+  if (!googleSkipReasonNeedsCalendarOverlay(params.reasonCode)) return 'excluded';
+  const snapshot = buildGoogleReviewSnapshot({
+    ev: params.ev,
+    salonTimeZone: params.salonTimeZone,
+    staffId: params.staffId,
+    staffName: params.staffName,
+    matching: params.matching,
+    clientId: params.clientId,
+  });
+  if (!snapshot) return 'excluded';
   const ok = await upsertGoogleCalendarReviewIssue(params);
-  return ok ? 'overlay' : 'hidden';
+  if (!ok) {
+    console.error('[calendar/google-overlay] upsert failed for eligible timed event', {
+      salonId: params.salonId,
+      eventId: params.ev.id,
+      reasonCode: params.reasonCode,
+    });
+    return 'failed';
+  }
+  return 'overlay';
 }

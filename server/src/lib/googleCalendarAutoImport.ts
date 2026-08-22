@@ -21,6 +21,7 @@ import {
 import {
   buildGoogleOccurrenceKey,
   buildGoogleOccurrenceRecurrenceId,
+  googleOccurrenceLookupKeys,
   executeManualGoogleCalendarImport,
   suggestNewClientNameFromTitle,
   type ManualGoogleImportResult,
@@ -49,6 +50,7 @@ import {
 } from './googleCalendarReviewOverlay.js';
 import {
   findImportedOccurrenceRecord,
+  googleImportedAppointmentIsVisible,
   googleOccurrenceNeedsAutoReconcile,
   loadGoogleImportedOccurrenceIndex,
   reconcileGoogleReviewOverlay,
@@ -298,15 +300,7 @@ export function googleEventOccurrenceKeys(ev: Pick<
   GoogleEventPreviewItem,
   'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'
 >): string[] {
-  const recurrenceId = buildGoogleOccurrenceRecurrenceId(ev);
-  const full = buildGoogleOccurrenceKey({
-    calendarId: ev.calendarId || '',
-    eventId: ev.id,
-    recurrenceId,
-  });
-  return recurrenceId
-    ? [full, ev.id, `${ev.id}:${recurrenceId}`]
-    : [full, ev.id];
+  return googleOccurrenceLookupKeys(ev);
 }
 
 export function isImportedGoogleOccurrence(
@@ -1069,8 +1063,39 @@ export async function pullGoogleCalendarConnection(params: {
 
         if (isImportedGoogleOccurrence(ev, importedKeys)) {
           const record = findImportedOccurrenceRecord(ev, importedIndex);
-          if (!record?.appointmentId || isGoogleEventCancelledOrDeleted(ev)) {
+          if (isGoogleEventCancelledOrDeleted(ev)) {
             bumpSkip('already_imported');
+            continue;
+          }
+          if (!record || !googleImportedAppointmentIsVisible(record)) {
+            bumpSkip('imported_appointment_missing');
+            const coverageClientId = await ensureAutoCoverageClient(
+              ev,
+              parsed.clientNameCandidate,
+              parsed.phone.normalized || '',
+            );
+            const persistKind = await persistGoogleReviewOrResolve({
+              db: params.db,
+              salonId: params.salonId,
+              calendarConnectionId: params.connectionId,
+              ev,
+              reasonCode: 'imported_appointment_missing',
+              staffId,
+              staffName,
+              salonTimeZone,
+              matching,
+              importedKeys,
+              clientId: coverageClientId,
+              ignoreImportedLink: true,
+            });
+            if (persistKind === 'failed') {
+              summary.errors += 1;
+              console.error('[calendar/google-auto] overlay persist failed', {
+                salonId: params.salonId,
+                eventId: ev.id,
+                reason: 'imported_appointment_missing',
+              });
+            }
             continue;
           }
           const moved = await reconcileGoogleSourcedAppointment({
@@ -1087,8 +1112,54 @@ export async function pullGoogleCalendarConnection(params: {
           if (moved.kind === 'conflict') {
             summary.conflicts += 1;
             bumpSkip('appointment_conflict');
+            const persistKind = await persistGoogleReviewOrResolve({
+              db: params.db,
+              salonId: params.salonId,
+              calendarConnectionId: params.connectionId,
+              ev,
+              reasonCode: 'appointment_conflict',
+              staffId,
+              staffName,
+              salonTimeZone,
+              matching,
+              importedKeys,
+              clientId: record?.clientId ?? null,
+              ignoreImportedLink: true,
+            });
+            if (persistKind === 'failed') {
+              summary.errors += 1;
+              console.error('[calendar/google-auto] overlay persist failed', {
+                salonId: params.salonId,
+                eventId: ev.id,
+                reason: 'appointment_conflict',
+              });
+            }
           } else if (moved.kind === 'updated') {
             summary.updated += 1;
+          } else if (moved.kind === 'missing') {
+            bumpSkip('imported_appointment_missing');
+            const persistKind = await persistGoogleReviewOrResolve({
+              db: params.db,
+              salonId: params.salonId,
+              calendarConnectionId: params.connectionId,
+              ev,
+              reasonCode: 'imported_appointment_missing',
+              staffId,
+              staffName,
+              salonTimeZone,
+              matching,
+              importedKeys,
+              clientId: record?.clientId ?? null,
+              ignoreImportedLink: true,
+            });
+            if (persistKind === 'failed') {
+              summary.errors += 1;
+              console.error('[calendar/google-auto] overlay persist failed', {
+                salonId: params.salonId,
+                eventId: ev.id,
+                reason: 'imported_appointment_missing',
+              });
+            }
           } else {
             bumpSkip('already_imported');
           }
@@ -1126,15 +1197,14 @@ export async function pullGoogleCalendarConnection(params: {
 
         if (decision.action === 'skip') {
           bumpSkip(decision.reason);
-          const needsCoverage = googleSkipReasonNeedsCalendarOverlay(decision.reason);
-          const coverageClientId = needsCoverage
+          const coverageClientId = isGoogleEventEligibleForSalonCalendarDisplay(ev)
             ? await ensureAutoCoverageClient(
                 ev,
                 parsed.clientNameCandidate,
                 parsed.phone.normalized || '',
               )
             : null;
-          await persistGoogleReviewOrResolve({
+          const persistKind = await persistGoogleReviewOrResolve({
             db: params.db,
             salonId: params.salonId,
             calendarConnectionId: params.connectionId,
@@ -1147,6 +1217,14 @@ export async function pullGoogleCalendarConnection(params: {
             importedKeys,
             clientId: coverageClientId,
           });
+          if (persistKind === 'failed') {
+            summary.errors += 1;
+            console.error('[calendar/google-auto] overlay persist failed', {
+              salonId: params.salonId,
+              eventId: ev.id,
+              reason: decision.reason,
+            });
+          }
           continue;
         }
 
@@ -1157,7 +1235,7 @@ export async function pullGoogleCalendarConnection(params: {
             parsed.clientNameCandidate,
             parsed.phone.normalized || '',
           );
-          await persistGoogleReviewOrResolve({
+          const persistKind = await persistGoogleReviewOrResolve({
             db: params.db,
             salonId: params.salonId,
             calendarConnectionId: params.connectionId,
@@ -1170,6 +1248,14 @@ export async function pullGoogleCalendarConnection(params: {
             importedKeys,
             clientId: coverageClientId,
           });
+          if (persistKind === 'failed') {
+            summary.errors += 1;
+            console.error('[calendar/google-auto] overlay persist failed', {
+              salonId: params.salonId,
+              eventId: ev.id,
+              reason: 'import_bound',
+            });
+          }
           continue;
         }
 

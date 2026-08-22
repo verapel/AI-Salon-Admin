@@ -612,6 +612,7 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
       endTime: '12:00',
       staffId: STAFF,
       clientId: CLIENT,
+      status: 'scheduled',
     };
     assert.equal(googleImportedOccurrenceUnchanged(previewEvent(), record, 'UTC'), true);
     const overlay: GoogleReviewOverlayRecord = {

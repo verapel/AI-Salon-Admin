@@ -7,6 +7,8 @@ import { syncAppointmentReminder } from './appointmentReminders.js';
 import {
   buildGoogleOccurrenceKey,
   buildGoogleOccurrenceRecurrenceId,
+  googleOccurrenceLookupKeys,
+  googleStoredOccurrenceKeys,
   loadGoogleImportedOccurrenceKeys,
 } from './googleCalendarImport.js';
 import type { GoogleEventPreviewItem } from './googleCalendarOAuth.js';
@@ -17,6 +19,7 @@ import {
   googleEventCalendarTimes,
   isGoogleEventCancelledOrDeleted,
   isGoogleReviewOverlayRepresented,
+  googleReviewOverlayRecordIsVisible,
   type GoogleReviewCoverageIndex,
   type GoogleReviewOverlayRecord,
   upsertGoogleCalendarReviewIssue,
@@ -32,6 +35,7 @@ export type GoogleImportedOccurrenceRecord = {
   endTime: string | null;
   staffId: string | null;
   clientId: string | null;
+  status: string | null;
 };
 
 export type GoogleImportedOccurrenceIndex = {
@@ -51,13 +55,7 @@ const ACTIVE_STATUSES = new Set(['scheduled', 'confirmed']);
 function occurrenceKeys(
   ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>,
 ): string[] {
-  const recurrenceId = buildGoogleOccurrenceRecurrenceId(ev);
-  const full = buildGoogleOccurrenceKey({
-    calendarId: ev.calendarId || '',
-    eventId: ev.id,
-    recurrenceId,
-  });
-  return recurrenceId ? [full, ev.id, `${ev.id}:${recurrenceId}`] : [full, ev.id];
+  return googleOccurrenceLookupKeys(ev);
 }
 
 function isImportedGoogleOccurrence(
@@ -121,11 +119,13 @@ export function normalizeImportedOccurrenceIndex(
       endTime: clock5(typeof appt?.end_time === 'string' ? appt.end_time : '') || null,
       staffId: typeof appt?.staff_id === 'string' ? appt.staff_id : null,
       clientId: typeof appt?.client_id === 'string' ? appt.client_id : null,
+      status: typeof appt?.status === 'string' ? appt.status : null,
     };
-    const variants = [
-      rec ? `${cal}:${uid}:${rec}` : `${cal}:${uid}`,
-      rec ? `${uid}:${rec}` : uid,
-    ];
+    const variants = googleStoredOccurrenceKeys({
+      calendarId: cal,
+      eventId: uid,
+      recurrenceId: rec,
+    });
     for (const key of variants) {
       keys.add(key);
       byKey.set(key, record);
@@ -145,21 +145,41 @@ export function findImportedOccurrenceRecord(
   return null;
 }
 
+export function googleImportedAppointmentIsVisible(
+  record: GoogleImportedOccurrenceRecord | null | undefined,
+): boolean {
+  if (!record?.appointmentId) return false;
+  if (!record.date || !record.startTime || !record.endTime) return false;
+  const status = (record.status || 'scheduled').toLowerCase();
+  return status !== 'cancelled' && status !== 'deleted';
+}
+
 export function googleImportedOccurrenceUnchanged(
   ev: GoogleEventPreviewItem,
   record: GoogleImportedOccurrenceRecord | null | undefined,
   salonTimeZone: string,
 ): boolean {
-  if (!record?.appointmentId) return true;
-  if (record.etag && ev.etag && record.etag === ev.etag) return true;
-  if (record.lastModified && ev.updated && record.lastModified === ev.updated) return true;
+  if (!googleImportedAppointmentIsVisible(record)) return false;
   const times = googleEventCalendarTimes(ev, salonTimeZone);
   if (!times) return false;
-  if (!record.date || !record.startTime || !record.endTime) return true;
+  if (record!.etag && ev.etag && record!.etag === ev.etag) {
+    return (
+      record!.date === times.date &&
+      clock5(record!.startTime) === times.startTime &&
+      clock5(record!.endTime) === times.endTime
+    );
+  }
+  if (record!.lastModified && ev.updated && record!.lastModified === ev.updated) {
+    return (
+      record!.date === times.date &&
+      clock5(record!.startTime) === times.startTime &&
+      clock5(record!.endTime) === times.endTime
+    );
+  }
   return (
-    record.date === times.date &&
-    clock5(record.startTime) === times.startTime &&
-    clock5(record.endTime) === times.endTime
+    record!.date === times.date &&
+    clock5(record!.startTime) === times.startTime &&
+    clock5(record!.endTime) === times.endTime
   );
 }
 
@@ -168,8 +188,7 @@ export function googleOverlayOccurrenceUnchanged(
   record: GoogleReviewOverlayRecord | null | undefined,
   salonTimeZone: string,
 ): boolean {
-  if (!record) return true;
-  if (record.etag && ev.etag && record.etag === ev.etag) return true;
+  if (!record || !googleReviewOverlayRecordIsVisible(record)) return false;
   const snapshot = buildGoogleReviewSnapshot({
     ev,
     salonTimeZone,
@@ -177,6 +196,14 @@ export function googleOverlayOccurrenceUnchanged(
     staffName: record.staffName || 'Tatev',
   });
   if (!snapshot) return false;
+  if (record.etag && ev.etag && record.etag === ev.etag) {
+    return (
+      (record.title || '').trim() === snapshot.title.trim() &&
+      record.date === snapshot.date &&
+      clock5(record.startTime) === snapshot.startTime &&
+      clock5(record.endTime) === snapshot.endTime
+    );
+  }
   return (
     (record.title || '').trim() === snapshot.title.trim() &&
     record.date === snapshot.date &&
@@ -214,8 +241,7 @@ export function findOverlayRecord(
   ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>,
   index: GoogleReviewCoverageIndex,
 ): GoogleReviewOverlayRecord | null {
-  const rec = buildGoogleOccurrenceRecurrenceId(ev);
-  const keys = rec ? [ev.id, `${ev.id}:${rec}`] : [ev.id];
+  const keys = googleOccurrenceLookupKeys(ev);
   for (const key of keys) {
     const row = index.overlayByKey.get(key);
     if (row) return row;
@@ -312,7 +338,7 @@ export async function reconcileGoogleSourcedAppointment(params: {
     return { kind: 'cancelled_preserved' };
   }
   const times = googleEventCalendarTimes(params.ev, params.salonTimeZone);
-  if (!times) return { kind: 'unchanged' };
+  if (!times) return { kind: 'missing' };
   if (
     params.record.date === times.date &&
     clock5(params.record.startTime) === times.startTime &&
@@ -421,7 +447,7 @@ export async function reconcileGoogleReviewOverlay(params: {
   salonTimeZone: string;
   matching?: CalendarEventMatchingPreview;
   reasonCode?: string;
-}): Promise<'updated' | 'unchanged' | 'hidden'> {
+}): Promise<'updated' | 'unchanged' | 'hidden' | 'failed'> {
   if (isGoogleEventCancelledOrDeleted(params.ev)) {
     const hidden = await dismissGoogleReviewOverlay({
       db: params.db,
@@ -445,7 +471,7 @@ export async function reconcileGoogleReviewOverlay(params: {
     matching: params.matching,
     clientId: remembered,
   });
-  return ok ? 'updated' : 'unchanged';
+  return ok ? 'updated' : 'failed';
 }
 
 export function occurrenceKeyForEvent(ev: GoogleEventPreviewItem): string {
