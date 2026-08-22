@@ -13,6 +13,38 @@ export interface Client {
   birthday: string | null;
 }
 
+export type ClientImportDraft = {
+  name: string;
+  phone: string;
+  email: string;
+  birthday: string | null;
+  notes: string;
+};
+
+export type ClientImportReason =
+  | 'new'
+  | 'phone_match'
+  | 'email_match'
+  | 'missing_name'
+  | 'empty';
+
+export type ClientImportPreviewRow = {
+  draft: ClientImportDraft;
+  action: 'create' | 'reuse' | 'skip';
+  reason: ClientImportReason;
+  existingClientId: string | null;
+  existingClientName: string | null;
+  willUpdate: boolean;
+};
+
+export type ClientImportResult = {
+  created: number;
+  reused: number;
+  updated: number;
+  skipped: number;
+  errors: { name: string; message: string }[];
+};
+
 export interface Service {
   id: string;
   name: string;
