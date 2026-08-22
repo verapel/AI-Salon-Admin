@@ -1,6 +1,9 @@
 /**
- * GOOGLE-CAL-FAST-6: Automatic Google Calendar pull import (pilot → Tatev).
- * Reuses manual-import execution/RPC. No Google writes. No AI. No staff inference from titles.
+ * GOOGLE-CAL-FAST-6 / FAST-8: Automatic Google Calendar pull import (pilot → Tatev).
+ * Reuses manual-import execution/RPC and FAST-7D coverage/overlay helpers.
+ * FAST-8: coverage clients + overlays only for overlay-eligible NEW events.
+ * Pre-watermark / already-imported / cancelled skips must not create cards.
+ * No Google writes. No AI. No staff inference from titles.
  * Default staff is salon-scoped Tatev/Tatevik resolved into provider_config.auto_import_staff_id.
  */
 
@@ -37,6 +40,7 @@ import {
 import { decryptCalendarCredential } from './calendarCredentialsCrypto.js';
 import { getSalonTimezone } from './scheduleSlots.js';
 import {
+  googleSkipReasonNeedsCalendarOverlay,
   isGoogleEventEligibleForSalonCalendarDisplay,
   persistGoogleReviewOrResolve,
   resolveGoogleCalendarReviewIssue,
@@ -996,8 +1000,10 @@ export async function pullGoogleCalendarConnection(params: {
 
     for (const ev of events) {
       summary.scanned += 1;
+      let parsed: CalendarEventParsedPreview | undefined;
+      let matching: ReturnType<typeof matchParsedCalendarEvent> | undefined;
       try {
-        const parsed = parseExternalCalendarEvent(
+        parsed = parseExternalCalendarEvent(
           {
             summary: ev.summary,
             description: ev.description,
@@ -1007,7 +1013,7 @@ export async function pullGoogleCalendarConnection(params: {
           },
           salonTimeZone,
         );
-        const matching = matchParsedCalendarEvent({
+        matching = matchParsedCalendarEvent({
           parsed,
           originalTitle: ev.summary,
           catalog,
@@ -1027,11 +1033,14 @@ export async function pullGoogleCalendarConnection(params: {
 
         if (decision.action === 'skip') {
           bumpSkip(decision.reason);
-          const coverageClientId = await ensureAutoCoverageClient(
-            ev,
-            parsed.clientNameCandidate,
-            parsed.phone.normalized || '',
-          );
+          const needsCoverage = googleSkipReasonNeedsCalendarOverlay(decision.reason);
+          const coverageClientId = needsCoverage
+            ? await ensureAutoCoverageClient(
+                ev,
+                parsed.clientNameCandidate,
+                parsed.phone.normalized || '',
+              )
+            : null;
           await persistGoogleReviewOrResolve({
             db: params.db,
             salonId: params.salonId,
@@ -1177,6 +1186,15 @@ export async function pullGoogleCalendarConnection(params: {
           });
         }
         if (code !== 'google_event_already_imported') {
+          const needsCoverage = googleSkipReasonNeedsCalendarOverlay(code);
+          const coverageClientId =
+            needsCoverage && parsed
+              ? await ensureAutoCoverageClient(
+                  ev,
+                  parsed.clientNameCandidate,
+                  parsed.phone.normalized || '',
+                )
+              : null;
           await persistGoogleReviewOrResolve({
             db: params.db,
             salonId: params.salonId,
@@ -1186,7 +1204,9 @@ export async function pullGoogleCalendarConnection(params: {
             staffId,
             staffName,
             salonTimeZone,
+            matching,
             importedKeys,
+            clientId: coverageClientId,
           });
         }
       }
