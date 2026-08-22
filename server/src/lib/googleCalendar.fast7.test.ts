@@ -917,7 +917,8 @@ describe('GOOGLE-CAL-FAST-7 30-day backfill (executed)', () => {
       onProgress: (progress) => ticks.push({ ...progress }),
     });
     assert.equal(result.scanned, 3);
-    assert.deepEqual(ticks[0], { processed: 0, total: 3 });
+    assert.equal(ticks[0]?.processed, 0);
+    assert.equal(ticks[0]?.total, 3);
     assert.equal(ticks.at(-1)?.processed, 3);
     assert.equal(ticks.at(-1)?.total, 3);
     assert.ok(ticks.some((tick) => tick.processed === 1 && tick.total === 3));

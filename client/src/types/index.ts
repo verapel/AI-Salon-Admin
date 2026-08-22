@@ -705,6 +705,8 @@ export interface GoogleBackfillProgress {
   total: number | null;
   percent: number;
   status: 'idle' | 'listing' | 'processing' | 'done' | 'error';
+  pagesProcessed?: number;
+  result?: GoogleBackfillLast30DaysResult | null;
 }
 
 /** Compact FAST-7D coverage summary (no appointment/client rows). */

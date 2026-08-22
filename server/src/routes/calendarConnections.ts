@@ -49,8 +49,8 @@ import {
 } from '../lib/googleCalendarAutoImport.js';
 import { importGoogleCalendarLast30Days } from '../lib/googleCalendarBackfill.js';
 import {
-  beginGoogleBackfillProgress,
   getGoogleBackfillProgress,
+  tryBeginGoogleBackfillProgress,
   updateGoogleBackfillProgress,
 } from '../lib/googleCalendarBackfillProgress.js';
 import {
@@ -966,116 +966,73 @@ router.get('/google/events/import-last-30-days/progress', async (req, res) => {
  */
 router.post('/google/events/import-last-30-days', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
-  beginGoogleBackfillProgress(salonId);
-  try {
-    const result = await importGoogleCalendarLast30Days({
-      db: supabase as any,
-      salonId,
-      onProgress: ({ processed, total }) => {
-        updateGoogleBackfillProgress(salonId, {
-          status: 'processing',
-          processed,
-          total,
-        });
-      },
-    });
-    updateGoogleBackfillProgress(salonId, {
-      status: 'done',
-      processed: result.scanned,
-      total: result.scanned,
-    });
-    return res.json(result);
-  } catch (err) {
-    updateGoogleBackfillProgress(salonId, { status: 'error' });
-    if (err instanceof CalendarMatchCatalogError) {
-      console.error('[calendar] google 30-day backfill catalog failed', {
-        salonId,
-        operation: 'google_import_last_30_days',
-        code: err.code,
-        catalog: err.catalog,
-      });
-      return res.status(503).json({
-        error: 'Could not load salon matching catalog',
-        code: CALENDAR_MATCH_CATALOG_FAILED_CODE,
-      });
-    }
-    if (err instanceof GoogleCalendarOAuthError) {
-      if (err.code === 'GOOGLE_OAUTH_NOT_CONNECTED') {
-        return res.status(404).json({
-          error: 'Google Calendar is not connected',
-          code: 'google_not_connected',
-        });
-      }
-      if (err.code === 'GOOGLE_CALENDAR_NOT_SELECTED') {
-        return res.status(400).json({
-          error: 'Google calendar is not selected',
-          code: 'google_calendar_not_selected',
-        });
-      }
-      if (err.code === 'GOOGLE_AUTO_STAFF_UNRESOLVED') {
-        return res.status(409).json({
-          error: 'Could not resolve Tatev staff for 30-day import',
-          code: 'google_auto_staff_unresolved',
-        });
-      }
-      if (
-        err.code === 'GOOGLE_OAUTH_DECRYPT_FAILED' ||
-        err.code === 'GOOGLE_OAUTH_TOKEN_EXCHANGE_FAILED' ||
-        err.code === 'GOOGLE_OAUTH_NOT_CONFIGURED'
-      ) {
-        console.error('[calendar] google 30-day backfill token failed', {
-          salonId,
-          operation: 'google_import_last_30_days',
-          code: err.code,
-        });
-        return res.status(502).json({
-          error: 'Could not refresh Google credentials',
-          code: 'google_token_refresh_failed',
-        });
-      }
-      if (err.code === 'GOOGLE_EVENTS_FETCH_FAILED') {
-        console.error('[calendar] google 30-day backfill fetch failed', {
-          salonId,
-          operation: 'google_import_last_30_days',
-          code: err.code,
-        });
-        return res.status(502).json({
-          error: 'Could not load Google calendar events',
-          code: 'google_events_fetch_failed',
-        });
-      }
-      console.error('[calendar] google 30-day backfill oauth failed', {
-        salonId,
-        operation: 'google_import_last_30_days',
-        code: err.code,
-      });
-      return res.status(502).json({
-        error: 'Could not import last 30 days',
-        code: 'google_backfill_failed',
-      });
-    }
-    if (err instanceof GoogleCalendarImportError) {
-      const status = GOOGLE_IMPORT_HTTP_STATUS[err.code] ?? 502;
-      console.error('[calendar] google 30-day backfill rejected', {
-        salonId,
-        operation: 'google_import_last_30_days',
-        code: err.code,
-      });
-      return res.status(status).json({
-        error: 'Could not import last 30 days',
-        code: err.code,
-      });
-    }
-    console.error('[calendar] google 30-day backfill unexpected', {
-      salonId,
-      operation: 'google_import_last_30_days',
-      message: err instanceof Error ? err.message : String(err),
-    });
-    return res.status(502).json({
-      error: 'Could not import last 30 days',
-      code: 'google_backfill_failed',
+  const started = tryBeginGoogleBackfillProgress(salonId);
+  if (!started.started) {
+    return res.status(409).json({
+      error: 'Google Calendar sync is already running',
+      code: 'google_backfill_already_running',
+      progress: started.progress,
     });
   }
+
+  void importGoogleCalendarLast30Days({
+    db: supabase as any,
+    salonId,
+    onProgress: ({ processed, total, pagesProcessed }) => {
+      updateGoogleBackfillProgress(salonId, {
+        status: 'processing',
+        processed,
+        total,
+        pagesProcessed,
+      });
+    },
+  })
+    .then((result) => {
+      updateGoogleBackfillProgress(salonId, {
+        status: 'done',
+        processed: result.scanned,
+        total: result.scanned,
+        result,
+      });
+    })
+    .catch((err) => {
+      updateGoogleBackfillProgress(salonId, { status: 'error' });
+      if (err instanceof CalendarMatchCatalogError) {
+        console.error('[calendar] google 30-day backfill catalog failed', {
+          salonId,
+          operation: 'google_import_last_30_days',
+          code: err.code,
+          catalog: err.catalog,
+        });
+        return;
+      }
+      if (err instanceof GoogleCalendarOAuthError) {
+        console.error('[calendar] google 30-day backfill oauth failed', {
+          salonId,
+          operation: 'google_import_last_30_days',
+          code: err.code,
+        });
+        return;
+      }
+      if (err instanceof GoogleCalendarImportError) {
+        console.error('[calendar] google 30-day backfill rejected', {
+          salonId,
+          operation: 'google_import_last_30_days',
+          code: err.code,
+        });
+        return;
+      }
+      console.error('[calendar] google 30-day backfill unexpected', {
+        salonId,
+        operation: 'google_import_last_30_days',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+  return res.status(202).json({
+    accepted: true,
+    progress: getGoogleBackfillProgress(salonId),
+  });
 });
 
 /**

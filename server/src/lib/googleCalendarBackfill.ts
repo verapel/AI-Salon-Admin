@@ -32,14 +32,20 @@ import {
   loadGoogleCalendarAppConfig,
   refreshGoogleAccessToken,
   type GoogleEventPreviewItem,
+  type GoogleEventsListPage,
   type GoogleFetch,
 } from './googleCalendarOAuth.js';
 import { decryptCalendarCredential } from './calendarCredentialsCrypto.js';
 import { getSalonTimezone } from './scheduleSlots.js';
 import {
+  findRememberedCoverageClientId,
   isGoogleEventEligibleForSalonCalendarDisplay,
+  isGoogleReviewOverlayRepresented,
+  loadGoogleReviewCoverageIndex,
   persistGoogleReviewOrResolve,
+  rememberGoogleReviewCoverage,
   resolveGoogleCalendarReviewIssue,
+  type GoogleReviewCoverageIndex,
 } from './googleCalendarReviewOverlay.js';
 import {
   loadGoogleCoverageClientSession,
@@ -241,6 +247,7 @@ export async function listGoogleCalendarEventsForBackfill(params: {
   fetchImpl?: GoogleFetch;
   maxPages?: number;
   maxEvents?: number;
+  onPage?: (page: GoogleEventsListPage) => void | Promise<void>;
 }): Promise<{ events: GoogleEventPreviewItem[]; truncated: boolean }> {
   return listGoogleCalendarEventsPreview({
     accessToken: params.accessToken,
@@ -252,6 +259,7 @@ export async function listGoogleCalendarEventsForBackfill(params: {
     maxPages: params.maxPages ?? GOOGLE_BACKFILL_MAX_PAGES,
     maxEvents: params.maxEvents ?? GOOGLE_BACKFILL_MAX_SCAN_EVENTS,
     orderBy: 'startTime',
+    onPage: params.onPage,
   });
 }
 
@@ -332,14 +340,17 @@ async function ensureCoverageClient(params: {
   session: CoverageClientRecord[];
   catalog: CalendarMatchCatalog;
   summary: GoogleBackfillResult;
+  rememberedClientId?: string | null;
 }): Promise<string | null> {
   if (!isGoogleEventEligibleForSalonCalendarDisplay(params.ev)) return null;
-  const rememberedClientId = await loadRememberedGoogleCoverageClientId({
-    db: params.db,
-    salonId: params.salonId,
-    calendarConnectionId: params.calendarConnectionId,
-    ev: params.ev,
-  });
+  const rememberedClientId =
+    params.rememberedClientId ??
+    (await loadRememberedGoogleCoverageClientId({
+      db: params.db,
+      salonId: params.salonId,
+      calendarConnectionId: params.calendarConnectionId,
+      ev: params.ev,
+    }));
   const resolved = await resolveOrCreateGoogleCoverageClient({
     db: params.db,
     salonId: params.salonId,
@@ -375,7 +386,12 @@ export async function importGoogleCalendarLast30Days(params: {
   salonTimeZone?: string;
   maxPages?: number;
   maxEvents?: number;
-  onProgress?: (progress: { processed: number; total: number }) => void;
+  onProgress?: (progress: {
+    processed: number;
+    total: number | null;
+    pagesProcessed?: number;
+  }) => void;
+  onPage?: (page: GoogleEventsListPage) => void | Promise<void>;
 }): Promise<GoogleBackfillResult> {
   const salonId = params.salonId.trim();
   const now = params.now ?? new Date();
@@ -429,10 +445,216 @@ export async function importGoogleCalendarLast30Days(params: {
     throw new GoogleCalendarImportError('google_import_failed', 'Could not load import links');
   }
 
-  let listedEvents: GoogleEventPreviewItem[];
+  const reviewIndex: GoogleReviewCoverageIndex = await loadGoogleReviewCoverageIndex({
+    db: params.db,
+    salonId,
+    calendarConnectionId: conn.id,
+  });
+
+  let salonTimeZone: string;
+  if (params.salonTimeZone) {
+    salonTimeZone = resolveParserTimezone(params.salonTimeZone);
+  } else {
+    try {
+      salonTimeZone = resolveParserTimezone(await getSalonTimezone(salonId));
+    } catch {
+      salonTimeZone = resolveParserTimezone(undefined);
+    }
+  }
+
+  const loadedCatalog =
+    params.matchCatalog ?? (await loadSalonCalendarMatchCatalog(params.db, salonId));
+  const catalog = {
+    clients: [...loadedCatalog.clients],
+    services: loadedCatalog.services,
+  };
+  const executeImport = params.executeImport ?? executeManualGoogleCalendarImport;
+  const serviceNames = catalog.services.map((s) => s.name);
+  const clientSession: CoverageClientRecord[] = await loadGoogleCoverageClientSession({
+    db: params.db,
+    salonId,
+    catalog,
+  });
+
+  let knownTotal: number | null = null;
+  let pagesProcessed = 0;
+
+  const emitProgress = () => {
+    params.onProgress?.({
+      processed: summary.scanned,
+      total: knownTotal,
+      pagesProcessed,
+    });
+  };
+
+  const processEvents = async (events: GoogleEventPreviewItem[]) => {
+    for (const ev of events) {
+      summary.scanned += 1;
+      try {
+        if (isImportedGoogleOccurrence(ev, importedKeys)) {
+          applyBackfillOutcome(summary, { kind: 'alreadyImported' });
+          continue;
+        }
+
+        if (isGoogleReviewOverlayRepresented(ev, reviewIndex.overlayKeys)) {
+          const remembered = findRememberedCoverageClientId(ev, reviewIndex.clientByKey);
+          if (remembered) summary.clientsReused += 1;
+          summary.reviewEvents += 1;
+          summary.represented += 1;
+          continue;
+        }
+
+        const parsed = parseExternalCalendarEvent(
+          {
+            summary: ev.summary,
+            description: ev.description,
+            status: ev.status,
+            start: ev.start,
+            end: ev.end,
+          },
+          salonTimeZone,
+        );
+        const matching = matchParsedCalendarEvent({
+          parsed,
+          originalTitle: ev.summary,
+          catalog,
+        });
+
+        const decision = decideGoogleAutoImport({
+          parsed,
+          matching,
+          eventStatus: ev.status,
+          summary: ev.summary,
+          staffId: staff.id,
+          alreadyImported: false,
+          serviceNames,
+        });
+
+        const coverageClientId = await ensureCoverageClient({
+          db: params.db,
+          salonId,
+          calendarConnectionId: conn.id,
+          ev,
+          parsedClientName: parsed.clientNameCandidate,
+          phoneDigits: parsed.phone.normalized || '',
+          session: clientSession,
+          catalog,
+          summary,
+          rememberedClientId: findRememberedCoverageClientId(ev, reviewIndex.clientByKey),
+        });
+
+        if (decision.action === 'skip') {
+          applyBackfillOutcome(
+            summary,
+            classifyGoogleBackfillSkip({
+              decisionReason: decision.reason,
+              serviceStatus: matching.service.status,
+            }),
+          );
+          const persistKind = await persistGoogleReviewOrResolve({
+            db: params.db,
+            salonId,
+            calendarConnectionId: conn.id,
+            ev,
+            reasonCode: decision.reason,
+            staffId: staff.id,
+            staffName: staff.name,
+            salonTimeZone,
+            matching,
+            importedKeys,
+            clientId: coverageClientId,
+          });
+          if (persistKind === 'overlay') {
+            summary.reviewEvents += 1;
+            summary.represented += 1;
+            rememberGoogleReviewCoverage(ev, reviewIndex, coverageClientId);
+          }
+          continue;
+        }
+
+        const result: ManualGoogleImportResult = await executeImport({
+          db: params.db,
+          salonId,
+          salonTimeZone,
+          fetchImpl: params.fetchImpl,
+          body: {
+            eventId: ev.id,
+            staffId: decision.staffId,
+            serviceId: decision.serviceId,
+            client:
+              coverageClientId
+                ? { mode: 'existing', clientId: coverageClientId }
+                : decision.clientMode === 'existing'
+                  ? { mode: 'existing', clientId: decision.clientId }
+                  : { mode: 'new', name: decision.clientName },
+            expectedEtag: ev.etag || undefined,
+            expectedUpdated: ev.updated || undefined,
+          },
+        });
+
+        if (result.alreadyImported) {
+          rememberImportedOccurrence(ev, importedKeys);
+          applyBackfillOutcome(summary, { kind: 'alreadyImported' });
+        } else {
+          rememberImportedOccurrence(ev, importedKeys);
+          summary.imported += 1;
+          summary.appointments += 1;
+          summary.represented += 1;
+        }
+        await resolveGoogleCalendarReviewIssue({
+          db: params.db,
+          salonId,
+          calendarConnectionId: conn.id,
+          ev,
+          appointmentId: result.appointmentId,
+        });
+      } catch (err) {
+        const code =
+          err && typeof err === 'object' && 'code' in err
+            ? String((err as { code?: string }).code || 'other')
+            : 'other';
+        applyBackfillOutcome(
+          summary,
+          classifyGoogleBackfillSkip({
+            importErrorCode: code,
+          }),
+        );
+        const persistKind = await persistGoogleReviewOrResolve({
+          db: params.db,
+          salonId,
+          calendarConnectionId: conn.id,
+          ev,
+          reasonCode: code,
+          staffId: staff.id,
+          staffName: staff.name,
+          salonTimeZone,
+          importedKeys,
+        });
+        if (persistKind === 'overlay') {
+          summary.reviewEvents += 1;
+          summary.represented += 1;
+          rememberGoogleReviewCoverage(ev, reviewIndex, null);
+        }
+        if (code === 'other' || !('code' in (err as object))) {
+          console.error('[calendar/google-backfill] event import failed', {
+            salonId,
+            connectionId: conn.id,
+            eventId: ev.id,
+            code,
+          });
+        }
+      } finally {
+        emitProgress();
+      }
+    }
+  };
+
   let truncated = Boolean(params.truncatedOverride);
   if (params.eventsOverride) {
-    listedEvents = params.eventsOverride;
+    const events = selectGoogleEventsForBackfill(params.eventsOverride, window);
+    knownTotal = events.length;
+    params.onProgress?.({ processed: 0, total: knownTotal, pagesProcessed: 0 });
+    await processEvents(events);
   } else {
     const config = loadGoogleCalendarAppConfig();
     let refreshToken: string;
@@ -475,201 +697,19 @@ export async function importGoogleCalendarLast30Days(params: {
       fetchImpl: params.fetchImpl,
       maxPages: params.maxPages,
       maxEvents: params.maxEvents,
+      onPage: async (page) => {
+        pagesProcessed = page.pageIndex;
+        await params.onPage?.(page);
+        const slice = selectGoogleEventsForBackfill(page.events, window);
+        await processEvents(slice);
+        emitProgress();
+      },
     });
-    listedEvents = listed.events;
     truncated = listed.truncated;
+    knownTotal = summary.scanned;
+    emitProgress();
   }
 
   summary.truncated = truncated;
-  const events = selectGoogleEventsForBackfill(listedEvents, window);
-  params.onProgress?.({ processed: 0, total: events.length });
-
-  let salonTimeZone: string;
-  if (params.salonTimeZone) {
-    salonTimeZone = resolveParserTimezone(params.salonTimeZone);
-  } else {
-    try {
-      salonTimeZone = resolveParserTimezone(await getSalonTimezone(salonId));
-    } catch {
-      salonTimeZone = resolveParserTimezone(undefined);
-    }
-  }
-
-  const loadedCatalog =
-    params.matchCatalog ?? (await loadSalonCalendarMatchCatalog(params.db, salonId));
-  const catalog = {
-    clients: [...loadedCatalog.clients],
-    services: loadedCatalog.services,
-  };
-  const executeImport = params.executeImport ?? executeManualGoogleCalendarImport;
-  const serviceNames = catalog.services.map((s) => s.name);
-  const clientSession: CoverageClientRecord[] = await loadGoogleCoverageClientSession({
-    db: params.db,
-    salonId,
-    catalog,
-  });
-
-  for (const ev of events) {
-    summary.scanned += 1;
-    try {
-      if (isImportedGoogleOccurrence(ev, importedKeys)) {
-        applyBackfillOutcome(summary, { kind: 'alreadyImported' });
-        await resolveGoogleCalendarReviewIssue({
-          db: params.db,
-          salonId,
-          calendarConnectionId: conn.id,
-          ev,
-        });
-        continue;
-      }
-
-      const parsed = parseExternalCalendarEvent(
-        {
-          summary: ev.summary,
-          description: ev.description,
-          status: ev.status,
-          start: ev.start,
-          end: ev.end,
-        },
-        salonTimeZone,
-      );
-      const matching = matchParsedCalendarEvent({
-        parsed,
-        originalTitle: ev.summary,
-        catalog,
-      });
-
-      const decision = decideGoogleAutoImport({
-        parsed,
-        matching,
-        eventStatus: ev.status,
-        summary: ev.summary,
-        staffId: staff.id,
-        alreadyImported: false,
-        serviceNames,
-      });
-
-      const coverageClientId = await ensureCoverageClient({
-        db: params.db,
-        salonId,
-        calendarConnectionId: conn.id,
-        ev,
-        parsedClientName: parsed.clientNameCandidate,
-        phoneDigits: parsed.phone.normalized || '',
-        session: clientSession,
-        catalog,
-        summary,
-      });
-
-      if (decision.action === 'skip') {
-        applyBackfillOutcome(
-          summary,
-          classifyGoogleBackfillSkip({
-            decisionReason: decision.reason,
-            serviceStatus: matching.service.status,
-          }),
-        );
-        const persistKind = await persistGoogleReviewOrResolve({
-          db: params.db,
-          salonId,
-          calendarConnectionId: conn.id,
-          ev,
-          reasonCode: decision.reason,
-          staffId: staff.id,
-          staffName: staff.name,
-          salonTimeZone,
-          matching,
-          importedKeys,
-          clientId: coverageClientId,
-        });
-        if (persistKind === 'overlay') {
-          summary.reviewEvents += 1;
-          summary.represented += 1;
-        }
-        continue;
-      }
-
-      const result: ManualGoogleImportResult = await executeImport({
-        db: params.db,
-        salonId,
-        salonTimeZone,
-        fetchImpl: params.fetchImpl,
-        body: {
-          eventId: ev.id,
-          staffId: decision.staffId,
-          serviceId: decision.serviceId,
-          client:
-            coverageClientId
-              ? { mode: 'existing', clientId: coverageClientId }
-              : decision.clientMode === 'existing'
-                ? { mode: 'existing', clientId: decision.clientId }
-                : { mode: 'new', name: decision.clientName },
-          expectedEtag: ev.etag || undefined,
-          expectedUpdated: ev.updated || undefined,
-        },
-      });
-
-      if (result.alreadyImported) {
-        rememberImportedOccurrence(ev, importedKeys);
-        applyBackfillOutcome(summary, { kind: 'alreadyImported' });
-        await resolveGoogleCalendarReviewIssue({
-          db: params.db,
-          salonId,
-          calendarConnectionId: conn.id,
-          ev,
-          appointmentId: result.appointmentId,
-        });
-      } else {
-        rememberImportedOccurrence(ev, importedKeys);
-        summary.imported += 1;
-        summary.appointments += 1;
-        summary.represented += 1;
-        await resolveGoogleCalendarReviewIssue({
-          db: params.db,
-          salonId,
-          calendarConnectionId: conn.id,
-          ev,
-          appointmentId: result.appointmentId,
-        });
-      }
-    } catch (err) {
-      const code =
-        err && typeof err === 'object' && 'code' in err
-          ? String((err as { code?: string }).code || 'other')
-          : 'other';
-      applyBackfillOutcome(
-        summary,
-        classifyGoogleBackfillSkip({
-          importErrorCode: code,
-        }),
-      );
-      const persistKind = await persistGoogleReviewOrResolve({
-        db: params.db,
-        salonId,
-        calendarConnectionId: conn.id,
-        ev,
-        reasonCode: code,
-        staffId: staff.id,
-        staffName: staff.name,
-        salonTimeZone,
-        importedKeys,
-      });
-      if (persistKind === 'overlay') {
-        summary.reviewEvents += 1;
-        summary.represented += 1;
-      }
-      if (code === 'other' || !('code' in (err as object))) {
-        console.error('[calendar/google-backfill] event import failed', {
-          salonId,
-          connectionId: conn.id,
-          eventId: ev.id,
-          code,
-        });
-      }
-    } finally {
-      params.onProgress?.({ processed: summary.scanned, total: events.length });
-    }
-  }
-
   return summary;
 }

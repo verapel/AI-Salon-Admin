@@ -687,6 +687,8 @@ const en = {
   'integrations.google.backfillRunning': 'Syncing Google Calendar…',
   'integrations.google.backfillWait': 'This can take a minute. Please wait.',
   'integrations.google.backfillProgressCount': 'Processed {processed} of {total} events',
+  'integrations.google.backfillProgressProcessed': 'Processed: {processed} events',
+  'integrations.google.backfillProgressContinue': 'Sync is still running…',
   'integrations.google.backfillProgressListing': 'Loading Google events…',
   'integrations.google.backfillConfirmTitle':
     'Events from the last 30 days and all future events will be processed.',
@@ -1877,6 +1879,8 @@ const ru: Record<TranslationKey, string> = {
   'integrations.google.backfillRunning': 'Синхронизация Google Calendar…',
   'integrations.google.backfillWait': 'Это может занять минуту. Подождите.',
   'integrations.google.backfillProgressCount': 'Обработано {processed} из {total} событий',
+  'integrations.google.backfillProgressProcessed': 'Обработано: {processed} событий',
+  'integrations.google.backfillProgressContinue': 'Синхронизация продолжается…',
   'integrations.google.backfillProgressListing': 'Загружаем события Google…',
   'integrations.google.backfillConfirmTitle':
     'Будут обработаны записи за последние 30 дней и все будущие записи.',
@@ -3055,6 +3059,8 @@ const hy: Record<TranslationKey, string> = {
   'integrations.google.backfillRunning': 'Google Calendar-ը համաժամեցվում է…',
   'integrations.google.backfillWait': 'Սա կարող է տևել մոտ մեկ րոպե։ Սպասեք։',
   'integrations.google.backfillProgressCount': 'Մշակված է {processed}՝ {total}-ից',
+  'integrations.google.backfillProgressProcessed': 'Մշակված է՝ {processed} իրադարձություն',
+  'integrations.google.backfillProgressContinue': 'Համաժամեցումը շարունակվում է…',
   'integrations.google.backfillProgressListing': 'Բեռնում ենք Google իրադարձությունները…',
   'integrations.google.backfillConfirmTitle':
     'Կմշակվեն վերջին 30 օրվա և բոլոր ապագա գրանցումները։',

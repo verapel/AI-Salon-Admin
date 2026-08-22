@@ -50,11 +50,14 @@ describe('Google manual sync live progress', () => {
 
     assert.match(backfill, /onProgress\?:/);
     assert.match(backfill, /processed:\s*summary\.scanned/);
-    assert.match(backfill, /total:\s*events\.length/);
+    assert.match(backfill, /knownTotal/);
     assert.doesNotMatch(backfill, /setInterval|setTimeout\(/);
 
     assert.match(route, /router\.get\('\/google\/events\/import-last-30-days\/progress'/);
     assert.match(route, /getGoogleBackfillProgress\(salonId\)/);
+    assert.match(route, /tryBeginGoogleBackfillProgress/);
+    assert.match(route, /status\(202\)/);
+    assert.match(route, /google_backfill_already_running/);
     assert.match(route, /onProgress:/);
 
     assert.match(api, /import-last-30-days\/progress/);

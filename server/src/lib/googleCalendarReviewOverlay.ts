@@ -111,6 +111,88 @@ export function isGoogleEventAllDay(ev: Pick<GoogleEventPreviewItem, 'start' | '
  * Timed, non-cancelled Google events can appear on the salon calendar.
  * All-day and cancelled/deleted events are not shown as active blocks.
  */
+export function googleReviewOccurrenceLookupKeys(
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>,
+): string[] {
+  const rec = buildGoogleOccurrenceRecurrenceId(ev);
+  return rec ? [ev.id, `${ev.id}:${rec}`] : [ev.id];
+}
+
+export type GoogleReviewCoverageIndex = {
+  overlayKeys: Set<string>;
+  clientByKey: Map<string, string>;
+};
+
+export async function loadGoogleReviewCoverageIndex(params: {
+  db: any;
+  salonId: string;
+  calendarConnectionId: string;
+}): Promise<GoogleReviewCoverageIndex> {
+  const overlayKeys = new Set<string>();
+  const clientByKey = new Map<string, string>();
+  try {
+    const { data, error } = await params.db
+      .from('calendar_import_issues')
+      .select('external_uid, recurrence_id, parsed_event, raw_event, status')
+      .eq('salon_id', params.salonId)
+      .eq('calendar_connection_id', params.calendarConnectionId);
+    if (error || !Array.isArray(data)) return { overlayKeys, clientByKey };
+    for (const row of data) {
+      if (row?.status && row.status !== 'open') continue;
+      const uid = typeof row?.external_uid === 'string' ? row.external_uid : '';
+      if (!uid) continue;
+      const rec =
+        typeof row?.recurrence_id === 'string' && row.recurrence_id.trim()
+          ? row.recurrence_id.trim()
+          : '';
+      const keys = rec ? [uid, `${uid}:${rec}`] : [uid];
+      for (const key of keys) overlayKeys.add(key);
+      const parsed = row?.parsed_event;
+      const raw = row?.raw_event;
+      const clientId =
+        (parsed && typeof parsed === 'object' && typeof parsed.clientId === 'string'
+          ? parsed.clientId
+          : '') ||
+        (raw && typeof raw === 'object' && typeof raw.clientId === 'string' ? raw.clientId : '');
+      if (clientId) {
+        for (const key of keys) clientByKey.set(key, clientId);
+      }
+    }
+  } catch {
+    return { overlayKeys, clientByKey };
+  }
+  return { overlayKeys, clientByKey };
+}
+
+export function findRememberedCoverageClientId(
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>,
+  clientByKey: Map<string, string>,
+): string | null {
+  for (const key of googleReviewOccurrenceLookupKeys(ev)) {
+    const id = clientByKey.get(key);
+    if (id) return id;
+  }
+  return null;
+}
+
+export function isGoogleReviewOverlayRepresented(
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>,
+  overlayKeys: Set<string>,
+): boolean {
+  return googleReviewOccurrenceLookupKeys(ev).some((key) => overlayKeys.has(key));
+}
+
+export function rememberGoogleReviewCoverage(
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>,
+  index: GoogleReviewCoverageIndex,
+  clientId?: string | null,
+): void {
+  for (const key of googleReviewOccurrenceLookupKeys(ev)) {
+    index.overlayKeys.add(key);
+    if (clientId) index.clientByKey.set(key, clientId);
+  }
+}
+
 export function isGoogleEventEligibleForSalonCalendarDisplay(
   ev: Pick<GoogleEventPreviewItem, 'status' | 'start' | 'end'>,
 ): boolean {

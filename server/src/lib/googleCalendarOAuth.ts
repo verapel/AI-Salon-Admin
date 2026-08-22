@@ -899,6 +899,13 @@ export function mapGoogleEventPreviewEntry(
   };
 }
 
+export type GoogleEventsListPage = {
+  pageIndex: number;
+  pageTokenUsed: string | null;
+  nextPageToken: string | null;
+  events: GoogleEventPreviewItem[];
+};
+
 /**
  * GOOGLE-CAL-FAST-2: Read-only events.list preview for a selected calendar.
  * No syncToken. No DB writes. Caps pages/events.
@@ -913,6 +920,7 @@ export async function listGoogleCalendarEventsPreview(params: {
   maxPages?: number;
   maxEvents?: number;
   orderBy?: 'startTime' | 'updated';
+  onPage?: (page: GoogleEventsListPage) => void | Promise<void>;
 }): Promise<{ events: GoogleEventPreviewItem[]; truncated: boolean }> {
   const token = params.accessToken.trim();
   if (!token) {
@@ -990,19 +998,33 @@ export async function listGoogleCalendarEventsPreview(params: {
 
     const body = json as Record<string, unknown>;
     const items = Array.isArray(body.items) ? body.items : [];
+    const pageEvents: GoogleEventPreviewItem[] = [];
+    const pageTokenUsed = pageToken;
     for (const item of items) {
       if (events.length >= maxEvents) {
         truncated = true;
         break;
       }
       const mapped = mapGoogleEventPreviewEntry(item, calendarId, calendarName);
-      if (mapped) events.push(mapped);
+      if (mapped) {
+        events.push(mapped);
+        pageEvents.push(mapped);
+      }
     }
 
     pageToken =
       typeof body.nextPageToken === 'string' && body.nextPageToken.trim()
         ? body.nextPageToken.trim()
         : null;
+
+    if (params.onPage) {
+      await params.onPage({
+        pageIndex: pages,
+        pageTokenUsed,
+        nextPageToken: pageToken,
+        events: pageEvents,
+      });
+    }
 
     if (pageToken && (pages >= maxPages || events.length >= maxEvents)) {
       truncated = true;

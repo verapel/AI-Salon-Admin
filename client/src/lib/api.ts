@@ -264,10 +264,10 @@ export const api = {
         },
       ),
     importGoogleLast30Days: () =>
-      request<import('@/types').GoogleBackfillLast30DaysResult>(
-        '/calendar/google/events/import-last-30-days',
-        { method: 'POST' },
-      ),
+      request<
+        | import('@/types').GoogleBackfillLast30DaysResult
+        | { accepted: true; progress: import('@/types').GoogleBackfillProgress }
+      >('/calendar/google/events/import-last-30-days', { method: 'POST' }),
     getGoogleBackfillProgress: () =>
       request<import('@/types').GoogleBackfillProgress>(
         '/calendar/google/events/import-last-30-days/progress',
