@@ -174,13 +174,21 @@ export function emptyGoogleBackfillResult(truncated = false): GoogleBackfillResu
   };
 }
 
-/** Event START window: [now - 30 days, +∞). No future timeMax. */
+/**
+ * Event START window: [now - 30 days, +∞).
+ * timeMin is the start of the UTC calendar day 30 days before `now`,
+ * so the entire "30 days ago" day is visible. No future timeMax.
+ */
 export function buildGoogleBackfillWindow(now: Date = new Date()): {
   timeMin: string;
   timeMax?: string;
 } {
+  const start = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  start.setUTCDate(start.getUTCDate() - GOOGLE_BACKFILL_LOOKBACK_DAYS);
   return {
-    timeMin: new Date(now.getTime() - GOOGLE_BACKFILL_LOOKBACK_MS).toISOString(),
+    timeMin: start.toISOString(),
   };
 }
 

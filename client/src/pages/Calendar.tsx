@@ -70,7 +70,28 @@ const toLocalDateStr = (date: Date) => {
 /** "14:00" — 24-hour format from "HH:MM:SS" or "HH:MM" */
 const formatTime24 = (time: string) => time.slice(0, 5);
 
-const HOURS = Array.from({ length: 12 }, (_, i) => i + 8);
+const DEFAULT_HOUR_START = 8;
+const DEFAULT_HOUR_END = 19;
+
+/** Default 08–19, expanded so early/late timed Google (or salon) blocks stay visible. */
+function hoursForVisibleDays(
+  blocks: Array<{ date: string; startTime: string }>,
+  days: Date[],
+): number[] {
+  const daySet = new Set(days.map(toLocalDateStr));
+  let min = DEFAULT_HOUR_START;
+  let max = DEFAULT_HOUR_END;
+  for (const block of blocks) {
+    if (!daySet.has(block.date)) continue;
+    const hour = parseInt(block.startTime.split(':')[0], 10);
+    if (!Number.isFinite(hour)) continue;
+    if (hour < min) min = hour;
+    if (hour > max) max = hour;
+  }
+  min = Math.max(0, min);
+  max = Math.min(23, max);
+  return Array.from({ length: max - min + 1 }, (_, i) => min + i);
+}
 
 /** Shared desktop week grid: fixed time column + 7 equal day columns */
 const WEEK_GRID_CLASS = 'grid grid-cols-[3.5rem_repeat(7,minmax(0,1fr))]';
@@ -220,8 +241,18 @@ export default function Calendar() {
   }, []);
 
   const todayStr = toLocalDateStr(todayDate);
-  const mobileWeekDays = useMemo(() => weekDaysFrom(todayDate), [todayDate]);
-  const mobileMonthCells = useMemo(() => monthGridFrom(todayDate), [todayDate]);
+  const mobileWeekDays = useMemo(() => weekDaysFrom(currentDate), [currentDate]);
+  const mobileMonthCells = useMemo(() => monthGridFrom(currentDate), [currentDate]);
+  const weekHours = useMemo(
+    () => hoursForVisibleDays(filteredAppointments, weekDays),
+    [filteredAppointments, weekDays],
+  );
+
+  const navigateMonth = (direction: number) => {
+    const next = new Date(currentDate);
+    next.setMonth(next.getMonth() + direction);
+    setCurrentDate(next);
+  };
 
   const todayAppointments = useMemo(
     () => filteredAppointments.filter((a) => a.date === todayStr).sort(sortBlocksForDisplay),
@@ -444,6 +475,27 @@ export default function Calendar() {
 
         {mobileView === 'week' ? (
           <div className="w-full min-w-0 space-y-4">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => navigateWeek(-1)}
+                className="btn-ghost"
+                aria-label={t('calendar.prevWeek')}
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                {mobileWeekDays[0].toLocaleDateString(locale, { month: 'long', year: 'numeric' })}
+              </h3>
+              <button
+                type="button"
+                onClick={() => navigateWeek(1)}
+                className="btn-ghost"
+                aria-label={t('calendar.nextWeek')}
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            </div>
             {mobileWeekDays.map((day) => {
               const dayBlocks = getAppointmentsForDay(day).sort(sortBlocksForDisplay);
               return (
@@ -470,9 +522,27 @@ export default function Calendar() {
 
         {mobileView === 'month' ? (
           <div className="w-full min-w-0 space-y-4">
-            <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
-              {todayDate.toLocaleDateString(locale, { month: 'long', year: 'numeric' })}
-            </p>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => navigateMonth(-1)}
+                className="btn-ghost"
+                aria-label={t('calendar.prevMonth')}
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                {currentDate.toLocaleDateString(locale, { month: 'long', year: 'numeric' })}
+              </p>
+              <button
+                type="button"
+                onClick={() => navigateMonth(1)}
+                className="btn-ghost"
+                aria-label={t('calendar.nextMonth')}
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            </div>
             <div className="grid w-full min-w-0 grid-cols-7 gap-1">
               {mobileWeekDays.map((day) => (
                 <div
@@ -556,7 +626,7 @@ export default function Calendar() {
               ))}
             </div>
 
-            {HOURS.map((hour) => (
+            {weekHours.map((hour) => (
               <div
                 key={hour}
                 className={`${WEEK_GRID_CLASS} border-b last:border-b-0 dark:border-gray-700`}
