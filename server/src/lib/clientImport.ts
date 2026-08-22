@@ -159,7 +159,10 @@ export function phoneMatchKey(value: string | null | undefined): string {
 }
 
 export function normalizeStoredPhone(value: unknown): string {
-  const raw = optionalClientText(value);
+  const raw =
+    typeof value === 'number' && Number.isFinite(value)
+      ? String(Math.trunc(value))
+      : optionalClientText(value);
   const digits = phoneDigits(raw);
   if (!digits) return '';
   if (raw.startsWith('+')) return `+${digits}`;
@@ -300,7 +303,7 @@ function emptyMapped(): MappedRow {
 }
 
 function mappedToDraft(mapped: MappedRow): ClientImportDraft {
-  const lastVisit = parseClientDate(mapped.lastVisit) ?? cellText(mapped.lastVisit) || null;
+  const lastVisit = parseClientDate(mapped.lastVisit) ?? (cellText(mapped.lastVisit) || null);
   return sanitizeClientDraft({
     firstName: mapped.firstName,
     lastName: mapped.lastName,
@@ -337,7 +340,10 @@ export function mapSpreadsheetObject(row: Record<string, unknown>): ClientImport
 }
 
 function headerMatchCount(cells: unknown[]): number {
-  return cells.reduce((count, cell) => (fieldForHeader(String(cell ?? '')) ? count + 1 : count), 0);
+  return cells.reduce<number>(
+    (count, cell) => (fieldForHeader(String(cell ?? '')) ? count + 1 : count),
+    0
+  );
 }
 
 function findHeaderRowIndex(rows: unknown[][]): number {
@@ -363,8 +369,56 @@ function rowFromCells(headers: unknown[], cells: unknown[]): Record<string, unkn
   return row;
 }
 
+function isZipXlsx(buffer: Buffer): boolean {
+  return buffer.length >= 2 && buffer[0] === 0x50 && buffer[1] === 0x4b;
+}
+
+function decodeCsvText(buffer: Buffer): string {
+  if (buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
+    return buffer.subarray(3).toString('utf8');
+  }
+  const utf8 = buffer.toString('utf8');
+  if (!utf8.includes('\uFFFD') && /[А-Яа-яЁё]/.test(utf8)) return utf8;
+  try {
+    const win = new TextDecoder('windows-1251').decode(buffer);
+    if (/[А-Яа-яЁё]/.test(win)) return win;
+  } catch {
+    /* keep utf8 */
+  }
+  return utf8;
+}
+
+function detectCsvDelimiter(text: string): string {
+  const first = (text.split(/\r?\n/, 1)[0] ?? '').replace(/"[^"]*"/g, '');
+  const semi = (first.match(/;/g) || []).length;
+  const comma = (first.match(/,/g) || []).length;
+  return semi > comma ? ';' : ',';
+}
+
+function isOleXls(buffer: Buffer): boolean {
+  return (
+    buffer.length >= 4 &&
+    buffer[0] === 0xd0 &&
+    buffer[1] === 0xcf &&
+    buffer[2] === 0x11 &&
+    buffer[3] === 0xe0
+  );
+}
+
+function readWorkbook(buffer: Buffer): XLSX.WorkBook {
+  if (isZipXlsx(buffer) || isOleXls(buffer)) {
+    return XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  }
+  const text = decodeCsvText(buffer);
+  return XLSX.read(text, {
+    type: 'string',
+    cellDates: false,
+    FS: detectCsvDelimiter(text),
+  });
+}
+
 export function parseClientSpreadsheetBuffer(buffer: Buffer): ClientImportDraft[] {
-  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const workbook = readWorkbook(buffer);
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) return [];
   const sheet = workbook.Sheets[sheetName];
