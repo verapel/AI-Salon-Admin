@@ -182,6 +182,58 @@ function pullDb(opts: {
           },
         };
       }
+      if (table === 'calendar_import_issues') {
+        return {
+          select() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              maybeSingle: async () => ({ data: null, error: null }),
+              then: async (resolve: any) => resolve({ data: [], error: null }),
+            };
+            return chain;
+          },
+          update() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then: async (resolve: any) => resolve({ error: null }),
+            };
+            return chain;
+          },
+          insert() {
+            return { then: async (resolve: any) => resolve({ error: null }) };
+          },
+        };
+      }
+      if (table === 'appointments') {
+        return {
+          select() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              in() {
+                return chain;
+              },
+              maybeSingle: async () => ({ data: null, error: null }),
+              then: async (resolve: any) => resolve({ data: [], error: null }),
+            };
+            return chain;
+          },
+          update() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then: async (resolve: any) => resolve({ error: null }),
+            };
+            return chain;
+          },
+        };
+      }
       if (table === 'staff') {
         return {
           select() {

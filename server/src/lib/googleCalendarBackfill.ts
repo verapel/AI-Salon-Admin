@@ -22,7 +22,6 @@ import {
 import {
   executeManualGoogleCalendarImport,
   GoogleCalendarImportError,
-  loadGoogleImportedOccurrenceKeys,
   type ManualGoogleImportResult,
 } from './googleCalendarImport.js';
 import {
@@ -39,6 +38,7 @@ import { decryptCalendarCredential } from './calendarCredentialsCrypto.js';
 import { getSalonTimezone } from './scheduleSlots.js';
 import {
   findRememberedCoverageClientId,
+  isGoogleEventCancelledOrDeleted,
   isGoogleEventEligibleForSalonCalendarDisplay,
   isGoogleReviewOverlayRepresented,
   loadGoogleReviewCoverageIndex,
@@ -47,6 +47,16 @@ import {
   resolveGoogleCalendarReviewIssue,
   type GoogleReviewCoverageIndex,
 } from './googleCalendarReviewOverlay.js';
+import {
+  findImportedOccurrenceRecord,
+  findOverlayRecord,
+  googleImportedOccurrenceUnchanged,
+  googleOverlayOccurrenceUnchanged,
+  loadGoogleImportedOccurrenceIndex,
+  reconcileGoogleReviewOverlay,
+  reconcileGoogleSourcedAppointment,
+  type GoogleImportedOccurrenceIndex,
+} from './googleCalendarReconcile.js';
 import {
   loadGoogleCoverageClientSession,
   loadRememberedGoogleCoverageClientId,
@@ -86,6 +96,14 @@ export type GoogleBackfillResult = {
   excluded: number;
   failed: number;
   truncated: boolean;
+  newEvents: number;
+  updatedEvents: number;
+  unchangedEvents: number;
+  appointmentsCreated: number;
+  appointmentsUpdated: number;
+  reviewEventsCreated: number;
+  reviewEventsUpdated: number;
+  conflicts: number;
   reasons: GoogleBackfillReasonCounts;
 };
 
@@ -131,6 +149,14 @@ export function emptyGoogleBackfillResult(truncated = false): GoogleBackfillResu
     excluded: 0,
     failed: 0,
     truncated,
+    newEvents: 0,
+    updatedEvents: 0,
+    unchangedEvents: 0,
+    appointmentsCreated: 0,
+    appointmentsUpdated: 0,
+    reviewEventsCreated: 0,
+    reviewEventsUpdated: 0,
+    conflicts: 0,
     reasons: emptyGoogleBackfillReasons(),
   };
 }
@@ -312,6 +338,7 @@ function applyBackfillOutcome(
 ): void {
   if (outcome.kind === 'alreadyImported') {
     summary.alreadyImported += 1;
+    summary.unchangedEvents += 1;
     summary.represented += 1;
     return;
   }
@@ -434,9 +461,10 @@ export async function importGoogleCalendarLast30Days(params: {
     );
   }
 
-  let importedKeys: Set<string>;
+  let importedIndex: GoogleImportedOccurrenceIndex;
   try {
-    importedKeys = await loadGoogleImportedOccurrenceKeys(params.db, {
+    importedIndex = await loadGoogleImportedOccurrenceIndex({
+      db: params.db,
       salonId,
       calendarConnectionId: conn.id,
     });
@@ -444,6 +472,7 @@ export async function importGoogleCalendarLast30Days(params: {
     if (err instanceof GoogleCalendarImportError) throw err;
     throw new GoogleCalendarImportError('google_import_failed', 'Could not load import links');
   }
+  const importedKeys = importedIndex.keys;
 
   const reviewIndex: GoogleReviewCoverageIndex = await loadGoogleReviewCoverageIndex({
     db: params.db,
@@ -491,16 +520,111 @@ export async function importGoogleCalendarLast30Days(params: {
     for (const ev of events) {
       summary.scanned += 1;
       try {
+        const importedRecord = findImportedOccurrenceRecord(ev, importedIndex);
+        const overlayRecord = findOverlayRecord(ev, reviewIndex);
+
         if (isImportedGoogleOccurrence(ev, importedKeys)) {
-          applyBackfillOutcome(summary, { kind: 'alreadyImported' });
+          if (isGoogleEventCancelledOrDeleted(ev)) {
+            applyBackfillOutcome(summary, { kind: 'alreadyImported' });
+            continue;
+          }
+          if (googleImportedOccurrenceUnchanged(ev, importedRecord, salonTimeZone)) {
+            applyBackfillOutcome(summary, { kind: 'alreadyImported' });
+            continue;
+          }
+          const moved = await reconcileGoogleSourcedAppointment({
+            db: params.db,
+            salonId,
+            calendarConnectionId: conn.id,
+            ev,
+            record: importedRecord || {
+              appointmentId: '',
+              etag: null,
+              lastModified: null,
+              date: null,
+              startTime: null,
+              endTime: null,
+              staffId: staff.id,
+              clientId: null,
+            },
+            salonTimeZone,
+            staffId: staff.id,
+            staffName: staff.name,
+          });
+          if (moved.kind === 'updated') {
+            summary.updatedEvents += 1;
+            summary.appointmentsUpdated += 1;
+            summary.represented += 1;
+            summary.alreadyImported += 1;
+          } else if (moved.kind === 'conflict') {
+            summary.conflicts += 1;
+            applyBackfillOutcome(
+              summary,
+              classifyGoogleBackfillSkip({ importErrorCode: 'appointment_conflict' }),
+            );
+            summary.reviewEvents += 1;
+            summary.reviewEventsUpdated += 1;
+            summary.represented += 1;
+          } else {
+            applyBackfillOutcome(summary, { kind: 'alreadyImported' });
+          }
           continue;
         }
 
         if (isGoogleReviewOverlayRepresented(ev, reviewIndex.overlayKeys)) {
           const remembered = findRememberedCoverageClientId(ev, reviewIndex.clientByKey);
           if (remembered) summary.clientsReused += 1;
+          if (isGoogleEventCancelledOrDeleted(ev)) {
+            const hidden = await reconcileGoogleReviewOverlay({
+              db: params.db,
+              salonId,
+              calendarConnectionId: conn.id,
+              ev,
+              overlays: reviewIndex,
+              staffId: staff.id,
+              staffName: staff.name,
+              salonTimeZone,
+            });
+            if (hidden === 'hidden') {
+              reviewIndex.overlayKeys.delete(ev.id);
+              summary.reviewEventsUpdated += 1;
+              summary.updatedEvents += 1;
+            } else {
+              summary.unchangedEvents += 1;
+              summary.reviewEvents += 1;
+              summary.represented += 1;
+            }
+            applyBackfillOutcome(
+              summary,
+              classifyGoogleBackfillSkip({ decisionReason: 'cancelled' }),
+            );
+            continue;
+          }
+          if (googleOverlayOccurrenceUnchanged(ev, overlayRecord, salonTimeZone)) {
+            summary.reviewEvents += 1;
+            summary.represented += 1;
+            summary.unchangedEvents += 1;
+            continue;
+          }
+          const overlayOut = await reconcileGoogleReviewOverlay({
+            db: params.db,
+            salonId,
+            calendarConnectionId: conn.id,
+            ev,
+            overlays: reviewIndex,
+            staffId: staff.id,
+            staffName: staff.name,
+            salonTimeZone,
+            reasonCode: overlayRecord?.reasonCode,
+          });
           summary.reviewEvents += 1;
           summary.represented += 1;
+          if (overlayOut === 'updated') {
+            summary.reviewEventsUpdated += 1;
+            summary.updatedEvents += 1;
+          } else {
+            summary.unchangedEvents += 1;
+          }
           continue;
         }
 
@@ -566,6 +690,8 @@ export async function importGoogleCalendarLast30Days(params: {
           });
           if (persistKind === 'overlay') {
             summary.reviewEvents += 1;
+            summary.reviewEventsCreated += 1;
+            summary.newEvents += 1;
             summary.represented += 1;
             rememberGoogleReviewCoverage(ev, reviewIndex, coverageClientId);
           }
@@ -599,6 +725,8 @@ export async function importGoogleCalendarLast30Days(params: {
           rememberImportedOccurrence(ev, importedKeys);
           summary.imported += 1;
           summary.appointments += 1;
+          summary.appointmentsCreated += 1;
+          summary.newEvents += 1;
           summary.represented += 1;
         }
         await resolveGoogleCalendarReviewIssue({
@@ -632,6 +760,8 @@ export async function importGoogleCalendarLast30Days(params: {
         });
         if (persistKind === 'overlay') {
           summary.reviewEvents += 1;
+          summary.reviewEventsCreated += 1;
+          summary.newEvents += 1;
           summary.represented += 1;
           rememberGoogleReviewCoverage(ev, reviewIndex, null);
         }

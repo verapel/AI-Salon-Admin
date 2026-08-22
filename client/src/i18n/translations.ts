@@ -693,7 +693,11 @@ const en = {
   'integrations.google.backfillConfirmTitle':
     'Events from the last 30 days and all future events will be processed.',
   'integrations.google.backfillConfirmGoogleUnchanged': 'Google Calendar will not be changed.',
-  'integrations.google.backfillConfirmSkipImported': 'Already imported events will be skipped.',
+  'integrations.google.backfillConfirmSkipImported':
+    'Already represented events are updated in place. Unchanged events are not recreated.',
+  'integrations.google.backfillNewEvents': 'New',
+  'integrations.google.backfillUpdatedEvents': 'Updated',
+  'integrations.google.backfillUnchangedEvents': 'Unchanged',
   'integrations.google.backfillConfirmSkipUnsafe':
     'Unresolved events stay visible for review and still get a client card.',
   'integrations.google.backfillConfirmTatev': 'Imported appointments will be assigned to Tatev.',
@@ -1885,7 +1889,11 @@ const ru: Record<TranslationKey, string> = {
   'integrations.google.backfillConfirmTitle':
     'Будут обработаны записи за последние 30 дней и все будущие записи.',
   'integrations.google.backfillConfirmGoogleUnchanged': 'Google Calendar не будет изменён.',
-  'integrations.google.backfillConfirmSkipImported': 'Уже импортированные события будут пропущены.',
+  'integrations.google.backfillConfirmSkipImported':
+    'Уже существующие события обновляются на месте. Без изменений не пересоздаются.',
+  'integrations.google.backfillNewEvents': 'Новых',
+  'integrations.google.backfillUpdatedEvents': 'Обновлено',
+  'integrations.google.backfillUnchangedEvents': 'Без изменений',
   'integrations.google.backfillConfirmSkipUnsafe':
     'Неразрешённые события останутся на проверке и получат карточку клиента.',
   'integrations.google.backfillConfirmTatev': 'Импортированные записи будут назначены мастеру Tatev.',
@@ -3065,7 +3073,11 @@ const hy: Record<TranslationKey, string> = {
   'integrations.google.backfillConfirmTitle':
     'Կմշակվեն վերջին 30 օրվա և բոլոր ապագա գրանցումները։',
   'integrations.google.backfillConfirmGoogleUnchanged': 'Google Calendar-ը չի փոխվի։',
-  'integrations.google.backfillConfirmSkipImported': 'Արդեն ներմուծված իրադարձությունները կբաց թողնվեն։',
+  'integrations.google.backfillConfirmSkipImported':
+    'Արդեն ներկայացված իրադարձությունները թարմացվում են նույն գրառման վրա։ Անփոփոխները չեն վերաստեղծվում։',
+  'integrations.google.backfillNewEvents': 'Նոր',
+  'integrations.google.backfillUpdatedEvents': 'Թարմացված',
+  'integrations.google.backfillUnchangedEvents': 'Անփոփոխ',
   'integrations.google.backfillConfirmSkipUnsafe':
     'Չլուծված իրադարձությունները կմնան ստուգման համար և կստանան հաճախորդի քարտ։',
   'integrations.google.backfillConfirmTatev': 'Ներմուծված գրանցումները կնշանակվեն Tatev մասնագետին։',

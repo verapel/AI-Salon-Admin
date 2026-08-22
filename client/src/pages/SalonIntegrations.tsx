@@ -1190,23 +1190,17 @@ export default function SalonIntegrations() {
                           {t('integrations.google.backfillScanned')}: {googleBackfillResult.scanned}
                         </p>
                         <p>
-                          {t('integrations.google.backfillRepresented')}:{' '}
-                          {googleBackfillResult.represented}
+                          {t('integrations.google.backfillNewEvents')}:{' '}
+                          {googleBackfillResult.newEvents ?? googleBackfillResult.imported}
                         </p>
                         <p>
-                          {t('integrations.google.backfillImported')}: {googleBackfillResult.imported}
+                          {t('integrations.google.backfillUpdatedEvents')}:{' '}
+                          {googleBackfillResult.updatedEvents ?? 0}
                         </p>
                         <p>
-                          {t('integrations.google.backfillReviewEvents')}:{' '}
-                          {googleBackfillResult.reviewEvents}
-                        </p>
-                        <p>
-                          {t('integrations.google.backfillClientsCreated')}:{' '}
-                          {googleBackfillResult.clientsCreated}
-                        </p>
-                        <p>
-                          {t('integrations.google.backfillClientsReused')}:{' '}
-                          {googleBackfillResult.clientsReused}
+                          {t('integrations.google.backfillUnchangedEvents')}:{' '}
+                          {googleBackfillResult.unchangedEvents ??
+                            googleBackfillResult.alreadyImported}
                         </p>
                         <p>
                           {t('integrations.google.backfillFailed')}: {googleBackfillResult.failed}
@@ -1789,11 +1783,20 @@ export default function SalonIntegrations() {
                     {t('integrations.google.backfillScanned')}: {googleBackfillResult.scanned}
                   </p>
                   <p>
-                    {t('integrations.google.backfillImported')}: {googleBackfillResult.imported}
+                    {t('integrations.google.backfillNewEvents')}:{' '}
+                    {googleBackfillResult.newEvents ?? googleBackfillResult.imported}
                   </p>
                   <p>
-                    {t('integrations.google.backfillReviewEvents')}:{' '}
-                    {googleBackfillResult.reviewEvents}
+                    {t('integrations.google.backfillUpdatedEvents')}:{' '}
+                    {googleBackfillResult.updatedEvents ?? 0}
+                  </p>
+                  <p>
+                    {t('integrations.google.backfillUnchangedEvents')}:{' '}
+                    {googleBackfillResult.unchangedEvents ??
+                      googleBackfillResult.alreadyImported}
+                  </p>
+                  <p>
+                    {t('integrations.google.backfillFailed')}: {googleBackfillResult.failed}
                   </p>
                 </div>
               ) : null}

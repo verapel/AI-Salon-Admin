@@ -723,6 +723,14 @@ export interface GoogleBackfillLast30DaysResult {
   excluded: number;
   failed: number;
   truncated: boolean;
+  newEvents?: number;
+  updatedEvents?: number;
+  unchangedEvents?: number;
+  appointmentsCreated?: number;
+  appointmentsUpdated?: number;
+  reviewEventsCreated?: number;
+  reviewEventsUpdated?: number;
+  conflicts?: number;
   reasons: {
     noPhone: number;
     unsafeClientName: number;

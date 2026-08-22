@@ -118,9 +118,23 @@ export function googleReviewOccurrenceLookupKeys(
   return rec ? [ev.id, `${ev.id}:${rec}`] : [ev.id];
 }
 
+export type GoogleReviewOverlayRecord = {
+  issueId: string;
+  etag: string | null;
+  title: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  staffId: string;
+  staffName: string;
+  reasonCode: string;
+  clientId: string | null;
+};
+
 export type GoogleReviewCoverageIndex = {
   overlayKeys: Set<string>;
   clientByKey: Map<string, string>;
+  overlayByKey: Map<string, GoogleReviewOverlayRecord>;
 };
 
 export async function loadGoogleReviewCoverageIndex(params: {
@@ -130,13 +144,16 @@ export async function loadGoogleReviewCoverageIndex(params: {
 }): Promise<GoogleReviewCoverageIndex> {
   const overlayKeys = new Set<string>();
   const clientByKey = new Map<string, string>();
+  const overlayByKey = new Map<string, GoogleReviewOverlayRecord>();
   try {
     const { data, error } = await params.db
       .from('calendar_import_issues')
-      .select('external_uid, recurrence_id, parsed_event, raw_event, status')
+      .select(
+        'id, external_uid, recurrence_id, parsed_event, raw_event, status, external_etag, reason_code',
+      )
       .eq('salon_id', params.salonId)
       .eq('calendar_connection_id', params.calendarConnectionId);
-    if (error || !Array.isArray(data)) return { overlayKeys, clientByKey };
+    if (error || !Array.isArray(data)) return { overlayKeys, clientByKey, overlayByKey };
     for (const row of data) {
       if (row?.status && row.status !== 'open') continue;
       const uid = typeof row?.external_uid === 'string' ? row.external_uid : '';
@@ -149,19 +166,31 @@ export async function loadGoogleReviewCoverageIndex(params: {
       for (const key of keys) overlayKeys.add(key);
       const parsed = row?.parsed_event;
       const raw = row?.raw_event;
+      const snapshot = readSnapshot(parsed);
       const clientId =
-        (parsed && typeof parsed === 'object' && typeof parsed.clientId === 'string'
-          ? parsed.clientId
-          : '') ||
+        snapshot?.clientId ||
         (raw && typeof raw === 'object' && typeof raw.clientId === 'string' ? raw.clientId : '');
       if (clientId) {
         for (const key of keys) clientByKey.set(key, clientId);
       }
+      const record: GoogleReviewOverlayRecord = {
+        issueId: typeof row?.id === 'string' ? row.id : '',
+        etag: typeof row?.external_etag === 'string' ? row.external_etag : null,
+        title: snapshot?.title || '',
+        date: snapshot?.date || '',
+        startTime: snapshot?.startTime || '',
+        endTime: snapshot?.endTime || '',
+        staffId: snapshot?.staffId || '',
+        staffName: snapshot?.staffName || '',
+        reasonCode: typeof row?.reason_code === 'string' ? row.reason_code : 'other',
+        clientId: clientId || null,
+      };
+      for (const key of keys) overlayByKey.set(key, record);
     }
   } catch {
-    return { overlayKeys, clientByKey };
+    return { overlayKeys, clientByKey, overlayByKey };
   }
-  return { overlayKeys, clientByKey };
+  return { overlayKeys, clientByKey, overlayByKey };
 }
 
 export function findRememberedCoverageClientId(
@@ -186,10 +215,38 @@ export function rememberGoogleReviewCoverage(
   ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>,
   index: GoogleReviewCoverageIndex,
   clientId?: string | null,
+  record?: GoogleReviewOverlayRecord | null,
 ): void {
   for (const key of googleReviewOccurrenceLookupKeys(ev)) {
     index.overlayKeys.add(key);
     if (clientId) index.clientByKey.set(key, clientId);
+    if (record) index.overlayByKey.set(key, record);
+  }
+}
+
+export async function dismissGoogleReviewOverlay(params: {
+  db: any;
+  salonId: string;
+  calendarConnectionId: string;
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>;
+}): Promise<boolean> {
+  const recurrenceId = buildGoogleOccurrenceRecurrenceId(params.ev);
+  const nowIso = new Date().toISOString();
+  try {
+    const { error } = await params.db
+      .from('calendar_import_issues')
+      .update({
+        status: 'dismissed',
+        updated_at: nowIso,
+      })
+      .eq('salon_id', params.salonId)
+      .eq('calendar_connection_id', params.calendarConnectionId)
+      .eq('external_uid', params.ev.id)
+      .eq('recurrence_id', recurrenceId)
+      .eq('status', 'open');
+    return !error;
+  } catch {
+    return false;
   }
 }
 

@@ -164,6 +164,15 @@ function coverageDb(opts: {
             };
             return chain;
           },
+          update() {
+            const chain: any = {
+              eq() {
+                return chain;
+              },
+              then: async (resolve: any) => resolve({ error: null }),
+            };
+            return chain;
+          },
         };
       }
       if (table === 'staff') {

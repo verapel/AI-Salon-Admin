@@ -22,7 +22,6 @@ import {
   buildGoogleOccurrenceKey,
   buildGoogleOccurrenceRecurrenceId,
   executeManualGoogleCalendarImport,
-  loadGoogleImportedOccurrenceKeys,
   suggestNewClientNameFromTitle,
   type ManualGoogleImportResult,
 } from './googleCalendarImport.js';
@@ -41,10 +40,21 @@ import { decryptCalendarCredential } from './calendarCredentialsCrypto.js';
 import { getSalonTimezone } from './scheduleSlots.js';
 import {
   googleSkipReasonNeedsCalendarOverlay,
+  isGoogleEventCancelledOrDeleted,
   isGoogleEventEligibleForSalonCalendarDisplay,
+  isGoogleReviewOverlayRepresented,
+  loadGoogleReviewCoverageIndex,
   persistGoogleReviewOrResolve,
   resolveGoogleCalendarReviewIssue,
 } from './googleCalendarReviewOverlay.js';
+import {
+  findImportedOccurrenceRecord,
+  googleOccurrenceNeedsAutoReconcile,
+  loadGoogleImportedOccurrenceIndex,
+  reconcileGoogleReviewOverlay,
+  reconcileGoogleSourcedAppointment,
+  type GoogleImportedOccurrenceIndex,
+} from './googleCalendarReconcile.js';
 import {
   loadGoogleCoverageClientSession,
   loadRememberedGoogleCoverageClientId,
@@ -741,6 +751,7 @@ export type GooglePullConnectionResult = {
   connectionId: string;
   scanned: number;
   imported: number;
+  updated: number;
   skipped: number;
   conflicts: number;
   errors: number;
@@ -771,6 +782,7 @@ export async function pullGoogleCalendarConnection(params: {
     connectionId: params.connectionId,
     scanned: 0,
     imported: 0,
+    updated: 0,
     skipped: 0,
     conflicts: 0,
     errors: 0,
@@ -853,9 +865,10 @@ export async function pullGoogleCalendarConnection(params: {
       return summary;
     }
 
-    let importedKeys = new Set<string>();
+    let importedIndex: GoogleImportedOccurrenceIndex = { keys: new Set(), byKey: new Map() };
     try {
-      importedKeys = await loadGoogleImportedOccurrenceKeys(params.db, {
+      importedIndex = await loadGoogleImportedOccurrenceIndex({
+        db: params.db,
         salonId: params.salonId,
         calendarConnectionId: params.connectionId,
       });
@@ -865,14 +878,43 @@ export async function pullGoogleCalendarConnection(params: {
         connectionId: params.connectionId,
         message: linkErr instanceof Error ? linkErr.message : String(linkErr),
       });
-      importedKeys = new Set();
+    }
+    const importedKeys = importedIndex.keys;
+    const reviewIndex = await loadGoogleReviewCoverageIndex({
+      db: params.db,
+      salonId: params.salonId,
+      calendarConnectionId: params.connectionId,
+    });
+
+    let salonTimeZoneEarly: string;
+    if (params.salonTimeZone) {
+      salonTimeZoneEarly = resolveParserTimezone(params.salonTimeZone);
+    } else {
+      try {
+        salonTimeZoneEarly = resolveParserTimezone(await getSalonTimezone(params.salonId));
+      } catch {
+        salonTimeZoneEarly = resolveParserTimezone(undefined);
+      }
     }
 
-    const keepDiscoverable = (ev: GoogleEventPreviewItem) =>
-      classifyAutoImportCreatedAt({
-        created: ev.created,
-        autoImportSince: watermark,
-      }) === 'new' && !isImportedGoogleOccurrence(ev, importedKeys);
+    const keepDiscoverable = (ev: GoogleEventPreviewItem) => {
+      const createdNew =
+        classifyAutoImportCreatedAt({
+          created: ev.created,
+          autoImportSince: watermark,
+        }) === 'new';
+      const represented =
+        isImportedGoogleOccurrence(ev, importedKeys) ||
+        isGoogleReviewOverlayRepresented(ev, reviewIndex.overlayKeys);
+      if (createdNew && !represented) return true;
+      if (!represented) return false;
+      return googleOccurrenceNeedsAutoReconcile({
+        ev,
+        imported: importedIndex,
+        overlays: reviewIndex,
+        salonTimeZone: salonTimeZoneEarly,
+      });
+    };
 
     let listedEvents: GoogleEventPreviewItem[];
     if (params.eventsOverride) {
@@ -938,20 +980,26 @@ export async function pullGoogleCalendarConnection(params: {
       }
     }
 
-    const events = selectNewGoogleEventsForAutoPull(listedEvents, watermark).filter(
-      (ev) => !isImportedGoogleOccurrence(ev, importedKeys),
-    );
+    const events = listedEvents.filter((ev) => {
+      const createdNew =
+        classifyAutoImportCreatedAt({
+          created: ev.created,
+          autoImportSince: watermark,
+        }) === 'new';
+      const represented =
+        isImportedGoogleOccurrence(ev, importedKeys) ||
+        isGoogleReviewOverlayRepresented(ev, reviewIndex.overlayKeys);
+      if (createdNew && !represented) return true;
+      if (!represented) return false;
+      return googleOccurrenceNeedsAutoReconcile({
+        ev,
+        imported: importedIndex,
+        overlays: reviewIndex,
+        salonTimeZone: salonTimeZoneEarly,
+      });
+    });
 
-    let salonTimeZone: string;
-    if (params.salonTimeZone) {
-      salonTimeZone = resolveParserTimezone(params.salonTimeZone);
-    } else {
-      try {
-        salonTimeZone = resolveParserTimezone(await getSalonTimezone(params.salonId));
-      } catch {
-        salonTimeZone = resolveParserTimezone(undefined);
-      }
-    }
+    const salonTimeZone = salonTimeZoneEarly;
 
     const loadedCatalog =
       params.matchCatalog ??
@@ -1018,6 +1066,51 @@ export async function pullGoogleCalendarConnection(params: {
           originalTitle: ev.summary,
           catalog,
         });
+
+        if (isImportedGoogleOccurrence(ev, importedKeys)) {
+          const record = findImportedOccurrenceRecord(ev, importedIndex);
+          if (!record?.appointmentId || isGoogleEventCancelledOrDeleted(ev)) {
+            bumpSkip('already_imported');
+            continue;
+          }
+          const moved = await reconcileGoogleSourcedAppointment({
+            db: params.db,
+            salonId: params.salonId,
+            calendarConnectionId: params.connectionId,
+            ev,
+            record,
+            salonTimeZone,
+            staffId,
+            staffName,
+            matching,
+          });
+          if (moved.kind === 'conflict') {
+            summary.conflicts += 1;
+            bumpSkip('appointment_conflict');
+          } else if (moved.kind === 'updated') {
+            summary.updated += 1;
+          } else {
+            bumpSkip('already_imported');
+          }
+          continue;
+        }
+
+        if (isGoogleReviewOverlayRepresented(ev, reviewIndex.overlayKeys)) {
+          const overlayOut = await reconcileGoogleReviewOverlay({
+            db: params.db,
+            salonId: params.salonId,
+            calendarConnectionId: params.connectionId,
+            ev,
+            overlays: reviewIndex,
+            staffId,
+            staffName,
+            salonTimeZone,
+            matching,
+          });
+          if (overlayOut === 'updated' || overlayOut === 'hidden') summary.updated += 1;
+          else bumpSkip('already_imported');
+          continue;
+        }
 
         const decision = decideGoogleAutoImport({
           parsed,
