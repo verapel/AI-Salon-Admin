@@ -86,11 +86,11 @@ function dbWithRow(row: Record<string, unknown> | null) {
 }
 
 describe('GOOGLE-CAL-FAST-2 events preview URL + mapping (executed)', () => {
-  it('preview window is now-30d .. now+90d UTC ISO', () => {
+  it('preview window is start of UTC day 30d ago and has no timeMax', () => {
     const now = new Date('2026-08-16T12:00:00.000Z');
     const w = buildGoogleEventsPreviewWindow(now);
-    assert.equal(w.timeMin, '2026-07-17T12:00:00.000Z');
-    assert.equal(w.timeMax, '2026-11-14T12:00:00.000Z');
+    assert.equal(w.timeMin, '2026-07-17T00:00:00.000Z');
+    assert.equal(w.timeMax, undefined);
   });
 
   it('events.list URL uses selected calendar + required query params', () => {
@@ -262,6 +262,7 @@ describe('GOOGLE-CAL-FAST-2 pagination + salon preview (mock HTTP)', () => {
         });
       }
       assert.match(url, /\/calendars\/primary\/events/);
+      assert.doesNotMatch(url, /timeMax=/);
       assert.doesNotMatch(url, /rt-secret/);
       return new Response(
         JSON.stringify({

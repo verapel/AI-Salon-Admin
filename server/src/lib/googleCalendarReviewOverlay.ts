@@ -81,13 +81,25 @@ export function isGoogleEventCancelledOrDeleted(
   return status === 'cancelled' || status === 'deleted';
 }
 
+export function usableGoogleDateTime(value: string | null | undefined): boolean {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) return false;
+  return Number.isFinite(Date.parse(raw));
+}
+
+/**
+ * All-day only when there is no usable start+end dateTime pair.
+ * A leftover `date` or `allDay` flag must not hide a timed Google event.
+ */
 export function isGoogleEventAllDay(ev: Pick<GoogleEventPreviewItem, 'start' | 'end'>): boolean {
-  return Boolean(
-    ev.start?.allDay ||
-      ev.end?.allDay ||
-      (ev.start?.date && !ev.start?.dateTime) ||
-      (ev.end?.date && !ev.end?.dateTime),
-  );
+  const startDt = usableGoogleDateTime(ev.start?.dateTime);
+  const endDt = usableGoogleDateTime(ev.end?.dateTime);
+  if (startDt && endDt) return false;
+  const startDateOnly = Boolean(ev.start?.date?.trim()) && !startDt;
+  const endDateOnly = Boolean(ev.end?.date?.trim()) && !endDt;
+  const flagged =
+    Boolean(ev.start?.allDay || ev.end?.allDay) && !startDt && !endDt;
+  return startDateOnly || endDateOnly || flagged;
 }
 
 /**
@@ -701,7 +713,15 @@ export async function persistGoogleReviewOrResolve(params: {
     return 'resolved';
   }
   if (!isGoogleEventEligibleForSalonCalendarDisplay(params.ev)) return 'excluded';
-  if (!googleSkipReasonNeedsCalendarOverlay(params.reasonCode)) return 'excluded';
+  const skipNeedsOverlay = googleSkipReasonNeedsCalendarOverlay(params.reasonCode);
+  const timedPair =
+    usableGoogleDateTime(params.ev.start?.dateTime) &&
+    usableGoogleDateTime(params.ev.end?.dateTime);
+  const falseAllDaySkip =
+    (params.reasonCode === 'all_day' || params.reasonCode === 'google_event_all_day') &&
+    timedPair &&
+    !isGoogleEventAllDay(params.ev);
+  if (!skipNeedsOverlay && !falseAllDaySkip) return 'excluded';
   const snapshot = buildGoogleReviewSnapshot({
     ev: params.ev,
     salonTimeZone: params.salonTimeZone,

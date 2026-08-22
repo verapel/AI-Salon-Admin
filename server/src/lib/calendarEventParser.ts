@@ -528,7 +528,21 @@ function parseTimes(
   timedOk: boolean;
 } {
   const reasons: string[] = [];
-  const allDay = Boolean(start.allDay || end.allDay || (start.date && !start.dateTime));
+  const startDt =
+    typeof start.dateTime === 'string' &&
+    start.dateTime.trim() &&
+    Number.isFinite(Date.parse(start.dateTime.trim()));
+  const endDt =
+    typeof end.dateTime === 'string' &&
+    end.dateTime.trim() &&
+    Number.isFinite(Date.parse(end.dateTime.trim()));
+  const allDay = !(startDt && endDt) &&
+    Boolean(
+      ((!startDt && start.allDay) ||
+        (!endDt && end.allDay) ||
+        (start.date && !startDt) ||
+        (end.date && !endDt)),
+    );
 
   if (allDay) {
     return {

@@ -49,11 +49,15 @@ export const GOOGLE_CALENDAR_PROVIDER = 'google' as const;
 /** FAST-6D/F: persisted events.list page cursor in provider_config. */
 export const GOOGLE_AUTO_IMPORT_PAGE_TOKEN_CONFIG_KEY = 'auto_import_page_token' as const;
 
-/** FAST-2 preview safety caps (not final sync architecture). */
+/** Helper defaults (auto-pull / low-cap callers). Salon preview overrides these. */
 export const GOOGLE_EVENTS_PREVIEW_MAX_PAGES = 10;
 export const GOOGLE_EVENTS_PREVIEW_MAX_EVENTS = 500;
 export const GOOGLE_EVENTS_PREVIEW_LOOKBACK_DAYS = 30;
+/** FAST-6 auto-pull start-window lookahead only. Salon preview has no future timeMax. */
 export const GOOGLE_EVENTS_PREVIEW_LOOKAHEAD_DAYS = 90;
+/** Salon «Показать события»: same hard cap as manual sync. */
+export const GOOGLE_EVENTS_SALON_PREVIEW_MAX_PAGES = 20;
+export const GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS = 5000;
 
 export type GoogleCalendarOAuthErrorCode =
   | 'GOOGLE_OAUTH_NOT_CONFIGURED'
@@ -776,17 +780,20 @@ export async function selectGoogleCalendarForSalon(params: {
   };
 }
 
+/**
+ * Salon preview listing window: same coverage as manual sync.
+ * [start of UTC day 30 calendar days ago, +∞). No future timeMax.
+ */
 export function buildGoogleEventsPreviewWindow(now: Date = new Date()): {
   timeMin: string;
-  timeMax: string;
+  timeMax?: string;
 } {
-  const start = new Date(now.getTime());
+  const start = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
   start.setUTCDate(start.getUTCDate() - GOOGLE_EVENTS_PREVIEW_LOOKBACK_DAYS);
-  const end = new Date(now.getTime());
-  end.setUTCDate(end.getUTCDate() + GOOGLE_EVENTS_PREVIEW_LOOKAHEAD_DAYS);
   return {
     timeMin: start.toISOString(),
-    timeMax: end.toISOString(),
   };
 }
 
@@ -1251,8 +1258,10 @@ export async function previewGoogleCalendarEventsForSalon(params: {
     calendarId,
     calendarName,
     timeMin: window.timeMin,
-    timeMax: window.timeMax,
+    ...(window.timeMax ? { timeMax: window.timeMax } : {}),
     fetchImpl: params.fetchImpl,
+    maxPages: GOOGLE_EVENTS_SALON_PREVIEW_MAX_PAGES,
+    maxEvents: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
   });
 
   // GOOGLE-CAL-FAST-3B: attach pure deterministic parse (no DB writes).
@@ -1304,7 +1313,7 @@ export async function previewGoogleCalendarEventsForSalon(params: {
     count: eventsWithParsed.length,
     truncated,
     windowStart: window.timeMin,
-    windowEnd: window.timeMax,
+    windowEnd: window.timeMax ?? '',
     calendarId,
     calendarName,
     salonTimeZone,

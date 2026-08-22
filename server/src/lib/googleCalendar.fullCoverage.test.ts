@@ -23,11 +23,7 @@ import {
 } from './googleCalendarBackfill.js';
 import { listGoogleReviewCalendarItems } from './googleCalendarReviewOverlay.js';
 import { googleSyncAccountingConsistent } from './googleCalendarSyncTerminals.js';
-import {
-  GOOGLE_EVENTS_PREVIEW_LOOKAHEAD_DAYS,
-  GOOGLE_EVENTS_PREVIEW_MAX_EVENTS,
-  type GoogleEventPreviewItem,
-} from './googleCalendarOAuth.js';
+import { type GoogleEventPreviewItem } from './googleCalendarOAuth.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '../../..');
@@ -678,11 +674,9 @@ describe('GOOGLE FULL CALENDAR COVERAGE', () => {
     assert.equal(overlay.length, 0);
   });
 
-  it('manual listing caps stay 20 pages / 5000; preview 500 / +90 must not limit sync', () => {
+  it('manual listing caps stay 20 pages / 5000; salon preview now matches that coverage', () => {
     assert.equal(GOOGLE_BACKFILL_MAX_PAGES, 20);
     assert.equal(GOOGLE_BACKFILL_MAX_SCAN_EVENTS, 5000);
-    assert.equal(GOOGLE_EVENTS_PREVIEW_MAX_EVENTS, 500);
-    assert.equal(GOOGLE_EVENTS_PREVIEW_LOOKAHEAD_DAYS, 90);
     const backfill = read('server/src/lib/googleCalendarBackfill.ts');
     const oauth = read('server/src/lib/googleCalendarOAuth.ts');
     const calendar = read('client/src/pages/Calendar.tsx');
@@ -690,8 +684,9 @@ describe('GOOGLE FULL CALENDAR COVERAGE', () => {
     assert.match(backfill, /No future timeMax/);
     assert.match(backfill, /listGoogleCalendarEventsForBackfill/);
     assert.match(backfill, /GOOGLE_BACKFILL_MAX_SCAN_EVENTS/);
-    assert.doesNotMatch(backfill, /GOOGLE_EVENTS_PREVIEW_MAX_EVENTS/);
-    assert.match(oauth, /GOOGLE_EVENTS_PREVIEW_MAX_EVENTS = 500/);
+    assert.match(oauth, /GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS = 5000/);
+    assert.match(oauth, /GOOGLE_EVENTS_SALON_PREVIEW_MAX_PAGES = 20/);
+    assert.match(oauth, /No future timeMax/);
     assert.match(calendar, /hoursForVisibleDays/);
     assert.match(calendar, /getGoogleReviewEvents/);
     assert.match(calendar, /navigateWeek/);
