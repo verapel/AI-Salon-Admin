@@ -1,9 +1,16 @@
 export type ProductCurrency = 'AMD' | 'USD' | 'RUB' | 'EUR';
 
-function asAmount(value: unknown): number | null {
+/** Positive money only. Accepts number or string, including spaced thousands ("2 000"). */
+export function asAmount(value: unknown): number | null {
   if (value == null || value === '') return null;
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) ? n : null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+  const text = String(value).trim();
+  if (!text || text === '-' || text === '—') return null;
+  const normalized = text.replace(/\s+/g, '').replace(',', '.');
+  const n = Number(normalized);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 export function formatMoneyAmount(amount: number): string {
@@ -12,32 +19,31 @@ export function formatMoneyAmount(amount: number): string {
     .replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
+export function storedCurrency(value: unknown): string {
+  const text = value == null ? '' : String(value).trim();
+  return text || 'AMD';
+}
+
 export function formatProductPrice(product: {
-  price?: number | null;
-  priceMin?: number | null;
-  priceMax?: number | null;
-  price_min?: number | null;
-  price_max?: number | null;
+  price?: number | string | null;
+  priceMin?: number | string | null;
+  priceMax?: number | string | null;
+  price_min?: number | string | null;
+  price_max?: number | string | null;
   currency?: string | null;
 }): string {
-  const currency = product.currency || 'AMD';
-  const price = asAmount(product.price);
-  const priceMin = asAmount(product.priceMin ?? product.price_min);
-  const priceMax = asAmount(product.priceMax ?? product.price_max);
-  const hasRange = priceMin != null || priceMax != null;
+  const currency = storedCurrency(product.currency);
+  const min = asAmount(product.priceMin ?? product.price_min);
+  const max = asAmount(product.priceMax ?? product.price_max);
+  const exact = asAmount(product.price);
 
-  if (priceMin != null && priceMax != null) {
-    if (priceMin !== priceMax) {
-      return `${formatMoneyAmount(priceMin)}–${formatMoneyAmount(priceMax)} ${currency}`;
-    }
-    return `${formatMoneyAmount(priceMin)} ${currency}`;
+  if (min != null && max != null) {
+    return min === max
+      ? `${formatMoneyAmount(min)} ${currency}`
+      : `${formatMoneyAmount(min)}–${formatMoneyAmount(max)} ${currency}`;
   }
-  if (hasRange) {
-    return `${formatMoneyAmount((priceMin ?? priceMax) as number)} ${currency}`;
-  }
-  if (price != null && price > 0) {
-    return `${formatMoneyAmount(price)} ${currency}`;
-  }
-  if (price != null && price === 0) return `0 ${currency}`;
-  return '';
+  if (min != null) return `от ${formatMoneyAmount(min)} ${currency}`;
+  if (max != null) return `до ${formatMoneyAmount(max)} ${currency}`;
+  if (exact != null) return `${formatMoneyAmount(exact)} ${currency}`;
+  return '—';
 }

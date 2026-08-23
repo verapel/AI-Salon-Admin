@@ -215,6 +215,32 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.equal(ranged.priceMin, 2000);
     assert.equal(ranged.priceMax, 3000);
     assert.equal(formatProductPrice(ranged), '2 000–3 000 AMD');
+    const spaced = mapProduct({
+      id: 'p3',
+      name: 'Paint 6.0',
+      brand: 'Loreal',
+      line: 'Majirel',
+      code_shade: '6.0',
+      category: 'paint',
+      quantity: 1,
+      min_quantity: 0,
+      unit: '',
+      price: 0,
+      price_min: '2 000',
+      price_max: '3 000',
+      currency: 'EUR',
+      supplier: '',
+      marked_for_purchase: false,
+      created_at: '2026-08-17T00:00:00.000Z',
+      updated_at: '2026-08-17T00:00:00.000Z',
+    });
+    assert.equal(spaced.priceMin, 2000);
+    assert.equal(spaced.priceMax, 3000);
+    assert.equal(formatProductPrice(spaced), '2 000–3 000 EUR');
+    assert.equal(formatProductPrice({ price: 0, priceMin: 2000, currency: 'AMD' }), 'от 2 000 AMD');
+    assert.equal(formatProductPrice({ price: 0, priceMax: 3000, currency: 'AMD' }), 'до 3 000 AMD');
+    assert.equal(formatProductPrice({ price: 2500, currency: 'AMD' }), '2 500 AMD');
+    assert.equal(formatProductPrice({ price: 0, priceMin: 0, priceMax: 0, currency: 'AMD' }), '—');
     const mapper = read('server/src/lib/mappers.ts');
     const fn = mapper.slice(mapper.indexOf('export function mapProduct'), mapper.indexOf('export function mapStaff'));
     assert.match(fn, /deriveProductStockStatus/);

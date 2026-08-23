@@ -6,7 +6,13 @@ import type {
   Reminder,
   Product,
 } from '../types.js';
+import { parseOptionalMoney } from './productFields.js';
 import { deriveProductStockStatus, visibleCodeShade } from './products.js';
+
+function mapOptionalPrice(value: unknown): number | null {
+  const n = parseOptionalMoney(value);
+  return n == null || n === 0 ? null : n;
+}
 
 /** Normalize PostgreSQL TIME ("09:00:00") to API format ("09:00"). */
 export function formatTimeValue(value: string): string {
@@ -76,8 +82,8 @@ export function mapProduct(row: {
   price: number;
   volume?: string | null;
   percentage?: number | null;
-  price_min?: number | null;
-  price_max?: number | null;
+  price_min?: number | string | null;
+  price_max?: number | string | null;
   currency?: string | null;
   supplier: string;
   marked_for_purchase: boolean;
@@ -97,8 +103,8 @@ export function mapProduct(row: {
     volume: row.volume ?? '',
     percentage: row.percentage == null ? null : Number(row.percentage),
     price: Number(row.price),
-    priceMin: row.price_min == null ? null : Number(row.price_min),
-    priceMax: row.price_max == null ? null : Number(row.price_max),
+    priceMin: mapOptionalPrice(row.price_min),
+    priceMax: mapOptionalPrice(row.price_max),
     currency: row.currency || 'AMD',
     supplier: row.supplier ?? '',
     markedForPurchase: Boolean(row.marked_for_purchase),

@@ -183,6 +183,41 @@ describe('PRODUCTS-2 excel and photo import', () => {
       formatProductPrice({ price: 0, priceMin: 2000, priceMax: 3000, currency: 'AMD' }),
       '0 AMD'
     );
+    assert.equal(formatProductPrice({ priceMin: 2000, currency: 'AMD' }), 'от 2 000 AMD');
+    assert.equal(formatProductPrice({ price_min: '2000', currency: 'AMD' }), 'от 2 000 AMD');
+    assert.equal(formatProductPrice({ priceMax: 3000, currency: 'AMD' }), 'до 3 000 AMD');
+    assert.equal(formatProductPrice({ price_max: '3 000', currency: 'AMD' }), 'до 3 000 AMD');
+    assert.equal(formatProductPrice({ price: 2500, currency: 'AMD' }), '2 500 AMD');
+    assert.equal(formatProductPrice({ price: 0, currency: 'AMD' }), '—');
+    assert.equal(formatProductPrice({ price: 0, priceMin: 0, priceMax: 0, currency: 'AMD' }), '—');
+    assert.equal(formatProductPrice({ priceMin: '', priceMax: '', price: '', currency: 'AMD' }), '—');
+    assert.equal(
+      formatProductPrice({ price_min: '2 000', price_max: '3 000', currency: 'AMD' }),
+      '2 000–3 000 AMD'
+    );
+    for (const category of ['paint', 'oxide', 'care'] as const) {
+      assert.equal(
+        formatProductPrice({
+          price: 0,
+          priceMin: 2000,
+          priceMax: 3000,
+          currency: 'USD',
+        }),
+        '2 000–3 000 USD',
+        `${category} uses the same price formatter`
+      );
+      assert.equal(formatProductPrice({ price: 0, currency: 'EUR' }), '—', `${category} hides zero price`);
+    }
+    const productsPage = read('client/src/pages/Products.tsx');
+    assert.match(productsPage, /import \{ formatProductPrice \} from '@\/lib\/productFormat'/);
+    assert.equal((productsPage.match(/formatProductPrice\(product\)/g) || []).length, 2);
+    assert.doesNotMatch(productsPage, /0 AMD/);
+    const clientFormatter = read('client/src/lib/productFormat.ts');
+    assert.match(clientFormatter, /от \$\{formatMoneyAmount\(min\)\} \$\{currency\}/);
+    assert.match(clientFormatter, /до \$\{formatMoneyAmount\(max\)\} \$\{currency\}/);
+    assert.match(clientFormatter, /return '—'/);
+    assert.match(clientFormatter, /price_min/);
+    assert.match(clientFormatter, /price_max/);
     assert.equal(parseCurrency('RUB'), 'RUB');
     assert.equal(parseCurrency('EUR'), 'EUR');
     const saved = sanitizeDraft({
