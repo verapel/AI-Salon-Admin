@@ -135,23 +135,31 @@ export function formatMoneyAmount(amount: number): string {
 }
 
 export function formatProductPrice(fields: {
-  price: number | null;
+  price?: number | null;
   priceMin?: number | null;
   priceMax?: number | null;
+  price_min?: number | null;
+  price_max?: number | null;
   currency?: string | null;
 }): string {
   const currency = parseCurrency(fields.currency);
-  if (
-    fields.priceMin != null &&
-    fields.priceMax != null &&
-    fields.priceMin !== fields.priceMax
-  ) {
-    return `${formatMoneyAmount(fields.priceMin)}–${formatMoneyAmount(fields.priceMax)} ${currency}`;
+  const price = fields.price ?? null;
+  const priceMin = fields.priceMin ?? fields.price_min ?? null;
+  const priceMax = fields.priceMax ?? fields.price_max ?? null;
+  const hasRange = priceMin != null || priceMax != null;
+
+  if (priceMin != null && priceMax != null) {
+    if (priceMin !== priceMax) {
+      return `${formatMoneyAmount(priceMin)}–${formatMoneyAmount(priceMax)} ${currency}`;
+    }
+    return `${formatMoneyAmount(priceMin)} ${currency}`;
   }
-  if (fields.price != null && fields.price > 0) {
-    return `${formatMoneyAmount(fields.price)} ${currency}`;
+  if (hasRange) {
+    return `${formatMoneyAmount((priceMin ?? priceMax) as number)} ${currency}`;
   }
-  if (fields.priceMin != null) return `${formatMoneyAmount(fields.priceMin)} ${currency}`;
-  if (fields.price != null && fields.price === 0) return `0 ${currency}`;
+  if (price != null && price > 0) {
+    return `${formatMoneyAmount(price)} ${currency}`;
+  }
+  if (price != null && price === 0) return `0 ${currency}`;
   return '';
 }

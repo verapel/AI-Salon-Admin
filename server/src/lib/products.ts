@@ -3,6 +3,7 @@ export type ProductStockStatus = 'in_stock' | 'low' | 'out';
 export type ProductIdentityRow = {
   id: string;
   salon_id: string;
+  name: string;
   brand: string;
   line: string;
   code_shade: string;
@@ -23,33 +24,64 @@ export function normalizeIdentityPart(value: unknown): string {
     .replace(/\s+/g, ' ');
 }
 
-export function identityIsTracked(brand: string, line: string, codeShade: string): boolean {
-  return Boolean(brand.trim() || line.trim() || codeShade.trim());
+export function identityIsTracked(
+  name: string,
+  brand: string,
+  line: string,
+  codeShade: string
+): boolean {
+  return Boolean(name.trim() || brand.trim() || line.trim() || codeShade.trim());
 }
 
-export function productIdentityKey(brand: string, line: string, codeShade: string): string {
-  return [brand, line, codeShade].map((part) => part.trim().toLowerCase()).join('\0');
+/** Hide a stored shade that only exists to keep same-brand care rows unique. */
+export function visibleCodeShade(storedCode: string, name: string): string {
+  const code = normalizeIdentityPart(storedCode);
+  const normalizedName = normalizeIdentityPart(name);
+  if (code && normalizedName && code.toLowerCase() === normalizedName.toLowerCase()) return '';
+  return code;
+}
+
+/**
+ * Existing unique index is brand+line+code_shade only.
+ * When shade is empty, persist the name so two care products can coexist.
+ */
+export function storedCodeShade(visibleCode: string, name: string): string {
+  const code = normalizeIdentityPart(visibleCode);
+  if (code) return code;
+  return normalizeIdentityPart(name);
+}
+
+export function productIdentityKey(
+  name: string,
+  brand: string,
+  line: string,
+  codeShade: string
+): string {
+  return [name, brand, line, visibleCodeShade(codeShade, name)]
+    .map((part) => part.trim().toLowerCase())
+    .join('\0');
 }
 
 export function findIdentityConflict(
   rows: ProductIdentityRow[],
   opts: {
     salonId: string;
+    name: string;
     brand: string;
     line: string;
     codeShade: string;
     excludeId?: string;
   }
 ): ProductIdentityRow | null {
-  if (!identityIsTracked(opts.brand, opts.line, opts.codeShade)) return null;
-  const key = productIdentityKey(opts.brand, opts.line, opts.codeShade);
+  if (!identityIsTracked(opts.name, opts.brand, opts.line, opts.codeShade)) return null;
+  const key = productIdentityKey(opts.name, opts.brand, opts.line, opts.codeShade);
   return (
     rows.find(
       (row) =>
         row.salon_id === opts.salonId &&
         row.id !== opts.excludeId &&
-        identityIsTracked(row.brand, row.line, row.code_shade) &&
-        productIdentityKey(row.brand, row.line, row.code_shade) === key
+        identityIsTracked(row.name, row.brand, row.line, row.code_shade) &&
+        productIdentityKey(row.name, row.brand, row.line, row.code_shade) === key
     ) ?? null
   );
 }

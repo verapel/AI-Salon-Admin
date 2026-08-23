@@ -18,6 +18,7 @@ import {
   type ProductIdentityRow,
 } from './products.js';
 import { mapProduct } from './mappers.js';
+import { formatProductPrice } from './productFields.js';
 import {
   categoryForProductSection,
   isProductInSection,
@@ -39,9 +40,10 @@ function row(
   salonId: string,
   brand: string,
   line: string,
-  code: string
+  code: string,
+  name = 'Color'
 ): ProductIdentityRow {
-  return { id, salon_id: salonId, brand, line, code_shade: code };
+  return { id, salon_id: salonId, name, brand, line, code_shade: code };
 }
 
 describe('PRODUCTS-1 products foundation', () => {
@@ -89,6 +91,7 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.ok(
       findIdentityConflict(rows, {
         salonId: SALON_A,
+        name: 'Color',
         brand: 'loreal',
         line: 'majirel',
         codeShade: '6.1',
@@ -97,6 +100,7 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.equal(
       findIdentityConflict(rows, {
         salonId: SALON_A,
+        name: 'Color',
         brand: 'loreal',
         line: 'majirel',
         codeShade: '6.1',
@@ -107,6 +111,7 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.equal(
       findIdentityConflict(rows, {
         salonId: SALON_B,
+        name: 'Color',
         brand: 'Loreal',
         line: 'Majirel',
         codeShade: '6.1',
@@ -117,18 +122,42 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.equal(
       findIdentityConflict(
         [row('p1', SALON_A, 'Loreal', 'Majirel', '6.1')],
-        { salonId: SALON_B, brand: 'Loreal', line: 'Majirel', codeShade: '6.1' }
+        { salonId: SALON_B, name: 'Color', brand: 'Loreal', line: 'Majirel', codeShade: '6.1' }
       ),
       null
     );
     assert.equal(
       findIdentityConflict(rows, {
         salonId: SALON_A,
+        name: '',
         brand: '',
         line: '',
         codeShade: '',
       }),
       null
+    );
+  });
+
+  it('does not merge different care names that share brand and line', () => {
+    const rows = [row('p1', SALON_A, 'KAARAL', 'Les Crèmes', 'Hydra', 'Hydra')];
+    assert.equal(
+      findIdentityConflict(rows, {
+        salonId: SALON_A,
+        name: 'Renew Care',
+        brand: 'KAARAL',
+        line: 'Les Crèmes',
+        codeShade: '',
+      }),
+      null
+    );
+    assert.ok(
+      findIdentityConflict(rows, {
+        salonId: SALON_A,
+        name: 'Hydra',
+        brand: 'kaaral',
+        line: 'les crèmes',
+        codeShade: '',
+      })
     );
   });
 
@@ -163,6 +192,29 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.equal(mapped.priceMin, null);
     assert.equal(mapped.priceMax, null);
     assert.equal(mapped.currency, 'AMD');
+    const ranged = mapProduct({
+      id: 'p2',
+      name: 'Mask',
+      brand: 'KAARAL',
+      line: 'Les Crèmes',
+      code_shade: 'Mask',
+      category: 'care',
+      quantity: 1,
+      min_quantity: 0,
+      unit: '',
+      price: 0,
+      price_min: 2000,
+      price_max: 3000,
+      currency: 'AMD',
+      supplier: '',
+      marked_for_purchase: false,
+      created_at: '2026-08-17T00:00:00.000Z',
+      updated_at: '2026-08-17T00:00:00.000Z',
+    });
+    assert.equal(ranged.codeShade, '');
+    assert.equal(ranged.priceMin, 2000);
+    assert.equal(ranged.priceMax, 3000);
+    assert.equal(formatProductPrice(ranged), '2 000–3 000 AMD');
     const mapper = read('server/src/lib/mappers.ts');
     const fn = mapper.slice(mapper.indexOf('export function mapProduct'), mapper.indexOf('export function mapStaff'));
     assert.match(fn, /deriveProductStockStatus/);

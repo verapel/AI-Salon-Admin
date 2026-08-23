@@ -6,7 +6,7 @@ import type {
   Reminder,
   Product,
 } from '../types.js';
-import { deriveProductStockStatus } from './products.js';
+import { deriveProductStockStatus, visibleCodeShade } from './products.js';
 
 /** Normalize PostgreSQL TIME ("09:00:00") to API format ("09:00"). */
 export function formatTimeValue(value: string): string {
@@ -89,16 +89,16 @@ export function mapProduct(row: {
     name: row.name,
     brand: row.brand ?? '',
     line: row.line ?? '',
-    codeShade: row.code_shade ?? '',
+    codeShade: visibleCodeShade(row.code_shade ?? '', row.name),
     category: row.category ?? '',
     quantity: row.quantity,
     minQuantity: row.min_quantity,
     unit: row.unit ?? '',
     volume: row.volume ?? '',
-    percentage: row.percentage ?? null,
+    percentage: row.percentage == null ? null : Number(row.percentage),
     price: Number(row.price),
-    priceMin: row.price_min ?? null,
-    priceMax: row.price_max ?? null,
+    priceMin: row.price_min == null ? null : Number(row.price_min),
+    priceMax: row.price_max == null ? null : Number(row.price_max),
     currency: row.currency || 'AMD',
     supplier: row.supplier ?? '',
     markedForPurchase: Boolean(row.marked_for_purchase),

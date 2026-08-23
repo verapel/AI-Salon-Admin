@@ -18,6 +18,8 @@ import {
   normalizeIdentityPart,
   parseNonNegativeInt,
   parseNonNegativeNumber,
+  storedCodeShade,
+  visibleCodeShade,
 } from '../lib/products.js';
 import {
   draftIsEmpty,
@@ -37,7 +39,7 @@ type ProductRow = Database['public']['Tables']['products']['Row'];
 async function loadSalonIdentityRows(salonId: string) {
   const { data, error } = await supabase
     .from('products')
-    .select('id, salon_id, brand, line, code_shade')
+    .select('id, salon_id, name, brand, line, code_shade')
     .eq('salon_id', salonId);
 
   if (error) throw error;
@@ -159,6 +161,7 @@ router.post('/import/commit', requireSalonWriteAccess, async (req, res) => {
 
     const match = findIdentityConflict(existing, {
       salonId,
+      name: draft.name,
       brand: draft.brand,
       line: draft.line,
       codeShade: draft.codeShade,
@@ -200,7 +203,7 @@ router.post('/import/commit', requireSalonWriteAccess, async (req, res) => {
         name: draft.name,
         brand: draft.brand,
         line: draft.line,
-        code_shade: draft.codeShade,
+        code_shade: storedCodeShade(draft.codeShade, draft.name),
         category: draft.category,
         quantity: draft.quantity,
         min_quantity: draft.minQuantity,
@@ -229,7 +232,7 @@ router.post('/import/commit', requireSalonWriteAccess, async (req, res) => {
       salon_id: salonId,
       brand: draft.brand,
       line: draft.line,
-      code_shade: draft.codeShade,
+      code_shade: storedCodeShade(draft.codeShade, draft.name),
       name: draft.name,
       quantity: draft.quantity,
     });
@@ -239,7 +242,7 @@ router.post('/import/commit', requireSalonWriteAccess, async (req, res) => {
       name: draft.name,
       brand: draft.brand,
       line: draft.line,
-      code_shade: draft.codeShade,
+      code_shade: storedCodeShade(draft.codeShade, draft.name),
       category: draft.category,
       quantity: draft.quantity,
       min_quantity: draft.minQuantity,
@@ -278,7 +281,7 @@ router.post('/', requireSalonWriteAccess, async (req, res) => {
 
   try {
     const existing = await loadSalonIdentityRows(salonId);
-    if (findIdentityConflict(existing, { salonId, brand, line, codeShade })) {
+    if (findIdentityConflict(existing, { salonId, name, brand, line, codeShade })) {
       return duplicateResponse(res);
     }
   } catch (err) {
@@ -301,7 +304,7 @@ router.post('/', requireSalonWriteAccess, async (req, res) => {
       name,
       brand,
       line,
-      code_shade: codeShade,
+      code_shade: storedCodeShade(codeShade, name),
       category: normalizeIdentityPart(req.body?.category),
       quantity,
       min_quantity: minQuantity,
@@ -386,7 +389,12 @@ router.put('/:id', requireSalonWriteAccess, async (req, res) => {
   }
   if (req.body?.brand !== undefined) updates.brand = normalizeIdentityPart(req.body.brand);
   if (req.body?.line !== undefined) updates.line = normalizeIdentityPart(req.body.line);
-  if (req.body?.codeShade !== undefined) updates.code_shade = normalizeIdentityPart(req.body.codeShade);
+  if (req.body?.codeShade !== undefined) {
+    updates.code_shade = storedCodeShade(
+      normalizeIdentityPart(req.body.codeShade),
+      normalizeIdentityPart(req.body?.name ?? updates.name)
+    );
+  }
   if (req.body?.category !== undefined) updates.category = normalizeIdentityPart(req.body.category);
   if (req.body?.unit !== undefined) updates.unit = normalizeIdentityPart(req.body.unit);
   if (req.body?.supplier !== undefined) updates.supplier = normalizeIdentityPart(req.body.supplier);
@@ -435,22 +443,29 @@ router.put('/:id', requireSalonWriteAccess, async (req, res) => {
   }
 
   const identityTouched =
-    req.body?.brand !== undefined || req.body?.line !== undefined || req.body?.codeShade !== undefined;
+    req.body?.name !== undefined ||
+    req.body?.brand !== undefined ||
+    req.body?.line !== undefined ||
+    req.body?.codeShade !== undefined;
 
   if (identityTouched) {
     const { data: current, error: loadError } = await supabase
       .from('products')
-      .select('id, salon_id, brand, line, code_shade')
+      .select('id, salon_id, name, brand, line, code_shade')
       .eq('id', id)
       .eq('salon_id', salonId)
       .single();
 
     if (loadError || !current) return res.status(404).json({ error: 'Product not found' });
+    if (req.body?.codeShade === undefined && updates.name && visibleCodeShade(current.code_shade, current.name) === '') {
+      updates.code_shade = storedCodeShade('', updates.name);
+    }
 
     try {
       const existing = await loadSalonIdentityRows(salonId);
       const conflict = findIdentityConflict(existing, {
         salonId,
+        name: updates.name ?? current.name,
         brand: updates.brand ?? current.brand,
         line: updates.line ?? current.line,
         codeShade: updates.code_shade ?? current.code_shade,

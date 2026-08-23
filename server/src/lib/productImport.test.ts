@@ -103,6 +103,58 @@ describe('PRODUCTS-2 excel and photo import', () => {
     assert.equal(actions[2]?.kind, 'skip');
   });
 
+  it('creates two care products with the same brand/line and only updates the same name on reimport', () => {
+    const hydra = sanitizeDraft({
+      name: 'Hydra',
+      brand: 'KAARAL',
+      line: 'Les Crèmes',
+      volume: '500 ml',
+      category: 'care',
+      quantity: 1,
+    });
+    const renew = sanitizeDraft({
+      name: 'Renew Care',
+      brand: 'KAARAL',
+      line: 'Les Crèmes',
+      volume: '500 ml',
+      category: 'care',
+      quantity: 1,
+    });
+    const first = planImportRows([], SALON_A, [hydra, renew]);
+    assert.equal(first[0]?.kind, 'create');
+    assert.equal(first[1]?.kind, 'create');
+
+    const existing = [
+      {
+        id: 'hydra-1',
+        salon_id: SALON_A,
+        name: 'Hydra',
+        brand: 'KAARAL',
+        line: 'Les Crèmes',
+        code_shade: 'Hydra',
+        quantity: 1,
+      },
+      {
+        id: 'renew-1',
+        salon_id: SALON_A,
+        name: 'Renew Care',
+        brand: 'KAARAL',
+        line: 'Les Crèmes',
+        code_shade: 'Renew Care',
+        quantity: 1,
+      },
+    ];
+    const second = planImportRows(existing, SALON_A, [
+      sanitizeDraft({ name: 'Hydra', brand: 'KAARAL', line: 'Les Crèmes', quantity: 1 }),
+    ]);
+    assert.equal(second.length, 1);
+    assert.equal(second[0]?.kind, 'update');
+    if (second[0]?.kind === 'update') {
+      assert.equal(second[0].id, 'hydra-1');
+      assert.equal(second[0].quantityDelta, 1);
+    }
+  });
+
   it('parses volume, optional percentage, price, range, and currency', () => {
     assert.equal(parseVolume('100 ml'), '100 ml');
     assert.equal(parseVolume('250мл'), '250 ml');
@@ -119,6 +171,18 @@ describe('PRODUCTS-2 excel and photo import', () => {
     assert.equal(ranged.priceMin, 2000);
     assert.equal(ranged.priceMax, 3000);
     assert.equal(formatProductPrice(ranged), '2 000–3 000 AMD');
+    assert.equal(
+      formatProductPrice({ price: 0, priceMin: 2000, priceMax: 3000, currency: 'AMD' }),
+      '2 000–3 000 AMD'
+    );
+    assert.equal(
+      formatProductPrice({ price: 0, price_min: 2000, price_max: 3000, currency: 'RUB' }),
+      '2 000–3 000 RUB'
+    );
+    assert.notEqual(
+      formatProductPrice({ price: 0, priceMin: 2000, priceMax: 3000, currency: 'AMD' }),
+      '0 AMD'
+    );
     assert.equal(parseCurrency('RUB'), 'RUB');
     assert.equal(parseCurrency('EUR'), 'EUR');
     const saved = sanitizeDraft({

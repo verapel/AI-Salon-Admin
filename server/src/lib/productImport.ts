@@ -11,6 +11,7 @@ import {
   findIdentityConflict,
   identityIsTracked,
   normalizeIdentityPart,
+  storedCodeShade,
   parseNonNegativeInt,
   parseNonNegativeNumber,
   type ProductIdentityRow,
@@ -172,7 +173,7 @@ export function sanitizeDraft(input: Partial<ProductDraft> | Record<string, unkn
 }
 
 export function draftIsEmpty(draft: ProductDraft): boolean {
-  return !draft.name && !identityIsTracked(draft.brand, draft.line, draft.codeShade);
+  return !identityIsTracked(draft.name, draft.brand, draft.line, draft.codeShade);
 }
 
 export function mapSpreadsheetObject(row: Record<string, unknown>): ProductDraft {
@@ -337,6 +338,7 @@ export function planImportRows(
 
     const match = findIdentityConflict(working, {
       salonId,
+      name: draft.name,
       brand: draft.brand,
       line: draft.line,
       codeShade: draft.codeShade,
@@ -355,7 +357,7 @@ export function planImportRows(
       salon_id: salonId,
       brand: draft.brand,
       line: draft.line,
-      code_shade: draft.codeShade,
+      code_shade: storedCodeShade(draft.codeShade, draft.name),
       name: draft.name,
       quantity: draft.quantity,
     });
