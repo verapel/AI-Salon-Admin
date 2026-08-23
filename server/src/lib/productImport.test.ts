@@ -212,8 +212,21 @@ describe('PRODUCTS-2 excel and photo import', () => {
       assert.equal(formatProductPrice({ price: 0, currency: 'EUR' }), '—', `${category} hides zero price`);
     }
     const productsPage = read('client/src/pages/Products.tsx');
-    assert.match(productsPage, /import \{ asAmount, formatProductPrice \} from '@\/lib\/productFormat'/);
-    assert.equal((productsPage.match(/formatProductPrice\(product\)/g) || []).length, 2);
+    assert.match(
+      productsPage,
+      /import \{ asAmount, formatProductExactPrice, formatProductPrice, formatProductPriceRange \} from '@\/lib\/productFormat'/
+    );
+    assert.match(productsPage, /products\.columnPrice/);
+    assert.match(productsPage, /products\.fieldPriceRange/);
+    assert.match(productsPage, /products\.columnActions/);
+    const desktopTable = productsPage.slice(productsPage.indexOf('hidden sm:block'));
+    assert.match(
+      desktopTable,
+      /columnPrice[\s\S]*fieldPriceRange[\s\S]*columnActions/
+    );
+    assert.match(desktopTable, /formatProductExactPrice\(product\)/);
+    assert.match(desktopTable, /formatProductPriceRange\(product\)/);
+    assert.doesNotMatch(desktopTable, /formatProductPrice\(product\)/);
     assert.doesNotMatch(productsPage, /0 AMD/);
     const clientFormatter = read('client/src/lib/productFormat.ts');
     assert.match(clientFormatter, /от \$\{formatMoneyAmount\(min\)\} \$\{currency\}/);

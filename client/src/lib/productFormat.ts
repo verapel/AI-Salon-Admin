@@ -47,3 +47,30 @@ export function formatProductPrice(product: {
   if (exact != null) return `${formatMoneyAmount(exact)} ${currency}`;
   return '—';
 }
+
+export function formatProductExactPrice(product: {
+  price?: number | string | null;
+  currency?: string | null;
+}): string {
+  const exact = asAmount(product.price);
+  if (exact == null) return '—';
+  return `${formatMoneyAmount(exact)} ${storedCurrency(product.currency)}`;
+}
+
+export function formatProductPriceRange(product: {
+  priceMin?: number | string | null;
+  priceMax?: number | string | null;
+  price_min?: number | string | null;
+  price_max?: number | string | null;
+  currency?: string | null;
+}): string {
+  const currency = storedCurrency(product.currency);
+  const min = asAmount(product.priceMin ?? product.price_min);
+  const max = asAmount(product.priceMax ?? product.price_max);
+  if (min != null && max != null) {
+    return `${formatMoneyAmount(min)} – ${formatMoneyAmount(max)} ${currency}`;
+  }
+  if (min != null) return `от ${formatMoneyAmount(min)} ${currency}`;
+  if (max != null) return `до ${formatMoneyAmount(max)} ${currency}`;
+  return '—';
+}

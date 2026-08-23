@@ -26,7 +26,7 @@ import {
   isProductInSection,
   type ProductSection,
 } from '@/lib/productSection';
-import { asAmount, formatProductPrice } from '@/lib/productFormat';
+import { asAmount, formatProductExactPrice, formatProductPrice, formatProductPriceRange } from '@/lib/productFormat';
 import type { Product, ProductDraft, ProductImportResult, ProductStockStatus } from '@/types';
 
 type StockFilter = 'all' | ProductStockStatus | 'purchase';
@@ -642,6 +642,9 @@ export default function Products() {
                       <th className="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">
                         {t('products.columnPrice')}
                       </th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">
+                        {t('products.fieldPriceRange')}
+                      </th>
                       <th className="px-4 py-3 text-right font-medium text-gray-500 dark:text-gray-400">
                         {t('products.columnActions')}
                       </th>
@@ -707,7 +710,10 @@ export default function Products() {
                           </div>
                         </td>
                         <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
-                          {formatProductPrice(product)}
+                          {formatProductExactPrice(product)}
+                        </td>
+                        <td className="px-4 py-3 text-gray-900 dark:text-white">
+                          {formatProductPriceRange(product)}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-1">
