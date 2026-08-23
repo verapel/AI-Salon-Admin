@@ -1,5 +1,13 @@
 import * as XLSX from 'xlsx';
 import {
+  DEFAULT_PRODUCT_CURRENCY,
+  parseCurrency,
+  parsePercentage,
+  parseProductPricing,
+  parseVolume,
+  type ProductCurrency,
+} from './productFields.js';
+import {
   findIdentityConflict,
   identityIsTracked,
   normalizeIdentityPart,
@@ -17,7 +25,12 @@ export type ProductDraft = {
   quantity: number;
   minQuantity: number;
   unit: string;
+  volume: string;
+  percentage: number | null;
   price: number;
+  priceMin: number | null;
+  priceMax: number | null;
+  currency: ProductCurrency;
   supplier: string;
   markedForPurchase: boolean;
 };
@@ -55,7 +68,12 @@ const HEADER_ALIASES: Record<keyof ProductDraft, string[]> = {
   quantity: ['quantity', 'qty', 'count', 'количество', 'кол во', 'кол-во', 'քանակ'],
   minQuantity: ['min', 'min quantity', 'minquantity', 'минимум', 'мин количество', 'նվազագույն'],
   unit: ['unit', 'ед', 'единица', 'ед изм', 'միավոր'],
+  volume: ['volume', 'объём', 'объем', 'объем мл', 'ծավալ'],
+  percentage: ['percentage', 'percent', 'процент', '%', 'տոկոս'],
   price: ['price', 'цена', 'գին', 'cost'],
+  priceMin: ['price min', 'price_min', 'мин цена', 'цена от', 'min price'],
+  priceMax: ['price max', 'price_max', 'макс цена', 'цена до', 'max price'],
+  currency: ['currency', 'валюта', 'արժույթ'],
   supplier: ['supplier', 'vendor', 'поставщик', 'մատակարար'],
   markedForPurchase: ['to order', 'purchase', 'for purchase', 'к закупке', 'закупка', 'գնման'],
 };
@@ -101,7 +119,12 @@ export function emptyDraft(): ProductDraft {
     quantity: 1,
     minQuantity: 0,
     unit: '',
+    volume: '',
+    percentage: null,
     price: 0,
+    priceMin: null,
+    priceMax: null,
+    currency: DEFAULT_PRODUCT_CURRENCY,
     supplier: '',
     markedForPurchase: false,
   };
@@ -120,6 +143,14 @@ export function sanitizeDraft(input: Partial<ProductDraft> | Record<string, unkn
   const name =
     normalizeIdentityPart(input.name) ||
     [brand, line, codeShade].filter(Boolean).join(' ');
+  const raw = input as Record<string, unknown>;
+  const pricing = parseProductPricing({
+    price: raw.price ?? price,
+    priceMin: raw.priceMin ?? raw.price_min,
+    priceMax: raw.priceMax ?? raw.price_max,
+    priceRange: raw.priceRange ?? raw.price_range,
+    currency: raw.currency,
+  });
   return {
     name,
     brand,
@@ -129,7 +160,12 @@ export function sanitizeDraft(input: Partial<ProductDraft> | Record<string, unkn
     quantity: quantity ?? 1,
     minQuantity: minQuantity ?? 0,
     unit: normalizeIdentityPart(input.unit),
-    price: price ?? 0,
+    volume: parseVolume(raw.volume ?? raw.size ?? raw.ml),
+    percentage: parsePercentage(raw.percentage ?? raw.percent ?? raw.vol),
+    price: pricing.price || (price ?? 0),
+    priceMin: pricing.priceMin,
+    priceMax: pricing.priceMax,
+    currency: parseCurrency(raw.currency),
     supplier: normalizeIdentityPart(input.supplier),
     markedForPurchase: coerceMarked((input as { markedForPurchase?: unknown }).markedForPurchase),
   };
@@ -159,31 +195,128 @@ export function parseSpreadsheetBuffer(buffer: Buffer): ProductDraft[] {
   return rows.map(mapSpreadsheetObject).filter((row) => !draftIsEmpty(row));
 }
 
-export function draftsFromPhotoPayload(payload: unknown): ProductDraft[] {
-  const list = extractDraftList(payload);
-  return list.map((item) => sanitizeDraft(item as Record<string, unknown>)).filter((row) => !draftIsEmpty(row));
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function extractDraftList(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
-  if (!payload || typeof payload !== 'object') return [];
-  const record = payload as Record<string, unknown>;
-  if (Array.isArray(record.products)) return record.products;
-  if (Array.isArray(record.rows)) return record.rows;
-  if (Array.isArray(record.items)) return record.items;
+function looksLikeProduct(value: unknown): value is Record<string, unknown> {
+  if (!isPlainObject(value)) return false;
+  const keys = [
+    'name',
+    'brand',
+    'line',
+    'code',
+    'code_shade',
+    'codeShade',
+    'shade',
+    'volume',
+    'percentage',
+    'price',
+    'category',
+  ];
+  return keys.some((key) => value[key] != null && String(value[key]).trim() !== '');
+}
+
+/**
+ * Collect every distinct product node. Do not collapse products[] to [0]
+ * (that dropped the second care item when a photo had two bottles).
+ */
+export function collectPhotoProductNodes(payload: unknown): Record<string, unknown>[] {
+  if (payload == null) return [];
+  if (Array.isArray(payload)) {
+    return payload.flatMap((item) => collectPhotoProductNodes(item));
+  }
+  if (!isPlainObject(payload)) return [];
+
+  const listKeys = ['products', 'items', 'rows', 'result', 'results', 'data'];
+  for (const key of listKeys) {
+    const value = payload[key];
+    if (Array.isArray(value)) {
+      return value.flatMap((item) => collectPhotoProductNodes(item));
+    }
+    if (looksLikeProduct(value)) return [value];
+  }
+
+  if (looksLikeProduct(payload.product) && !Array.isArray(payload.products)) {
+    return [payload.product as Record<string, unknown>];
+  }
+  if (looksLikeProduct(payload)) return [payload];
   return [];
+}
+
+export function draftsFromPhotoPayload(payload: unknown): ProductDraft[] {
+  const list = collectPhotoProductNodes(payload);
+  return list.map((item) => sanitizeDraft(item)).filter((row) => !draftIsEmpty(row));
+}
+
+function extractBalancedJson(source: string): string | null {
+  const open = source[0];
+  if (open !== '{' && open !== '[') return null;
+  const close = open === '{' ? '}' : ']';
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === open) depth += 1;
+    else if (ch === close) {
+      depth -= 1;
+      if (depth === 0) return source.slice(0, i + 1);
+    }
+  }
+  return null;
+}
+
+function extractAllCompleteJsonValues(source: string): unknown[] {
+  const values: unknown[] = [];
+  let rest = source.trim();
+  while (rest) {
+    const start = rest.search(/[\[{]/);
+    if (start < 0) break;
+    const extracted = extractBalancedJson(rest.slice(start));
+    if (!extracted) return [];
+    try {
+      values.push(JSON.parse(extracted));
+    } catch {
+      return [];
+    }
+    rest = rest.slice(start + extracted.length).trim();
+    if (rest.startsWith(',')) rest = rest.slice(1).trim();
+  }
+  return values;
 }
 
 export function parseJsonFromModelText(text: string): unknown {
   const trimmed = text.trim();
+  if (!trimmed) return [];
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const raw = fenced ? fenced[1].trim() : trimmed;
   const start = raw.search(/[\[{]/);
   if (start < 0) return [];
+  const slice = raw.slice(start);
   try {
-    return JSON.parse(raw.slice(start));
+    return JSON.parse(slice);
   } catch {
-    return [];
+    const values = extractAllCompleteJsonValues(slice);
+    if (values.length === 0) return [];
+    if (values.length === 1) return values[0];
+    return values;
   }
 }
 

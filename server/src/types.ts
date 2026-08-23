@@ -35,7 +35,12 @@ export interface Product {
   quantity: number;
   minQuantity: number;
   unit: string;
+  volume: string;
+  percentage: number | null;
   price: number;
+  priceMin: number | null;
+  priceMax: number | null;
+  currency: string;
   supplier: string;
   markedForPurchase: boolean;
   stockStatus: ProductStockStatus;

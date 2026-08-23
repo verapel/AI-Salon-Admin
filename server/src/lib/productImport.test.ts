@@ -17,6 +17,13 @@ import {
   sanitizeDraft,
 } from './productImport.js';
 import { extractProductDraftsFromImage, productPhotoVisionModel } from './productPhotoVision.js';
+import {
+  formatProductPrice,
+  parseCurrency,
+  parsePercentage,
+  parseProductPricing,
+  parseVolume,
+} from './productFields.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '../../..');
@@ -96,6 +103,94 @@ describe('PRODUCTS-2 excel and photo import', () => {
     assert.equal(actions[2]?.kind, 'skip');
   });
 
+  it('parses volume, optional percentage, price, range, and currency', () => {
+    assert.equal(parseVolume('100 ml'), '100 ml');
+    assert.equal(parseVolume('250мл'), '250 ml');
+    assert.equal(parseVolume('1 L'), '1 L');
+    assert.equal(parseVolume(''), '');
+    assert.equal(parsePercentage('1.5%'), 1.5);
+    assert.equal(parsePercentage('9%'), 9);
+    assert.equal(parsePercentage(''), null);
+    const priced = parseProductPricing({ price: '2500', currency: 'AMD' });
+    assert.equal(priced.price, 2500);
+    assert.equal(priced.currency, 'AMD');
+    assert.equal(formatProductPrice({ ...priced, priceMin: priced.priceMin, priceMax: priced.priceMax }), '2 500 AMD');
+    const ranged = parseProductPricing({ priceRange: '2000–3000 AMD', currency: 'AMD' });
+    assert.equal(ranged.priceMin, 2000);
+    assert.equal(ranged.priceMax, 3000);
+    assert.equal(formatProductPrice(ranged), '2 000–3 000 AMD');
+    assert.equal(parseCurrency('RUB'), 'RUB');
+    assert.equal(parseCurrency('EUR'), 'EUR');
+    const saved = sanitizeDraft({
+      name: 'Oxydant',
+      category: 'oxide',
+      volume: '1л',
+      percentage: '6%',
+      price_min: 2000,
+      price_max: 3000,
+      currency: 'AMD',
+    });
+    assert.equal(saved.volume, '1 L');
+    assert.equal(saved.percentage, 6);
+    assert.equal(saved.priceMin, 2000);
+    assert.equal(saved.priceMax, 3000);
+    assert.equal(saved.currency, 'AMD');
+    const legacy = sanitizeDraft({ name: 'Old Majirel', brand: 'Loreal', codeShade: '7.1', price: 1800 });
+    assert.equal(legacy.volume, '');
+    assert.equal(legacy.percentage, null);
+    assert.equal(legacy.price, 1800);
+    assert.equal(legacy.currency, 'AMD');
+  });
+
+  it('returns two preview rows for two care products and does not merge them', () => {
+    const rows = draftsFromPhotoPayload({
+      products: [
+        { name: 'Absolut Repair Mask', brand: "L'Oreal", volume: '250 ml', category: 'care', price: 4200 },
+        { name: 'Vitamino Color Shampoo', brand: "L'Oreal", volume: '300 ml', category: 'care', price: 3800 },
+      ],
+    });
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0]?.name, 'Absolut Repair Mask');
+    assert.equal(rows[1]?.name, 'Vitamino Color Shampoo');
+    assert.equal(rows[0]?.volume, '250 ml');
+    assert.equal(rows[1]?.volume, '300 ml');
+  });
+
+  it('parses paint photo JSON with shade, volume, and price', () => {
+    const parsed = parseJsonFromModelText(
+      '```json\n{"product":{"name":"Majirel","brand":"Loreal","codeShade":"6.1","volume":"50 ml","price":2500,"currency":"AMD","category":"paint"}}\n```'
+    );
+    const rows = draftsFromPhotoPayload(parsed);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.category, 'paint');
+    assert.equal(rows[0]?.codeShade, '6.1');
+    assert.equal(rows[0]?.volume, '50 ml');
+    assert.equal(rows[0]?.price, 2500);
+  });
+
+  it('parses oxide photo JSON with percentage and price range', () => {
+    const rows = draftsFromPhotoPayload({
+      products: [
+        {
+          name: 'Oxydant Creme',
+          brand: 'Loreal',
+          percentage: '9%',
+          volume: '1000 ml',
+          price_min: 2000,
+          price_max: 3000,
+          currency: 'AMD',
+          category: 'oxide',
+        },
+      ],
+    });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.category, 'oxide');
+    assert.equal(rows[0]?.percentage, 9);
+    assert.equal(rows[0]?.volume, '1000 ml');
+    assert.equal(rows[0]?.priceMin, 2000);
+    assert.equal(rows[0]?.priceMax, 3000);
+  });
+
   it('parses multi-label photo JSON without writing to the database', () => {
     const parsed = parseJsonFromModelText(
       '```json\n{"products":[{"brand":"Kaaral","line":"BACO","codeShade":"5.01","quantity":1},{"brand":"Kaaral","line":"BACO","codeShade":"5.18"}]}\n```'
@@ -157,8 +252,19 @@ describe('PRODUCTS-2 excel and photo import', () => {
     assert.match(commit, /\.update\(/);
   });
 
+  it('keeps two concatenated product objects instead of taking only the first', () => {
+    const parsed = parseJsonFromModelText(
+      '{"name":"Oil","brand":"Moroccanoil","volume":"100 ml","category":"care"}{"name":"Cream","brand":"Moroccanoil","volume":"250 ml","category":"care"}'
+    );
+    const rows = draftsFromPhotoPayload(parsed);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0]?.name, 'Oil');
+    assert.equal(rows[1]?.name, 'Cream');
+  });
+
   it('malformed photo JSON and unknown fields fail safely', () => {
     assert.deepEqual(parseJsonFromModelText('not json at all'), []);
+    assert.deepEqual(parseJsonFromModelText('{"products":[{"name":"One"},{"name":"Two"'), []);
     assert.deepEqual(draftsFromPhotoPayload({ products: 'nope' }), []);
     const draft = sanitizeDraft({
       name: 'BACO 5.01',
@@ -181,7 +287,12 @@ describe('PRODUCTS-2 excel and photo import', () => {
         Quantity: 2,
         'Min quantity': 1,
         Unit: 'pcs',
+        Volume: '100 ml',
+        Percentage: 9,
         Price: 10,
+        'Price min': '',
+        'Price max': '',
+        Currency: 'AMD',
         Supplier: '',
         Status: 'in_stock',
         'To order': 'yes',
@@ -195,6 +306,9 @@ describe('PRODUCTS-2 excel and photo import', () => {
     assert.equal(rows[0]?.name, 'BACO 5.01');
     assert.equal(rows[0]?.codeShade, '5.01');
     assert.equal(rows[0]?.markedForPurchase, true);
+    assert.equal(rows[0]?.volume, '100 ml');
+    assert.equal(rows[0]?.percentage, 9);
+    assert.equal(rows[0]?.currency, 'AMD');
   });
 
   it('products page uses one import pipeline, shared preview, and excel export', () => {

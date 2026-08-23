@@ -3,17 +3,23 @@ import { draftsFromPhotoPayload, parseJsonFromModelText, type ProductDraft } fro
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const VISION_MODEL = 'openai/gpt-4o-mini';
 
-const PHOTO_PROMPT = `You extract salon hair-color and cosmetics product labels from ONE photo that may contain MULTIPLE products.
+const PHOTO_PROMPT = `You extract salon products from ONE photo that may contain MULTIPLE products.
+Sections: paint/краска, oxide/оксид, care/уход.
 
 Return ONLY JSON:
-{"products":[{"name":"","brand":"","line":"","codeShade":"","category":"","quantity":1,"unit":"","price":0,"supplier":""}]}
+{"products":[{"name":"","brand":"","line":"","codeShade":"","category":"paint|oxide|care","quantity":1,"unit":"","volume":"","percentage":null,"price":0,"priceMin":null,"priceMax":null,"currency":"AMD","supplier":""}]}
 
 Rules:
-- Each visible distinct product/label is its own array item.
+- Each visible distinct product/label is its own array item. 1 product → 1 item. 2 products → 2 items. N products → N items.
+- Do not merge different bottles/tubes into one object.
 - codeShade is the tone/code printed on the tube (examples: 5.01, 5.18, 8.11, SL12.0, 6.1).
-- brand examples: Kaaral, Loreal. line examples: BACO, Majirel.
+- volume as printed: 100 ml, 250 ml, 500 ml, 1 L.
+- percentage is oxidant strength without % if visible: 1.5, 3, 6, 9, 12. Otherwise null.
+- If a price range is visible, fill priceMin and priceMax and set price to 0.
+- currency is AMD, USD, RUB, or EUR. Default AMD. Do not invent FX.
+- category: paint (краска), oxide (оксид), care (уход).
 - If quantity is not printed, use 1.
-- Do not invent supplier or price; use "" / 0 when unknown.
+- Do not invent supplier or price; use "" / 0 / null when unknown.
 - Never include commentary.`;
 
 export function productPhotoVisionModel(): string {

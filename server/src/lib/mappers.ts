@@ -74,6 +74,11 @@ export function mapProduct(row: {
   min_quantity: number;
   unit: string;
   price: number;
+  volume?: string | null;
+  percentage?: number | null;
+  price_min?: number | null;
+  price_max?: number | null;
+  currency?: string | null;
   supplier: string;
   marked_for_purchase: boolean;
   created_at: string;
@@ -89,7 +94,12 @@ export function mapProduct(row: {
     quantity: row.quantity,
     minQuantity: row.min_quantity,
     unit: row.unit ?? '',
+    volume: row.volume ?? '',
+    percentage: row.percentage ?? null,
     price: Number(row.price),
+    priceMin: row.price_min ?? null,
+    priceMax: row.price_max ?? null,
+    currency: row.currency || 'AMD',
     supplier: row.supplier ?? '',
     markedForPurchase: Boolean(row.marked_for_purchase),
     stockStatus: deriveProductStockStatus(row.quantity, row.min_quantity),

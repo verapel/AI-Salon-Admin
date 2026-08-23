@@ -26,7 +26,7 @@ import {
   isProductInSection,
   type ProductSection,
 } from '@/lib/productSection';
-import { formatCurrency } from '@/lib/utils';
+import { formatProductPrice } from '@/lib/productFormat';
 import type { Product, ProductDraft, ProductImportResult, ProductStockStatus } from '@/types';
 
 type StockFilter = 'all' | ProductStockStatus | 'purchase';
@@ -42,7 +42,12 @@ const emptyForm = () => ({
   quantity: 0,
   minQuantity: 0,
   unit: '',
+  volume: '',
+  percentage: '' as string,
   price: 0,
+  priceMin: '' as string,
+  priceMax: '' as string,
+  currency: 'AMD',
   supplier: '',
   markedForPurchase: false,
 });
@@ -126,6 +131,7 @@ export default function Products() {
           product.line,
           product.codeShade,
           product.category,
+          product.volume,
           product.supplier,
         ].some((value) => value.toLowerCase().includes(query))
       )
@@ -161,7 +167,12 @@ export default function Products() {
       quantity: product.quantity,
       minQuantity: product.minQuantity,
       unit: product.unit,
+      volume: product.volume ?? '',
+      percentage: product.percentage == null ? '' : String(product.percentage),
       price: product.price,
+      priceMin: product.priceMin == null ? '' : String(product.priceMin),
+      priceMax: product.priceMax == null ? '' : String(product.priceMax),
+      currency: product.currency || 'AMD',
       supplier: product.supplier,
       markedForPurchase: product.markedForPurchase,
     });
@@ -175,9 +186,14 @@ export default function Products() {
     setSubmitting(true);
     setFormError('');
     try {
-      const payload = section
-        ? { ...form, category: categoryForProductSection(section, form.category) }
-        : form;
+      const payload = {
+        ...(section
+          ? { ...form, category: categoryForProductSection(section, form.category) }
+          : form),
+        percentage: form.percentage === '' ? null : Number(form.percentage),
+        priceMin: form.priceMin === '' ? null : Number(form.priceMin),
+        priceMax: form.priceMax === '' ? null : Number(form.priceMax),
+      };
       if (editing) {
         await api.products.update(editing.id, payload);
       } else {
@@ -520,6 +536,16 @@ export default function Products() {
                         product.category ||
                         '—'}
                     </p>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {[
+                        product.volume ? `${t('products.fieldVolume')}: ${product.volume}` : null,
+                        product.percentage != null
+                          ? `${t('products.fieldPercentage')}: ${product.percentage}%`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
                   </div>
                   <span className={`badge shrink-0 text-xs ${statusBadgeClass(product.stockStatus)}`}>
                     {statusLabel(product.stockStatus, t)}
@@ -561,7 +587,7 @@ export default function Products() {
                     </button>
                   </div>
                   <span className="font-medium text-gray-900 dark:text-white">
-                    {formatCurrency(product.price)}
+                    {formatProductPrice(product)}
                   </span>
                 </div>
                 <div className="flex justify-end gap-1 border-t pt-3 dark:border-gray-700">
@@ -602,6 +628,12 @@ export default function Products() {
                         {t('products.columnCode')}
                       </th>
                       <th className="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">
+                        {t('products.columnVolume')}
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">
+                        {t('products.columnPercentage')}
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">
                         {t('products.columnQty')}
                       </th>
                       <th className="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">
@@ -629,6 +661,12 @@ export default function Products() {
                         </td>
                         <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
                           {product.codeShade || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
+                          {product.volume || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
+                          {product.percentage != null ? `${product.percentage}%` : '—'}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1">
@@ -669,7 +707,7 @@ export default function Products() {
                           </div>
                         </td>
                         <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
-                          {formatCurrency(product.price)}
+                          {formatProductPrice(product)}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-1">
@@ -793,7 +831,11 @@ export default function Products() {
                     <th className="py-2 pr-2">{t('products.fieldLine')}</th>
                     <th className="py-2 pr-2">{t('products.fieldCodeShade')}</th>
                     <th className="py-2 pr-2">{t('products.fieldQuantity')}</th>
+                    <th className="py-2 pr-2">{t('products.fieldVolume')}</th>
+                    <th className="py-2 pr-2">{t('products.fieldPercentage')}</th>
                     <th className="py-2 pr-2">{t('products.fieldPrice')}</th>
+                    <th className="py-2 pr-2">{t('products.fieldPriceRange')}</th>
+                    <th className="py-2 pr-2">{t('products.fieldCurrency')}</th>
                     <th className="py-2" />
                   </tr>
                 </thead>
@@ -862,6 +904,35 @@ export default function Products() {
                       <td className="py-1 pr-2">
                         <input
                           className="input-field"
+                          value={row.volume}
+                          onChange={(e) =>
+                            setPreviewRows((prev) =>
+                              prev.map((item, i) => (i === index ? { ...item, volume: e.target.value } : item))
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <input
+                          className="input-field"
+                          value={row.percentage ?? ''}
+                          onChange={(e) =>
+                            setPreviewRows((prev) =>
+                              prev.map((item, i) =>
+                                i === index
+                                  ? {
+                                      ...item,
+                                      percentage: e.target.value === '' ? null : Number(e.target.value),
+                                    }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <input
+                          className="input-field"
                           type="number"
                           min={0}
                           step="0.01"
@@ -872,6 +943,62 @@ export default function Products() {
                             )
                           }
                         />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <div className="flex gap-1">
+                          <input
+                            className="input-field"
+                            placeholder="min"
+                            value={row.priceMin ?? ''}
+                            onChange={(e) =>
+                              setPreviewRows((prev) =>
+                                prev.map((item, i) =>
+                                  i === index
+                                    ? {
+                                        ...item,
+                                        priceMin: e.target.value === '' ? null : Number(e.target.value),
+                                      }
+                                    : item
+                                )
+                              )
+                            }
+                          />
+                          <input
+                            className="input-field"
+                            placeholder="max"
+                            value={row.priceMax ?? ''}
+                            onChange={(e) =>
+                              setPreviewRows((prev) =>
+                                prev.map((item, i) =>
+                                  i === index
+                                    ? {
+                                        ...item,
+                                        priceMax: e.target.value === '' ? null : Number(e.target.value),
+                                      }
+                                    : item
+                                )
+                              )
+                            }
+                          />
+                        </div>
+                      </td>
+                      <td className="py-1 pr-2">
+                        <select
+                          className="input-field"
+                          value={row.currency || 'AMD'}
+                          onChange={(e) =>
+                            setPreviewRows((prev) =>
+                              prev.map((item, i) =>
+                                i === index ? { ...item, currency: e.target.value } : item
+                              )
+                            )
+                          }
+                        >
+                          <option value="AMD">AMD</option>
+                          <option value="USD">USD</option>
+                          <option value="RUB">RUB</option>
+                          <option value="EUR">EUR</option>
+                        </select>
                       </td>
                       <td className="py-1">
                         <button
@@ -993,6 +1120,26 @@ export default function Products() {
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
+              <label className="mb-1.5 block text-sm font-medium">{t('products.fieldVolume')}</label>
+              <input
+                className="input-field"
+                value={form.volume}
+                onChange={(e) => setForm({ ...form, volume: e.target.value })}
+                placeholder="100 ml, 250 ml, 1 L"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">{t('products.fieldPercentage')}</label>
+              <input
+                className="input-field"
+                value={form.percentage}
+                onChange={(e) => setForm({ ...form, percentage: e.target.value })}
+                placeholder="1.5, 3, 6, 9, 12"
+              />
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
               <label className="mb-1.5 block text-sm font-medium">{t('products.fieldPrice')}</label>
               <input
                 className="input-field"
@@ -1002,6 +1149,40 @@ export default function Products() {
                 value={form.price}
                 onChange={(e) => setForm({ ...form, price: Number(e.target.value) })}
               />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">{t('products.fieldPriceRange')}</label>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  className="input-field"
+                  inputMode="numeric"
+                  placeholder={t('products.fieldPriceMin')}
+                  value={form.priceMin}
+                  onChange={(e) => setForm({ ...form, priceMin: e.target.value })}
+                />
+                <input
+                  className="input-field"
+                  inputMode="numeric"
+                  placeholder={t('products.fieldPriceMax')}
+                  value={form.priceMax}
+                  onChange={(e) => setForm({ ...form, priceMax: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">{t('products.fieldCurrency')}</label>
+              <select
+                className="input-field"
+                value={form.currency}
+                onChange={(e) => setForm({ ...form, currency: e.target.value })}
+              >
+                <option value="AMD">AMD</option>
+                <option value="USD">USD</option>
+                <option value="RUB">RUB</option>
+                <option value="EUR">EUR</option>
+              </select>
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium">{t('products.fieldSupplier')}</label>

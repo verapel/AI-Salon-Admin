@@ -262,6 +262,11 @@ export interface Database {
           min_quantity: number;
           unit: string;
           price: number;
+          volume: string | null;
+          percentage: number | null;
+          price_min: number | null;
+          price_max: number | null;
+          currency: string;
           supplier: string;
           marked_for_purchase: boolean;
           created_at: string;
@@ -279,6 +284,11 @@ export interface Database {
           min_quantity?: number;
           unit?: string;
           price?: number;
+          volume?: string | null;
+          percentage?: number | null;
+          price_min?: number | null;
+          price_max?: number | null;
+          currency?: string;
           supplier?: string;
           marked_for_purchase?: boolean;
           created_at?: string;
@@ -296,6 +306,11 @@ export interface Database {
           min_quantity?: number;
           unit?: string;
           price?: number;
+          volume?: string | null;
+          percentage?: number | null;
+          price_min?: number | null;
+          price_max?: number | null;
+          currency?: string;
           supplier?: string;
           marked_for_purchase?: boolean;
           created_at?: string;

@@ -5,6 +5,12 @@ import { getSalonId } from '../lib/salonContext.js';
 import { requireSalonWriteAccess } from '../middleware/auth.js';
 import type { Database } from '../types/database.js';
 import {
+  parseCurrency,
+  parsePercentage,
+  parseProductPricing,
+  parseVolume,
+} from '../lib/productFields.js';
+import {
   applyQuantityDelta,
   compareProductCodeShade,
   findIdentityConflict,
@@ -199,7 +205,12 @@ router.post('/import/commit', requireSalonWriteAccess, async (req, res) => {
         quantity: draft.quantity,
         min_quantity: draft.minQuantity,
         unit: draft.unit,
+        volume: draft.volume,
+        percentage: draft.percentage,
         price: draft.price,
+        price_min: draft.priceMin,
+        price_max: draft.priceMax,
+        currency: draft.currency,
         supplier: draft.supplier,
         marked_for_purchase: draft.markedForPurchase,
         created_at: now,
@@ -233,7 +244,12 @@ router.post('/import/commit', requireSalonWriteAccess, async (req, res) => {
       quantity: draft.quantity,
       min_quantity: draft.minQuantity,
       unit: draft.unit,
+      volume: draft.volume,
+      percentage: draft.percentage,
       price: draft.price,
+      price_min: draft.priceMin,
+      price_max: draft.priceMax,
+      currency: draft.currency,
       supplier: draft.supplier,
       marked_for_purchase: draft.markedForPurchase,
       created_at: now,
@@ -270,6 +286,13 @@ router.post('/', requireSalonWriteAccess, async (req, res) => {
     return res.status(500).json({ error: message });
   }
 
+  const pricing = parseProductPricing({
+    price,
+    priceMin: req.body?.priceMin ?? req.body?.price_min,
+    priceMax: req.body?.priceMax ?? req.body?.price_max,
+    priceRange: req.body?.priceRange ?? req.body?.price_range,
+    currency: req.body?.currency,
+  });
   const now = new Date().toISOString();
   const { data, error } = await supabase
     .from('products')
@@ -283,7 +306,12 @@ router.post('/', requireSalonWriteAccess, async (req, res) => {
       quantity,
       min_quantity: minQuantity,
       unit: normalizeIdentityPart(req.body?.unit),
-      price,
+      volume: parseVolume(req.body?.volume),
+      percentage: parsePercentage(req.body?.percentage),
+      price: pricing.price || price,
+      price_min: pricing.priceMin,
+      price_max: pricing.priceMax,
+      currency: parseCurrency(req.body?.currency),
       supplier: normalizeIdentityPart(req.body?.supplier),
       marked_for_purchase: Boolean(req.body?.markedForPurchase),
       created_at: now,
@@ -379,6 +407,31 @@ router.put('/:id', requireSalonWriteAccess, async (req, res) => {
     const price = parseNonNegativeNumber(req.body.price, 0);
     if (price === null) return res.status(400).json({ error: 'Price must be 0 or greater' });
     updates.price = price;
+  }
+  if (req.body?.volume !== undefined) updates.volume = parseVolume(req.body.volume);
+  if (req.body?.percentage !== undefined) updates.percentage = parsePercentage(req.body.percentage);
+  if (
+    req.body?.priceMin !== undefined ||
+    req.body?.price_min !== undefined ||
+    req.body?.priceMax !== undefined ||
+    req.body?.price_max !== undefined ||
+    req.body?.priceRange !== undefined ||
+    req.body?.price_range !== undefined ||
+    req.body?.currency !== undefined
+  ) {
+    const pricing = parseProductPricing({
+      price: req.body?.price ?? updates.price,
+      priceMin: req.body?.priceMin ?? req.body?.price_min,
+      priceMax: req.body?.priceMax ?? req.body?.price_max,
+      priceRange: req.body?.priceRange ?? req.body?.price_range,
+      currency: req.body?.currency,
+    });
+    if (req.body?.price === undefined && pricing.priceMin != null && pricing.priceMax != null) {
+      updates.price = 0;
+    }
+    updates.price_min = pricing.priceMin;
+    updates.price_max = pricing.priceMax;
+    updates.currency = pricing.currency;
   }
 
   const identityTouched =

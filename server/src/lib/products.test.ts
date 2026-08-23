@@ -158,6 +158,11 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.equal(mapped.stockStatus, 'low');
     assert.equal(mapped.markedForPurchase, true);
     assert.equal(mapped.codeShade, '6.1');
+    assert.equal(mapped.volume, '');
+    assert.equal(mapped.percentage, null);
+    assert.equal(mapped.priceMin, null);
+    assert.equal(mapped.priceMax, null);
+    assert.equal(mapped.currency, 'AMD');
     const mapper = read('server/src/lib/mappers.ts');
     const fn = mapper.slice(mapper.indexOf('export function mapProduct'), mapper.indexOf('export function mapStaff'));
     assert.match(fn, /deriveProductStockStatus/);
