@@ -4,6 +4,7 @@ import {
   parseCurrency,
   parsePercentage,
   parseProductPricing,
+  persistProductPricing,
   parseVolume,
   type ProductCurrency,
 } from './productFields.js';
@@ -45,6 +46,164 @@ export type ImportPlanAction =
   | { kind: 'create'; draft: ProductDraft }
   | { kind: 'update'; id: string; quantityDelta: number; draft: ProductDraft }
   | { kind: 'skip'; reason: 'empty' | 'invalid'; draft: ProductDraft };
+
+export type ImportProductRow = {
+  id: string;
+  salon_id: string;
+  name: string;
+  brand: string;
+  line: string;
+  code_shade: string;
+  category: string;
+  quantity: number;
+  min_quantity: number;
+  unit: string;
+  volume: string | null;
+  percentage: number | null;
+  price: number;
+  price_min: number | null;
+  price_max: number | null;
+  currency: string;
+  supplier: string;
+  marked_for_purchase: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ImportCommitResult = {
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: { name: string; message: string }[];
+};
+
+export function buildImportInsertRow(
+  salonId: string,
+  draft: ProductDraft,
+  now: string
+): Omit<ImportProductRow, 'id'> {
+  const pricing = persistProductPricing(draft);
+  return {
+    salon_id: salonId,
+    name: draft.name,
+    brand: draft.brand,
+    line: draft.line,
+    code_shade: storedCodeShade(draft.codeShade, draft.name),
+    category: draft.category,
+    quantity: draft.quantity,
+    min_quantity: draft.minQuantity,
+    unit: draft.unit,
+    volume: draft.volume,
+    percentage: draft.percentage,
+    price: pricing.price,
+    price_min: pricing.price_min,
+    price_max: pricing.price_max,
+    currency: pricing.currency,
+    supplier: draft.supplier,
+    marked_for_purchase: draft.markedForPurchase,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+export function buildImportUpdatePatch(
+  draft: ProductDraft,
+  current: ImportProductRow,
+  now: string
+): Partial<ImportProductRow> {
+  const pricing = persistProductPricing(draft, current);
+  return {
+    quantity: current.quantity + draft.quantity,
+    marked_for_purchase: current.marked_for_purchase || draft.markedForPurchase,
+    price: pricing.price,
+    price_min: pricing.price_min,
+    price_max: pricing.price_max,
+    currency: pricing.currency,
+    updated_at: now,
+  };
+}
+
+export async function commitProductDrafts(opts: {
+  salonId: string;
+  incoming: unknown[];
+  now?: string;
+  loadRows: () => Promise<ImportProductRow[]>;
+  insertRow: (
+    row: Omit<ImportProductRow, 'id'>
+  ) => Promise<{ id: string } | { error: string }>;
+  updateRow: (
+    id: string,
+    patch: Partial<ImportProductRow>
+  ) => Promise<{ ok: true } | { error: string }>;
+}): Promise<{ result: ImportCommitResult; rows: ImportProductRow[] }> {
+  const currentRows = await opts.loadRows();
+  const existing: ImportExisting[] = currentRows.map((row) => ({
+    id: row.id,
+    salon_id: row.salon_id,
+    brand: row.brand,
+    line: row.line,
+    code_shade: row.code_shade,
+    name: row.name,
+    quantity: row.quantity,
+  }));
+  const now = opts.now ?? new Date().toISOString();
+  const result: ImportCommitResult = { created: 0, updated: 0, skipped: 0, errors: [] };
+
+  for (const raw of opts.incoming) {
+    const draft = sanitizeDraft((raw ?? {}) as Record<string, unknown>);
+    if (draftIsEmpty(draft) || !draft.name) {
+      result.skipped += 1;
+      continue;
+    }
+
+    const match = findIdentityConflict(existing, {
+      salonId: opts.salonId,
+      name: draft.name,
+      brand: draft.brand,
+      line: draft.line,
+      codeShade: draft.codeShade,
+    });
+
+    if (match) {
+      const current = currentRows.find((row) => row.id === match.id);
+      if (!current) {
+        result.errors.push({ name: draft.name, message: 'Product not found' });
+        continue;
+      }
+      const patch = buildImportUpdatePatch(draft, current, now);
+      const updated = await opts.updateRow(match.id, patch);
+      if ('error' in updated) {
+        result.errors.push({ name: draft.name, message: updated.error });
+        continue;
+      }
+      Object.assign(current, patch);
+      const working = existing.find((row) => row.id === match.id);
+      if (working) working.quantity = current.quantity;
+      result.updated += 1;
+      continue;
+    }
+
+    const row = buildImportInsertRow(opts.salonId, draft, now);
+    const inserted = await opts.insertRow(row);
+    if ('error' in inserted) {
+      result.errors.push({ name: draft.name, message: inserted.error });
+      continue;
+    }
+    currentRows.push({ ...row, id: inserted.id });
+    existing.push({
+      id: inserted.id,
+      salon_id: opts.salonId,
+      brand: draft.brand,
+      line: draft.line,
+      code_shade: storedCodeShade(draft.codeShade, draft.name),
+      name: draft.name,
+      quantity: draft.quantity,
+    });
+    result.created += 1;
+  }
+
+  return { result, rows: currentRows };
+}
 
 const HEADER_ALIASES: Record<keyof ProductDraft, string[]> = {
   name: ['name', 'product', 'product name', 'название', 'наименование', 'товар', 'продукт', 'անվանում', 'ապրանք'],

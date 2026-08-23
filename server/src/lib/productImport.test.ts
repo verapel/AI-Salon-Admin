@@ -9,14 +9,17 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import * as XLSX from 'xlsx';
 import {
+  commitProductDrafts,
   draftsFromPhotoPayload,
   mapSpreadsheetObject,
   parseJsonFromModelText,
   parseSpreadsheetBuffer,
   planImportRows,
   sanitizeDraft,
+  type ImportProductRow,
 } from './productImport.js';
 import { extractProductDraftsFromImage, productPhotoVisionModel } from './productPhotoVision.js';
+import { mapProduct } from './mappers.js';
 import {
   formatProductPrice,
   parseCurrency,
@@ -209,7 +212,7 @@ describe('PRODUCTS-2 excel and photo import', () => {
       assert.equal(formatProductPrice({ price: 0, currency: 'EUR' }), '—', `${category} hides zero price`);
     }
     const productsPage = read('client/src/pages/Products.tsx');
-    assert.match(productsPage, /import \{ formatProductPrice \} from '@\/lib\/productFormat'/);
+    assert.match(productsPage, /import \{ asAmount, formatProductPrice \} from '@\/lib\/productFormat'/);
     assert.equal((productsPage.match(/formatProductPrice\(product\)/g) || []).length, 2);
     assert.doesNotMatch(productsPage, /0 AMD/);
     const clientFormatter = read('client/src/lib/productFormat.ts');
@@ -346,9 +349,95 @@ describe('PRODUCTS-2 excel and photo import', () => {
     assert.doesNotMatch(photo, /\.insert\(/);
     assert.doesNotMatch(photo, /\.update\(/);
     assert.match(commit, /\.eq\('salon_id',\s*salonId\)/);
-    assert.match(commit, /findIdentityConflict/);
+    assert.match(commit, /commitProductDrafts/);
     assert.match(commit, /\.insert\(/);
     assert.match(commit, /\.update\(/);
+    assert.match(read('server/src/lib/productImport.ts'), /price_min: pricing\.price_min/);
+    assert.match(read('server/src/lib/productImport.ts'), /buildImportUpdatePatch/);
+  });
+
+  it('persists photo preview price range through commit, DB row, GET, and formatter', async () => {
+    const db: ImportProductRow[] = [];
+    let nextId = 1;
+
+    async function runCommit(incoming: unknown[]) {
+      return commitProductDrafts({
+        salonId: SALON_A,
+        incoming,
+        now: '2026-08-23T00:00:00.000Z',
+        loadRows: async () => db,
+        insertRow: async () => ({ id: `row-${nextId++}` }),
+        updateRow: async (id) => {
+          if (!db.some((row) => row.id === id)) return { error: 'Product not found' };
+          return { ok: true as const };
+        },
+      });
+    }
+
+    const payload = {
+      name: 'Test Range Product',
+      category: 'care',
+      price_min: 2000,
+      price_max: 3000,
+      currency: 'AMD',
+    };
+    const created = await runCommit([payload]);
+    assert.equal(created.result.created, 1);
+    assert.equal(created.result.errors.length, 0);
+    assert.equal(db[0]?.price_min, 2000);
+    assert.equal(db[0]?.price_max, 3000);
+    assert.equal(db[0]?.currency, 'AMD');
+
+    const mapped = mapProduct(db[0]!);
+    assert.equal(mapped.priceMin, 2000);
+    assert.equal(mapped.priceMax, 3000);
+    assert.equal(mapped.currency, 'AMD');
+    assert.equal(formatProductPrice(mapped), '2 000–3 000 AMD');
+
+    const reloaded = mapProduct({ ...db[0]! });
+    assert.equal(formatProductPrice(reloaded), '2 000–3 000 AMD');
+
+    const updated = await runCommit([payload]);
+    assert.equal(updated.result.updated, 1);
+    assert.equal(db.length, 1);
+    assert.equal(db[0]?.price_min, 2000);
+    assert.equal(db[0]?.price_max, 3000);
+    assert.equal(db[0]?.currency, 'AMD');
+    assert.equal(formatProductPrice(mapProduct(db[0]!)), '2 000–3 000 AMD');
+
+    const qtyOnly = await runCommit([{ name: 'Test Range Product', category: 'care', quantity: 1 }]);
+    assert.equal(qtyOnly.result.updated, 1);
+    assert.equal(db[0]?.price_min, 2000);
+    assert.equal(db[0]?.price_max, 3000);
+    assert.equal(formatProductPrice(mapProduct(db[0]!)), '2 000–3 000 AMD');
+
+    for (const category of ['paint', 'oxide', 'care'] as const) {
+      const isolated: ImportProductRow[] = [];
+      const { result } = await commitProductDrafts({
+        salonId: SALON_A,
+        incoming: [
+          {
+            name: `${category} range`,
+            category,
+            price_min: '2 000',
+            price_max: '3 000',
+            currency: 'AMD',
+          },
+        ],
+        loadRows: async () => isolated,
+        insertRow: async () => ({ id: category }),
+        updateRow: async () => ({ error: 'unexpected update' }),
+      });
+      assert.equal(result.created, 1, `${category} create`);
+      assert.equal(isolated[0]?.price_min, 2000, `${category} db min`);
+      assert.equal(isolated[0]?.price_max, 3000, `${category} db max`);
+      assert.equal(formatProductPrice(mapProduct(isolated[0]!)), '2 000–3 000 AMD');
+    }
+
+    assert.equal(formatProductPrice({ priceMin: 2000, currency: 'AMD' }), 'от 2 000 AMD');
+    assert.equal(formatProductPrice({ priceMax: 3000, currency: 'AMD' }), 'до 3 000 AMD');
+    assert.equal(formatProductPrice({ price: 2500, currency: 'AMD' }), '2 500 AMD');
+    assert.equal(formatProductPrice({ price: 0, currency: 'AMD' }), '—');
   });
 
   it('keeps two concatenated product objects instead of taking only the first', () => {

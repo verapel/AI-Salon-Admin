@@ -26,7 +26,7 @@ import {
   isProductInSection,
   type ProductSection,
 } from '@/lib/productSection';
-import { formatProductPrice } from '@/lib/productFormat';
+import { asAmount, formatProductPrice } from '@/lib/productFormat';
 import type { Product, ProductDraft, ProductImportResult, ProductStockStatus } from '@/types';
 
 type StockFilter = 'all' | ProductStockStatus | 'purchase';
@@ -191,8 +191,8 @@ export default function Products() {
           ? { ...form, category: categoryForProductSection(section, form.category) }
           : form),
         percentage: form.percentage === '' ? null : Number(form.percentage),
-        priceMin: form.priceMin === '' ? null : Number(form.priceMin),
-        priceMax: form.priceMax === '' ? null : Number(form.priceMax),
+        priceMin: asAmount(form.priceMin),
+        priceMax: asAmount(form.priceMax),
       };
       if (editing) {
         await api.products.update(editing.id, payload);
@@ -956,7 +956,7 @@ export default function Products() {
                                   i === index
                                     ? {
                                         ...item,
-                                        priceMin: e.target.value === '' ? null : Number(e.target.value),
+                                        priceMin: asAmount(e.target.value),
                                       }
                                     : item
                                 )
@@ -973,7 +973,7 @@ export default function Products() {
                                   i === index
                                     ? {
                                         ...item,
-                                        priceMax: e.target.value === '' ? null : Number(e.target.value),
+                                        priceMax: asAmount(e.target.value),
                                       }
                                     : item
                                 )

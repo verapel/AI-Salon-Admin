@@ -128,12 +128,6 @@ export function parseProductPricing(input: {
   };
 }
 
-export function formatMoneyAmount(amount: number): string {
-  return Math.round(amount)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-}
-
 /** Positive money only. Accepts number or string, including spaced thousands ("2 000"). */
 export function asDisplayAmount(value: unknown): number | null {
   if (value == null || value === '') return null;
@@ -144,6 +138,64 @@ export function asDisplayAmount(value: unknown): number | null {
   if (!text || text === '-' || text === '—') return null;
   const n = parseLooseNumber(text);
   return n != null && n > 0 ? n : null;
+}
+
+export type PersistedProductPricing = {
+  price: number;
+  price_min: number | null;
+  price_max: number | null;
+  currency: ProductCurrency;
+};
+
+/**
+ * Columns to write on CREATE/UPDATE. Incoming positive range wins;
+ * null/0/empty never clobbers a range already stored on the row.
+ */
+export function persistProductPricing(
+  incoming: {
+    price?: unknown;
+    priceMin?: unknown;
+    priceMax?: unknown;
+    price_min?: unknown;
+    price_max?: unknown;
+    priceRange?: unknown;
+    price_range?: unknown;
+    currency?: unknown;
+  },
+  existing?: {
+    price?: unknown;
+    price_min?: unknown;
+    price_max?: unknown;
+    currency?: unknown;
+  } | null
+): PersistedProductPricing {
+  const parsed = parseProductPricing({
+    price: incoming.price,
+    priceMin: incoming.priceMin ?? incoming.price_min,
+    priceMax: incoming.priceMax ?? incoming.price_max,
+    priceRange: incoming.priceRange ?? incoming.price_range,
+    currency: incoming.currency,
+  });
+  const keepMin = asDisplayAmount(existing?.price_min);
+  const keepMax = asDisplayAmount(existing?.price_max);
+  const keepPrice = asDisplayAmount(existing?.price);
+  const incomingCurrency =
+    incoming.currency != null && String(incoming.currency).trim() !== '';
+
+  return {
+    price: asDisplayAmount(parsed.price) ?? keepPrice ?? 0,
+    price_min: asDisplayAmount(parsed.priceMin) ?? keepMin,
+    price_max: asDisplayAmount(parsed.priceMax) ?? keepMax,
+    currency: incomingCurrency
+      ? parseCurrency(incoming.currency)
+      : parseCurrency(existing?.currency),
+  };
+}
+
+export function formatMoneyAmount(amount: number): string {
+  return Math.round(amount)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
 export function formatProductPrice(fields: {

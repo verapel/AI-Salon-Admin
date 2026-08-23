@@ -5,9 +5,8 @@ import { getSalonId } from '../lib/salonContext.js';
 import { requireSalonWriteAccess } from '../middleware/auth.js';
 import type { Database } from '../types/database.js';
 import {
-  parseCurrency,
   parsePercentage,
-  parseProductPricing,
+  persistProductPricing,
   parseVolume,
 } from '../lib/productFields.js';
 import {
@@ -22,11 +21,9 @@ import {
   visibleCodeShade,
 } from '../lib/products.js';
 import {
-  draftIsEmpty,
+  commitProductDrafts,
   parseSpreadsheetBuffer,
-  sanitizeDraft,
-  type ImportExisting,
-  type ProductDraft,
+  type ImportProductRow,
 } from '../lib/productImport.js';
 import { extractProductDraftsFromImage, productPhotoVisionModel } from '../lib/productPhotoVision.js';
 
@@ -125,141 +122,36 @@ router.post('/import/photo', requireSalonWriteAccess, async (req, res) => {
 router.post('/import/commit', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
   const incoming = Array.isArray(req.body?.rows) ? req.body.rows : [];
-  const drafts: ProductDraft[] = incoming.map((row: Partial<ProductDraft>) => sanitizeDraft(row));
 
-  const { data: currentRows, error: loadError } = await supabase
+  const { data: loadedRows, error: loadError } = await supabase
     .from('products')
     .select('*')
     .eq('salon_id', salonId);
 
   if (loadError) return res.status(500).json({ error: loadError.message });
+  const currentRows = [...((loadedRows ?? []) as ImportProductRow[])];
 
-  const existing: ImportExisting[] = (currentRows ?? []).map((row) => ({
-    id: row.id,
-    salon_id: row.salon_id,
-    brand: row.brand,
-    line: row.line,
-    code_shade: row.code_shade,
-    name: row.name,
-    quantity: row.quantity,
-  }));
-
-  const now = new Date().toISOString();
-  const result = {
-    created: 0,
-    updated: 0,
-    skipped: 0,
-    errors: [] as { name: string; message: string }[],
-  };
-
-  for (const raw of drafts) {
-    const draft = sanitizeDraft(raw);
-    if (draftIsEmpty(draft) || !draft.name) {
-      result.skipped += 1;
-      continue;
-    }
-
-    const match = findIdentityConflict(existing, {
-      salonId,
-      name: draft.name,
-      brand: draft.brand,
-      line: draft.line,
-      codeShade: draft.codeShade,
-    });
-
-    if (match) {
-      const current = (currentRows ?? []).find((row) => row.id === match.id);
-      if (!current) {
-        result.errors.push({ name: draft.name, message: 'Product not found' });
-        continue;
-      }
-      const nextQuantity = current.quantity + draft.quantity;
+  const { result } = await commitProductDrafts({
+    salonId,
+    incoming,
+    loadRows: async () => currentRows,
+    insertRow: async (row) => {
+      const { data, error } = await supabase.from('products').insert(row).select('id').single();
+      if (error || !data) return { error: error?.message || 'Create failed' };
+      return { id: data.id };
+    },
+    updateRow: async (id, patch) => {
       const { data, error } = await supabase
         .from('products')
-        .update({
-          quantity: nextQuantity,
-          marked_for_purchase: current.marked_for_purchase || draft.markedForPurchase,
-          updated_at: now,
-        })
-        .eq('id', match.id)
+        .update(patch)
+        .eq('id', id)
         .eq('salon_id', salonId)
         .select('id')
         .single();
-      if (error || !data) {
-        result.errors.push({ name: draft.name, message: error?.message || 'Update failed' });
-        continue;
-      }
-      current.quantity = nextQuantity;
-      const working = existing.find((row) => row.id === match.id);
-      if (working) working.quantity = nextQuantity;
-      result.updated += 1;
-      continue;
-    }
-
-    const { data, error } = await supabase
-      .from('products')
-      .insert({
-        salon_id: salonId,
-        name: draft.name,
-        brand: draft.brand,
-        line: draft.line,
-        code_shade: storedCodeShade(draft.codeShade, draft.name),
-        category: draft.category,
-        quantity: draft.quantity,
-        min_quantity: draft.minQuantity,
-        unit: draft.unit,
-        volume: draft.volume,
-        percentage: draft.percentage,
-        price: draft.price,
-        price_min: draft.priceMin,
-        price_max: draft.priceMax,
-        currency: draft.currency,
-        supplier: draft.supplier,
-        marked_for_purchase: draft.markedForPurchase,
-        created_at: now,
-        updated_at: now,
-      })
-      .select('id')
-      .single();
-
-    if (error || !data) {
-      result.errors.push({ name: draft.name, message: error?.message || 'Create failed' });
-      continue;
-    }
-
-    existing.push({
-      id: data.id,
-      salon_id: salonId,
-      brand: draft.brand,
-      line: draft.line,
-      code_shade: storedCodeShade(draft.codeShade, draft.name),
-      name: draft.name,
-      quantity: draft.quantity,
-    });
-    (currentRows ?? []).push({
-      id: data.id,
-      salon_id: salonId,
-      name: draft.name,
-      brand: draft.brand,
-      line: draft.line,
-      code_shade: storedCodeShade(draft.codeShade, draft.name),
-      category: draft.category,
-      quantity: draft.quantity,
-      min_quantity: draft.minQuantity,
-      unit: draft.unit,
-      volume: draft.volume,
-      percentage: draft.percentage,
-      price: draft.price,
-      price_min: draft.priceMin,
-      price_max: draft.priceMax,
-      currency: draft.currency,
-      supplier: draft.supplier,
-      marked_for_purchase: draft.markedForPurchase,
-      created_at: now,
-      updated_at: now,
-    } as ProductRow);
-    result.created += 1;
-  }
+      if (error || !data) return { error: error?.message || 'Update failed' };
+      return { ok: true as const };
+    },
+  });
 
   res.json(result);
 });
@@ -289,7 +181,7 @@ router.post('/', requireSalonWriteAccess, async (req, res) => {
     return res.status(500).json({ error: message });
   }
 
-  const pricing = parseProductPricing({
+  const pricing = persistProductPricing({
     price,
     priceMin: req.body?.priceMin ?? req.body?.price_min,
     priceMax: req.body?.priceMax ?? req.body?.price_max,
@@ -312,9 +204,9 @@ router.post('/', requireSalonWriteAccess, async (req, res) => {
       volume: parseVolume(req.body?.volume),
       percentage: parsePercentage(req.body?.percentage),
       price: pricing.price || price,
-      price_min: pricing.priceMin,
-      price_max: pricing.priceMax,
-      currency: parseCurrency(req.body?.currency),
+      price_min: pricing.price_min,
+      price_max: pricing.price_max,
+      currency: pricing.currency,
       supplier: normalizeIdentityPart(req.body?.supplier),
       marked_for_purchase: Boolean(req.body?.markedForPurchase),
       created_at: now,
@@ -427,19 +319,29 @@ router.put('/:id', requireSalonWriteAccess, async (req, res) => {
     req.body?.price_range !== undefined ||
     req.body?.currency !== undefined
   ) {
-    const pricing = parseProductPricing({
+    const minProvided =
+      req.body?.priceMin !== undefined ||
+      req.body?.price_min !== undefined ||
+      req.body?.priceRange !== undefined ||
+      req.body?.price_range !== undefined;
+    const maxProvided =
+      req.body?.priceMax !== undefined ||
+      req.body?.price_max !== undefined ||
+      req.body?.priceRange !== undefined ||
+      req.body?.price_range !== undefined;
+    const pricing = persistProductPricing({
       price: req.body?.price ?? updates.price,
       priceMin: req.body?.priceMin ?? req.body?.price_min,
       priceMax: req.body?.priceMax ?? req.body?.price_max,
       priceRange: req.body?.priceRange ?? req.body?.price_range,
       currency: req.body?.currency,
     });
-    if (req.body?.price === undefined && pricing.priceMin != null && pricing.priceMax != null) {
+    if (req.body?.price === undefined && pricing.price_min != null && pricing.price_max != null) {
       updates.price = 0;
     }
-    updates.price_min = pricing.priceMin;
-    updates.price_max = pricing.priceMax;
-    updates.currency = pricing.currency;
+    if (minProvided) updates.price_min = pricing.price_min;
+    if (maxProvided) updates.price_max = pricing.price_max;
+    if (req.body?.currency !== undefined) updates.currency = pricing.currency;
   }
 
   const identityTouched =
