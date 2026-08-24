@@ -9,6 +9,7 @@ import {
 } from './calendarCredentialsCrypto.js';
 import { getPublicAppOrigin } from './publicAppUrl.js';
 import {
+  instantToSalonLocal,
   parseExternalCalendarEvent,
   resolveParserTimezone,
   type CalendarEventParsedPreview,
@@ -58,6 +59,17 @@ export const GOOGLE_EVENTS_PREVIEW_LOOKAHEAD_DAYS = 90;
 /** Salon «Показать события»: same hard cap as manual sync. */
 export const GOOGLE_EVENTS_SALON_PREVIEW_MAX_PAGES = 20;
 export const GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS = 5000;
+
+/**
+ * Live salon-preview diagnostics only. Salon-local dates around the reported gap.
+ * Not a product window and not a Google timeMin/timeMax.
+ */
+export const GOOGLE_PREVIEW_LIVE_TRACE_DATES = [
+  '2026-08-20',
+  '2026-08-21',
+  '2026-08-22',
+  '2026-08-23',
+] as const;
 
 export type GoogleCalendarOAuthErrorCode =
   | 'GOOGLE_OAUTH_NOT_CONFIGURED'
@@ -978,6 +990,13 @@ export async function listGoogleCalendarEventsPreview(params: {
   maxEvents?: number;
   orderBy?: 'startTime' | 'updated';
   onPage?: (page: GoogleEventsListPage) => void | Promise<void>;
+  /**
+   * Salon preview live-trace only. One callback per fetched events.list page.
+   * Receives Google items[] length before mapping. Never pass this from sync/backfill.
+   */
+  onPreviewLiveTracePage?: (
+    page: GooglePreviewLiveTracePage,
+  ) => void | Promise<void>;
 }): Promise<{ events: GoogleEventPreviewItem[]; truncated: boolean }> {
   const token = params.accessToken.trim();
   if (!token) {
@@ -1083,6 +1102,25 @@ export async function listGoogleCalendarEventsPreview(params: {
       });
     }
 
+    if (params.onPreviewLiveTracePage) {
+      const starts: string[] = [];
+      const rawTimedStarts: string[] = [];
+      for (const item of items) {
+        const startVal = googlePreviewRawItemStartValue(item);
+        if (startVal) starts.push(startVal);
+        const timed = googlePreviewRawItemTimedStart(item);
+        if (timed) rawTimedStarts.push(timed);
+      }
+      await params.onPreviewLiveTracePage({
+        pageNumber: pages,
+        itemsOnPage: items.length,
+        hasNextPageToken: Boolean(pageToken),
+        firstEventStart: starts[0] ?? null,
+        lastEventStart: starts.length ? starts[starts.length - 1]! : null,
+        rawTimedStarts,
+      });
+    }
+
     if (pageToken && (pages >= maxPages || events.length >= maxEvents)) {
       truncated = true;
       break;
@@ -1097,6 +1135,47 @@ export function googlePreviewItemIdentity(
   ev: Pick<GoogleEventPreviewItem, 'id' | 'start'>,
 ): string {
   return `${ev.id}::${ev.start.dateTime || ev.start.date || ''}`;
+}
+
+/** events.list item start (dateTime or date). No summary/title. */
+export function googlePreviewRawItemStartValue(item: unknown): string | null {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  const start = (item as { start?: unknown }).start;
+  if (!start || typeof start !== 'object' || Array.isArray(start)) return null;
+  const row = start as { dateTime?: unknown; date?: unknown };
+  if (typeof row.dateTime === 'string' && row.dateTime.trim()) return row.dateTime.trim();
+  if (typeof row.date === 'string' && row.date.trim()) return row.date.trim();
+  return null;
+}
+
+/** Timed start only (dateTime). All-day date is ignored. */
+export function googlePreviewRawItemTimedStart(item: unknown): string | null {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  const start = (item as { start?: unknown }).start;
+  if (!start || typeof start !== 'object' || Array.isArray(start)) return null;
+  const dateTime = (start as { dateTime?: unknown }).dateTime;
+  return typeof dateTime === 'string' && dateTime.trim() ? dateTime.trim() : null;
+}
+
+export function googlePreviewTimedLocalDateKey(
+  dateTime: string,
+  timeZone: string,
+): string | null {
+  return instantToSalonLocal(dateTime, timeZone)?.date ?? null;
+}
+
+export type GooglePreviewLiveTracePage = {
+  pageNumber: number;
+  itemsOnPage: number;
+  hasNextPageToken: boolean;
+  firstEventStart: string | null;
+  lastEventStart: string | null;
+  /** In-memory aggregation only — never logged. */
+  rawTimedStarts: string[];
+};
+
+function emitGooglePreviewLiveTrace(payload: Record<string, unknown>): void {
+  console.error(payload);
 }
 
 /** 410 always; 400 only when the body points at a bad pageToken. */
@@ -1310,6 +1389,18 @@ export async function previewGoogleCalendarEventsForSalon(params: {
 
   const window = buildGoogleEventsPreviewWindow(params.now ?? new Date());
   const calendarName = row.selected_calendar_name?.trim() || null;
+
+  // GOOGLE-CAL-FAST-3B: attach pure deterministic parse (no DB writes).
+  let salonTimeZone: string;
+  if (typeof params.salonTimeZone === 'string' && params.salonTimeZone.trim()) {
+    salonTimeZone = resolveParserTimezone(params.salonTimeZone);
+  } else if (params.getSalonTimeZone) {
+    salonTimeZone = resolveParserTimezone(await params.getSalonTimeZone(params.salonId));
+  } else {
+    salonTimeZone = resolveParserTimezone(undefined);
+  }
+
+  const liveTracePages: GooglePreviewLiveTracePage[] = [];
   /**
    * One events.list from timeMin with no timeMax. Follow nextPageToken until
    * Google is done or maxEvents is hit. maxPages must be able to cover sparse
@@ -1325,17 +1416,18 @@ export async function previewGoogleCalendarEventsForSalon(params: {
     fetchImpl: params.fetchImpl,
     maxPages: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
     maxEvents: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
+    onPreviewLiveTracePage: (page) => {
+      liveTracePages.push(page);
+      emitGooglePreviewLiveTrace({
+        operation: 'google_preview_page',
+        pageNumber: page.pageNumber,
+        itemsOnPage: page.itemsOnPage,
+        hasNextPageToken: page.hasNextPageToken,
+        firstEventStart: page.firstEventStart,
+        lastEventStart: page.lastEventStart,
+      });
+    },
   });
-
-  // GOOGLE-CAL-FAST-3B: attach pure deterministic parse (no DB writes).
-  let salonTimeZone: string;
-  if (typeof params.salonTimeZone === 'string' && params.salonTimeZone.trim()) {
-    salonTimeZone = resolveParserTimezone(params.salonTimeZone);
-  } else if (params.getSalonTimeZone) {
-    salonTimeZone = resolveParserTimezone(await params.getSalonTimeZone(params.salonId));
-  } else {
-    salonTimeZone = resolveParserTimezone(undefined);
-  }
 
   // GOOGLE-CAL-FAST-4: load salon clients+services once, match all events in memory (read-only).
   let matchCatalog: CalendarMatchCatalog;
@@ -1370,6 +1462,58 @@ export async function previewGoogleCalendarEventsForSalon(params: {
       matchingStatus: matching.matchingStatus,
     };
   });
+
+  const rawItemsTotal = liveTracePages.reduce((n, page) => n + page.itemsOnPage, 0);
+  const uniqueGoogleOccurrences = new Set(
+    eventsWithParsed.map((ev) => googlePreviewItemIdentity(ev)),
+  ).size;
+  const firstEventStart = liveTracePages[0]?.firstEventStart ?? null;
+  const lastEventStart = liveTracePages.length
+    ? liveTracePages[liveTracePages.length - 1]!.lastEventStart
+    : null;
+
+  emitGooglePreviewLiveTrace({
+    operation: 'google_preview_summary',
+    selectedCalendarId: calendarId,
+    pagesFetched: liveTracePages.length,
+    rawItemsTotal,
+    uniqueGoogleOccurrences,
+    backendPreviewItems: eventsWithParsed.length,
+    truncated,
+    firstEventStart,
+    lastEventStart,
+  });
+
+  const rawGoogleTimedByDate: Record<string, number> = {};
+  const backendPreviewByDate: Record<string, number> = {};
+  for (const date of GOOGLE_PREVIEW_LIVE_TRACE_DATES) {
+    rawGoogleTimedByDate[date] = 0;
+    backendPreviewByDate[date] = 0;
+  }
+  for (const page of liveTracePages) {
+    for (const dateTime of page.rawTimedStarts) {
+      const date = googlePreviewTimedLocalDateKey(dateTime, salonTimeZone);
+      if (date && date in rawGoogleTimedByDate) {
+        rawGoogleTimedByDate[date] += 1;
+      }
+    }
+  }
+  for (const ev of eventsWithParsed) {
+    const dateTime = ev.start.dateTime;
+    if (!dateTime) continue;
+    const date = googlePreviewTimedLocalDateKey(dateTime, salonTimeZone);
+    if (date && date in backendPreviewByDate) {
+      backendPreviewByDate[date] += 1;
+    }
+  }
+  for (const date of GOOGLE_PREVIEW_LIVE_TRACE_DATES) {
+    emitGooglePreviewLiveTrace({
+      operation: 'google_preview_day',
+      date,
+      rawGoogleTimedEvents: rawGoogleTimedByDate[date] ?? 0,
+      backendPreviewEvents: backendPreviewByDate[date] ?? 0,
+    });
+  }
 
   return {
     events: eventsWithParsed,
