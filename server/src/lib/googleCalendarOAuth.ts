@@ -58,6 +58,13 @@ export const GOOGLE_EVENTS_PREVIEW_LOOKAHEAD_DAYS = 90;
 /** Salon «Показать события»: same hard cap as manual sync. */
 export const GOOGLE_EVENTS_SALON_PREVIEW_MAX_PAGES = 20;
 export const GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS = 5000;
+/**
+ * Fetch bound only (day windows). Logical preview window still has no timeMax.
+ * Covers +1y while avoiding a single huge events.list range that drops overlaps.
+ */
+export const GOOGLE_EVENTS_SALON_PREVIEW_FETCH_FUTURE_DAYS = 366;
+/** Parallel Google day-window requests for salon preview only. */
+const GOOGLE_EVENTS_SALON_PREVIEW_DAY_CONCURRENCY = 6;
 
 export type GoogleCalendarOAuthErrorCode =
   | 'GOOGLE_OAUTH_NOT_CONFIGURED'
@@ -1092,6 +1099,121 @@ export async function listGoogleCalendarEventsPreview(params: {
   return { events, truncated };
 }
 
+/** Stable Google occurrence identity — never date/client/match keys. */
+export function googlePreviewItemIdentity(
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'start'>,
+): string {
+  return `${ev.id}::${ev.start.dateTime || ev.start.date || ''}`;
+}
+
+export function mergeGooglePreviewEventsByIdentity(
+  groups: GoogleEventPreviewItem[][],
+): GoogleEventPreviewItem[] {
+  const seen = new Map<string, GoogleEventPreviewItem>();
+  for (const group of groups) {
+    for (const ev of group) {
+      const key = googlePreviewItemIdentity(ev);
+      if (!seen.has(key)) seen.set(key, ev);
+    }
+  }
+  return [...seen.values()].sort((a, b) => {
+    const aStart = a.start.dateTime || a.start.date || '';
+    const bStart = b.start.dateTime || b.start.date || '';
+    if (aStart !== bStart) return aStart.localeCompare(bStart);
+    return a.id.localeCompare(b.id);
+  });
+}
+
+export function buildGooglePreviewDayWindows(params: {
+  timeMin: string;
+  now?: Date;
+  futureDays?: number;
+}): Array<{ timeMin: string; timeMax: string }> {
+  const minMs = Date.parse(params.timeMin);
+  if (!Number.isFinite(minMs)) return [];
+  const now = params.now ?? new Date();
+  const futureDays = params.futureDays ?? GOOGLE_EVENTS_SALON_PREVIEW_FETCH_FUTURE_DAYS;
+  const minDate = new Date(minMs);
+  const start = new Date(
+    Date.UTC(minDate.getUTCFullYear(), minDate.getUTCMonth(), minDate.getUTCDate()),
+  );
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  end.setUTCDate(end.getUTCDate() + futureDays);
+  const windows: Array<{ timeMin: string; timeMax: string }> = [];
+  for (let cursor = new Date(start.getTime()); cursor.getTime() < end.getTime(); ) {
+    const next = new Date(cursor);
+    next.setUTCDate(next.getUTCDate() + 1);
+    windows.push({ timeMin: cursor.toISOString(), timeMax: next.toISOString() });
+    cursor = next;
+  }
+  return windows;
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      out[index] = await mapper(items[index]!);
+    }
+  }
+  const n = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return out;
+}
+
+/**
+ * Salon preview listing only. Day windows so overlapping timed events are not
+ * dropped by a single wide events.list page. Does not change import/backfill.
+ */
+export async function listGoogleCalendarEventsPreviewForSalon(params: {
+  accessToken: string;
+  calendarId: string;
+  calendarName?: string | null;
+  timeMin: string;
+  now?: Date;
+  fetchImpl?: GoogleFetch;
+}): Promise<{ events: GoogleEventPreviewItem[]; truncated: boolean }> {
+  const windows = buildGooglePreviewDayWindows({
+    timeMin: params.timeMin,
+    now: params.now,
+  });
+  let truncated = false;
+  const perDay = await mapPool(
+    windows,
+    GOOGLE_EVENTS_SALON_PREVIEW_DAY_CONCURRENCY,
+    async (window) => {
+      const result = await listGoogleCalendarEventsPreview({
+        accessToken: params.accessToken,
+        calendarId: params.calendarId,
+        calendarName: params.calendarName,
+        timeMin: window.timeMin,
+        timeMax: window.timeMax,
+        fetchImpl: params.fetchImpl,
+        maxPages: GOOGLE_EVENTS_SALON_PREVIEW_MAX_PAGES,
+        maxEvents: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
+      });
+      if (result.truncated) truncated = true;
+      return result.events;
+    },
+  );
+  const events = mergeGooglePreviewEventsByIdentity(perDay);
+  if (events.length > GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS) {
+    return {
+      events: events.slice(0, GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS),
+      truncated: true,
+    };
+  }
+  return { events, truncated };
+}
+
 /** 410 always; 400 only when the body points at a bad pageToken. */
 export function isRecoverableGooglePageTokenError(
   status: number,
@@ -1303,15 +1425,13 @@ export async function previewGoogleCalendarEventsForSalon(params: {
 
   const window = buildGoogleEventsPreviewWindow(params.now ?? new Date());
   const calendarName = row.selected_calendar_name?.trim() || null;
-  const { events, truncated } = await listGoogleCalendarEventsPreview({
+  const { events, truncated } = await listGoogleCalendarEventsPreviewForSalon({
     accessToken,
     calendarId,
     calendarName,
     timeMin: window.timeMin,
-    ...(window.timeMax ? { timeMax: window.timeMax } : {}),
+    now: params.now,
     fetchImpl: params.fetchImpl,
-    maxPages: GOOGLE_EVENTS_SALON_PREVIEW_MAX_PAGES,
-    maxEvents: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
   });
 
   // GOOGLE-CAL-FAST-3B: attach pure deterministic parse (no DB writes).

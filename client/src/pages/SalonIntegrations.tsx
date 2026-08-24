@@ -1388,7 +1388,7 @@ export default function SalonIntegrations() {
                             t('integrations.google.parsedMinutes').replace('{n}', String(n));
                           return (
                             <article
-                              key={ev.id}
+                              key={`${ev.id}::${ev.start.dateTime || ev.start.date || ''}`}
                               className="rounded-md border border-gray-200 p-3 dark:border-gray-700"
                             >
                               <div className="space-y-1">
