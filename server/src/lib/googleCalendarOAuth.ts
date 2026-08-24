@@ -297,6 +297,54 @@ export function parseGoogleTokenResponse(body: unknown): GoogleTokenExchangeResu
   };
 }
 
+function asSafeLogString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function asSafeLogNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function asPlainObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/** Safe Google token-error fields only. Never logs tokens, secrets, headers, or raw bodies. */
+function logGoogleOAuthTokenFailure(status: number, json: unknown): void {
+  const raw = asPlainObject(json);
+  console.error({
+    operation: 'google_oauth_token_refresh',
+    googleHttpStatus: status,
+    googleError: raw ? asSafeLogString(raw.error) : null,
+    googleErrorDescription: raw ? asSafeLogString(raw.error_description) : null,
+  });
+}
+
+/** Safe calendarList error fields only. Never logs tokens, secrets, headers, or raw bodies. */
+function logGoogleCalendarListFailure(status: number, json: unknown): void {
+  const raw = asPlainObject(json);
+  const errorObj = raw ? (asPlainObject(raw.error) ?? raw) : null;
+  let googleReason: string | null = null;
+  const errors = errorObj?.errors;
+  if (Array.isArray(errors) && errors.length > 0) {
+    const first = asPlainObject(errors[0]);
+    googleReason = first ? asSafeLogString(first.reason) : null;
+  }
+  console.error({
+    operation: 'google_calendar_list',
+    googleHttpStatus: status,
+    googleErrorCode: errorObj
+      ? (asSafeLogNumber(errorObj.code) ?? asSafeLogString(errorObj.code))
+      : null,
+    googleErrorStatus: errorObj ? asSafeLogString(errorObj.status) : null,
+    googleErrorMessage: errorObj ? asSafeLogString(errorObj.message) : null,
+    googleReason,
+  });
+}
+
 async function postTokenForm(
   body: Record<string, string>,
   fetchImpl: GoogleFetch,
@@ -321,6 +369,7 @@ async function postTokenForm(
     json = null;
   }
   if (!response.ok) {
+    logGoogleOAuthTokenFailure(response.status, json);
     throw new GoogleCalendarOAuthError(
       'GOOGLE_OAUTH_TOKEN_EXCHANGE_FAILED',
       'Token request failed',
@@ -489,6 +538,7 @@ export async function listGoogleCalendars(params: {
       json = null;
     }
     if (!response.ok) {
+      logGoogleCalendarListFailure(response.status, json);
       throw new GoogleCalendarOAuthError(
         'GOOGLE_CALENDAR_LIST_FAILED',
         'Calendar list request failed',
