@@ -1,6 +1,6 @@
 /**
- * GOOGLE-PREVIEW-MISSING-EVENTS: overlapping timed events across many days
- * must each remain their own preview item. Parsing/matching is metadata only.
+ * GOOGLE-PREVIEW-MISSING-EVENTS: keep every Google occurrence in preview.
+ * Parsing/matching is metadata only. No day-window Google listing.
  */
 
 import assert from 'node:assert/strict';
@@ -11,11 +11,10 @@ import { fileURLToPath } from 'node:url';
 import { encryptCalendarCredential } from './calendarCredentialsCrypto.js';
 import {
   GOOGLE_CALENDAR_OAUTH_SCOPE,
-  buildGooglePreviewDayWindows,
+  GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
+  GOOGLE_EVENTS_SALON_PREVIEW_MAX_PAGES,
   googlePreviewItemIdentity,
   listGoogleCalendarEventsPreview,
-  listGoogleCalendarEventsPreviewForSalon,
-  mergeGooglePreviewEventsByIdentity,
   previewGoogleCalendarEventsForSalon,
   serializeGoogleCalendarCredentialBlob,
 } from './googleCalendarOAuth.js';
@@ -41,6 +40,8 @@ type RawGoogleEvent = {
   id: string;
   summary: string;
   status?: string;
+  recurringEventId?: string;
+  originalStartTime?: { dateTime: string };
   start: { dateTime: string };
   end: { dateTime: string };
 };
@@ -50,6 +51,7 @@ function yerevanRange(
   summary: string,
   startLocal: string,
   endLocal: string,
+  extra: Partial<RawGoogleEvent> = {},
 ): RawGoogleEvent {
   return {
     id,
@@ -57,10 +59,11 @@ function yerevanRange(
     status: 'confirmed',
     start: { dateTime: `${startLocal}+04:00` },
     end: { dateTime: `${endLocal}+04:00` },
+    ...extra,
   };
 }
 
-/** 9 unique Google events across 3 days, including overlapping times. */
+/** 9 unique Google occurrences across 3 days, including overlaps + one recurring instance. */
 const NINE_EVENTS: RawGoogleEvent[] = [
   yerevanRange('g-d1-a', 'Ani coloring', '2026-08-21T08:50:00', '2026-08-21T10:50:00'),
   yerevanRange('g-d1-b', 'Lilit haircut', '2026-08-21T09:15:00', '2026-08-21T11:15:00'),
@@ -70,61 +73,17 @@ const NINE_EVENTS: RawGoogleEvent[] = [
   yerevanRange('g-d2-b', 'Tatev pedicure', '2026-08-22T12:00:00', '2026-08-22T13:30:00'),
   yerevanRange('g-d2-c', 'Arpi makeup', '2026-08-22T15:00:00', '2026-08-22T16:00:00'),
   yerevanRange('g-d3-a', 'incomplete title only', '2026-08-23T10:00:00', '2026-08-23T11:00:00'),
-  yerevanRange('g-d3-b', 'Vera окрашивание', '2026-08-23T14:00:00', '2026-08-23T16:00:00'),
+  yerevanRange(
+    'weekly_20260823T100000',
+    'Vera окрашивание',
+    '2026-08-23T14:00:00',
+    '2026-08-23T16:00:00',
+    {
+      recurringEventId: 'weekly',
+      originalStartTime: { dateTime: '2026-08-23T14:00:00+04:00' },
+    },
+  ),
 ];
-
-function overlapsGoogleWindow(
-  ev: RawGoogleEvent,
-  timeMin: string | null,
-  timeMax: string | null,
-): boolean {
-  const start = Date.parse(ev.start.dateTime);
-  const end = Date.parse(ev.end.dateTime);
-  if (timeMin) {
-    const min = Date.parse(timeMin);
-    if (Number.isFinite(min) && !(end > min)) return false;
-  }
-  if (timeMax) {
-    const max = Date.parse(timeMax);
-    if (Number.isFinite(max) && !(start < max)) return false;
-  }
-  return true;
-}
-
-function utcDayKey(ev: RawGoogleEvent): string {
-  return new Date(ev.start.dateTime).toISOString().slice(0, 10);
-}
-
-/** Simulate Google dropping overlapping siblings in a wide events.list window. */
-function applyWideWindowOverlapLoss(
-  events: RawGoogleEvent[],
-  timeMin: string | null,
-  timeMax: string | null,
-): RawGoogleEvent[] {
-  const matching = events.filter((ev) => overlapsGoogleWindow(ev, timeMin, timeMax));
-  const minMs = timeMin ? Date.parse(timeMin) : NaN;
-  const maxMs = timeMax ? Date.parse(timeMax) : minMs + 400 * 86400000;
-  const span = maxMs - minMs;
-  if (!Number.isFinite(span) || span <= 36 * 3600000) return matching;
-  const kept: RawGoogleEvent[] = [];
-  const seenDays = new Set<string>();
-  for (const ev of matching) {
-    const day = utcDayKey(ev);
-    if (seenDays.has(day)) continue;
-    seenDays.add(day);
-    kept.push(ev);
-  }
-  return kept;
-}
-
-function parseListWindow(url: string): { timeMin: string | null; timeMax: string | null; pageToken: string | null } {
-  const u = new URL(url);
-  return {
-    timeMin: u.searchParams.get('timeMin'),
-    timeMax: u.searchParams.get('timeMax'),
-    pageToken: u.searchParams.get('pageToken'),
-  };
-}
 
 function makeCredentialRow() {
   const enc = encryptCalendarCredential(
@@ -168,42 +127,33 @@ function dbWithRow(row: Record<string, unknown>) {
   };
 }
 
-describe('GOOGLE-PREVIEW-MISSING-EVENTS identity + day windows', () => {
-  it('identity is Google event id + start, not date/client/match', () => {
-    const a = {
-      id: 'g1',
-      start: { dateTime: '2026-08-21T04:50:00.000Z', date: null, timeZone: null, allDay: false },
-    };
-    const b = {
-      id: 'g2',
-      start: { dateTime: '2026-08-21T05:15:00.000Z', date: null, timeZone: null, allDay: false },
-    };
-    assert.notEqual(googlePreviewItemIdentity(a), googlePreviewItemIdentity(b));
-    assert.match(googlePreviewItemIdentity(a), /^g1::/);
-    const merged = mergeGooglePreviewEventsByIdentity([
-      [
-        { id: 'g1', start: a.start, summary: 'one' } as any,
-        { id: 'g2', start: b.start, summary: 'two' } as any,
-      ],
-    ]);
-    assert.equal(merged.length, 2);
-  });
+function paginatedFetch(pages: RawGoogleEvent[][]): typeof fetch {
+  return async (input) => {
+    const url = String(input);
+    if (url.includes('/token')) {
+      return new Response(JSON.stringify({ access_token: 'at', expires_in: 3600 }), {
+        status: 200,
+      });
+    }
+    assert.match(url, /singleEvents=true/);
+    assert.match(url, /orderBy=startTime/);
+    assert.doesNotMatch(url, /timeMax=/);
+    const u = new URL(url);
+    const pageToken = u.searchParams.get('pageToken');
+    const index = pageToken ? Number(pageToken.replace('p', '')) : 0;
+    const items = pages[index] ?? [];
+    const hasMore = index + 1 < pages.length;
+    return new Response(
+      JSON.stringify({
+        items,
+        ...(hasMore ? { nextPageToken: `p${index + 1}` } : {}),
+      }),
+      { status: 200 },
+    );
+  };
+}
 
-  it('day windows are 24h UTC slices covering lookback through +1y', () => {
-    const windows = buildGooglePreviewDayWindows({
-      timeMin: '2026-07-25T00:00:00.000Z',
-      now: NOW,
-      futureDays: 366,
-    });
-    assert.equal(windows[0]?.timeMin, '2026-07-25T00:00:00.000Z');
-    assert.equal(windows[0]?.timeMax, '2026-07-26T00:00:00.000Z');
-    assert.ok(windows.length >= 30 + 365);
-    assert.ok(windows.some((w) => w.timeMin === '2026-08-21T00:00:00.000Z'));
-    assert.ok(windows.some((w) => w.timeMin === '2027-08-24T00:00:00.000Z'));
-  });
-});
-
-describe('GOOGLE-PREVIEW-MISSING-EVENTS 9 events / 3 days (mock Google)', () => {
+describe('GOOGLE-PREVIEW-MISSING-EVENTS coverage (paginated events.list)', () => {
   before(() => {
     setEnv('GOOGLE_CALENDAR_CLIENT_ID', 'test-client-id');
     setEnv('GOOGLE_CALENDAR_CLIENT_SECRET', 'test-google-client-secret');
@@ -220,102 +170,113 @@ describe('GOOGLE-PREVIEW-MISSING-EVENTS 9 events / 3 days (mock Google)', () => 
     }
   });
 
-  function overlappingFetch(events: RawGoogleEvent[], paginateDay2 = false): typeof fetch {
-    return async (input) => {
-      const url = String(input);
-      if (url.includes('/token')) {
-        return new Response(JSON.stringify({ access_token: 'at', expires_in: 3600 }), {
-          status: 200,
-        });
-      }
-      const { timeMin, timeMax, pageToken } = parseListWindow(url);
-      let items = applyWideWindowOverlapLoss(events, timeMin, timeMax);
-      if (paginateDay2 && timeMin === '2026-08-22T00:00:00.000Z') {
-        if (pageToken === 'd2p2') {
-          items = items.filter((ev) => ev.id === 'g-d2-c');
-        } else {
-          return new Response(
-            JSON.stringify({
-              items: items.filter((ev) => ev.id !== 'g-d2-c'),
-              nextPageToken: 'd2p2',
-            }),
-            { status: 200 },
-          );
-        }
-      }
-      return new Response(JSON.stringify({ items }), { status: 200 });
-    };
-  }
-
-  it('wide events.list overlap-loss keeps 3; day windows restore all 9', async () => {
-    const wide = applyWideWindowOverlapLoss(
-      NINE_EVENTS,
-      '2026-07-25T00:00:00.000Z',
-      null,
-    );
-    assert.equal(wide.length, 3, 'fixture: one Google item per date in a wide window');
-
-    const listed = await listGoogleCalendarEventsPreviewForSalon({
+  it('9 unique overlapping occurrences survive list + parse + match + identity keys', async () => {
+    const fetchImpl = paginatedFetch([
+      NINE_EVENTS.slice(0, 4),
+      NINE_EVENTS.slice(4, 7),
+      NINE_EVENTS.slice(7),
+    ]);
+    const listed = await listGoogleCalendarEventsPreview({
       accessToken: 'at',
       calendarId: 'tatevik.miqaelyan@gmail.com',
-      calendarName: 'tatevik.miqaelyan@gmail.com',
       timeMin: '2026-07-25T00:00:00.000Z',
-      now: NOW,
-      fetchImpl: overlappingFetch(NINE_EVENTS),
+      fetchImpl,
+      maxPages: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
+      maxEvents: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
     });
     assert.equal(listed.events.length, 9);
-    assert.equal(new Set(listed.events.map((e) => e.id)).size, 9);
-  });
+    assert.equal(listed.truncated, false);
 
-  it('salon preview API keeps 9 events; incomplete parse still listed', async () => {
     const preview = await previewGoogleCalendarEventsForSalon({
       db: dbWithRow(makeCredentialRow()),
       salonId: 'salon-a',
-      fetchImpl: overlappingFetch(NINE_EVENTS),
+      fetchImpl: paginatedFetch([
+        NINE_EVENTS.slice(0, 4),
+        NINE_EVENTS.slice(4, 7),
+        NINE_EVENTS.slice(7),
+      ]),
       now: NOW,
       salonTimeZone: 'Asia/Yerevan',
       matchCatalog: { clients: [], services: [] },
     });
     assert.equal(preview.count, 9);
     assert.equal(preview.events.length, 9);
-    const ids = preview.events.map((e) => e.id);
-    assert.deepEqual(
-      [...ids].sort(),
-      NINE_EVENTS.map((e) => e.id).sort(),
-    );
+    assert.equal(preview.windowEnd, '');
+    assert.equal(new Set(preview.events.map((e) => e.id)).size, 9);
+    assert.equal(new Set(preview.events.map((e) => googlePreviewItemIdentity(e))).size, 9);
+
     const incomplete = preview.events.find((e) => e.id === 'g-d3-a');
-    assert.ok(incomplete);
     assert.ok(incomplete?.parsed);
-    assert.equal(incomplete?.summary, 'incomplete title only');
-    const renderKeys = preview.events.map((e) => googlePreviewItemIdentity(e));
-    assert.equal(new Set(renderKeys).size, 9);
+    assert.equal(incomplete?.matchingStatus === 'matched', false);
+
+    const recurring = preview.events.find((e) => e.id === 'weekly_20260823T100000');
+    assert.equal(recurring?.recurringEventId, 'weekly');
   });
 
-  it('day-window pagination still returns every overlapping event', async () => {
-    const listed = await listGoogleCalendarEventsPreviewForSalon({
+  it('sparse Google pages are accumulated, not stopped after 20 requests', async () => {
+    const sparse = Array.from({ length: 25 }, (_, i) =>
+      yerevanRange(
+        `sparse-${i}`,
+        `Client ${i}`,
+        `2026-08-21T${String(8 + (i % 10)).padStart(2, '0')}:00:00`,
+        `2026-08-21T${String(9 + (i % 10)).padStart(2, '0')}:00:00`,
+      ),
+    );
+    const pages = sparse.map((ev) => [ev]);
+
+    const capped = await listGoogleCalendarEventsPreview({
       accessToken: 'at',
-      calendarId: 'tatevik.miqaelyan@gmail.com',
+      calendarId: 'primary',
       timeMin: '2026-07-25T00:00:00.000Z',
+      fetchImpl: paginatedFetch(pages),
+      maxPages: GOOGLE_EVENTS_SALON_PREVIEW_MAX_PAGES,
+      maxEvents: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
+    });
+    assert.equal(capped.events.length, 20);
+    assert.equal(capped.truncated, true);
+
+    const preview = await previewGoogleCalendarEventsForSalon({
+      db: dbWithRow(makeCredentialRow()),
+      salonId: 'salon-a',
+      fetchImpl: paginatedFetch(pages),
       now: NOW,
-      fetchImpl: overlappingFetch(NINE_EVENTS, true),
+      salonTimeZone: 'Asia/Yerevan',
+      matchCatalog: { clients: [], services: [] },
     });
-    assert.equal(listed.events.length, 9);
-    assert.ok(listed.events.some((e) => e.id === 'g-d2-c'));
+    assert.equal(preview.events.length, 25);
+    assert.equal(preview.truncated, false);
   });
 
-  it('import listing helper is unchanged: one wide window still loses overlaps', async () => {
-    const listed = await listGoogleCalendarEventsPreview({
-      accessToken: 'at',
-      calendarId: 'tatevik.miqaelyan@gmail.com',
-      timeMin: '2026-07-25T00:00:00.000Z',
-      fetchImpl: overlappingFetch(NINE_EVENTS),
+  it('paginates more than 500 events without dropping earlier pages', async () => {
+    const many = Array.from({ length: 520 }, (_, i) =>
+      yerevanRange(
+        `bulk-${i}`,
+        `Event ${i}`,
+        `2026-08-21T08:00:00`,
+        `2026-08-21T09:00:00`,
+      ),
+    );
+    const pages: RawGoogleEvent[][] = [];
+    for (let i = 0; i < many.length; i += 250) {
+      pages.push(many.slice(i, i + 250));
+    }
+    const preview = await previewGoogleCalendarEventsForSalon({
+      db: dbWithRow(makeCredentialRow()),
+      salonId: 'salon-a',
+      fetchImpl: paginatedFetch(pages),
+      now: NOW,
+      salonTimeZone: 'Asia/Yerevan',
+      matchCatalog: { clients: [], services: [] },
     });
-    assert.equal(listed.events.length, 3);
+    assert.equal(preview.events.length, 520);
+    assert.equal(preview.truncated, false);
+    assert.equal(preview.events[0]?.id, 'bulk-0');
+    assert.equal(preview.events[519]?.id, 'bulk-519');
   });
 });
 
-describe('GOOGLE-PREVIEW-MISSING-EVENTS frontend cards', () => {
-  it('integrations preview maps every event with Google identity keys; no eligibility filter', () => {
+describe('GOOGLE-PREVIEW-MISSING-EVENTS contracts', () => {
+  it('frontend renders every backend item with occurrence keys; no eligibility filter', () => {
     const integrations = read('client/src/pages/SalonIntegrations.tsx');
     const start = integrations.indexOf('{googlePreviewEvents.map((ev) => {');
     assert.ok(start > 0);
@@ -333,7 +294,13 @@ describe('GOOGLE-PREVIEW-MISSING-EVENTS frontend cards', () => {
     assert.match(setCall, /setGooglePreviewEvents\(data\.events\)/);
   });
 
-  it('package registers this suite once', () => {
+  it('day-by-day listing is gone; preview uses one events.list with no timeMax', () => {
+    const oauth = read('server/src/lib/googleCalendarOAuth.ts');
+    assert.doesNotMatch(oauth, /buildGooglePreviewDayWindows|listGoogleCalendarEventsPreviewForSalon/);
+    assert.doesNotMatch(oauth, /GOOGLE_EVENTS_SALON_PREVIEW_FETCH_FUTURE_DAYS|DAY_CONCURRENCY/);
+    assert.match(oauth, /maxPages: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS/);
+    assert.match(oauth, /maxEvents: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS/);
+    assert.match(oauth, /No future timeMax/);
     const packageJson = read('server/package.json');
     const n = (packageJson.match(/googleCalendar\.previewMissingEvents\.test\.ts/g) || []).length;
     assert.equal(n, 1);

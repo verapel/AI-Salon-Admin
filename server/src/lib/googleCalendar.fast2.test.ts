@@ -262,7 +262,7 @@ describe('GOOGLE-CAL-FAST-2 pagination + salon preview (mock HTTP)', () => {
         });
       }
       assert.match(url, /\/calendars\/primary\/events/);
-      assert.match(url, /timeMax=/);
+      assert.doesNotMatch(url, /timeMax=/);
       assert.doesNotMatch(url, /rt-secret/);
       return new Response(
         JSON.stringify({
