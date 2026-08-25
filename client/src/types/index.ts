@@ -667,6 +667,9 @@ export interface GoogleEventsPreviewResponse {
   salonTimeZone?: string;
   staffOptions?: GoogleImportStaffOption[];
   autoImportEnabled?: boolean;
+  googleReceived?: number;
+  previewCards?: number;
+  hidden?: number;
 }
 
 export interface GoogleEventImportRequest {

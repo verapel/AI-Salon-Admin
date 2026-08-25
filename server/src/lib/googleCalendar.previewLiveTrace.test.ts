@@ -281,7 +281,10 @@ describe('GOOGLE-PREVIEW-LIVE-TRACE diagnostics', () => {
     });
 
     assert.equal(preview.truncated, false);
-    assert.equal(preview.events.length, 8);
+    assert.equal(preview.events.length, 9);
+    assert.equal(preview.googleReceived, 9);
+    assert.equal(preview.previewCards, 9);
+    assert.equal(preview.hidden, 0);
     assert.equal(preview.events.some((ev) => !ev.id), false);
 
     const pageLogs = logsWithOperation('google_preview_page');
@@ -312,8 +315,8 @@ describe('GOOGLE-PREVIEW-LIVE-TRACE diagnostics', () => {
     assert.equal(summary.selectedCalendarId, SELECTED_CALENDAR);
     assert.equal(summary.pagesFetched, 3);
     assert.equal(summary.rawItemsTotal, 9);
-    assert.equal(summary.uniqueGoogleOccurrences, 8);
-    assert.equal(summary.backendPreviewItems, 8);
+    assert.equal(summary.uniqueGoogleOccurrences, 9);
+    assert.equal(summary.backendPreviewItems, 9);
     assert.equal(summary.truncated, false);
     assert.equal(summary.firstEventStart, '2026-08-19T10:00:00+04:00');
     assert.equal(summary.lastEventStart, '2026-08-23T14:00:00+04:00');
@@ -331,7 +334,7 @@ describe('GOOGLE-PREVIEW-LIVE-TRACE diagnostics', () => {
     assert.equal(byDate['2026-08-20']?.rawGoogleTimedEvents, 1);
     assert.equal(byDate['2026-08-20']?.backendPreviewEvents, 1);
     assert.equal(byDate['2026-08-21']?.rawGoogleTimedEvents, 3);
-    assert.equal(byDate['2026-08-21']?.backendPreviewEvents, 2);
+    assert.equal(byDate['2026-08-21']?.backendPreviewEvents, 3);
     assert.equal(byDate['2026-08-22']?.rawGoogleTimedEvents, 2);
     assert.equal(byDate['2026-08-22']?.backendPreviewEvents, 2);
     assert.equal(byDate['2026-08-23']?.rawGoogleTimedEvents, 1);

@@ -248,6 +248,12 @@ export type GoogleEventsPreviewResult = {
   staffOptions?: ImportableStaffOption[];
   /** True when connection import_enabled and pilot staff configured. */
   autoImportEnabled?: boolean;
+  /** Unique Google occurrences received for salon preview (all selected calendars). */
+  googleReceived?: number;
+  /** Preview cards after mapping. Must equal googleReceived. */
+  previewCards?: number;
+  /** googleReceived - previewCards. Salon preview must stay 0. */
+  hidden?: number;
 };
 
 export type GoogleFetch = typeof fetch;
@@ -969,6 +975,11 @@ export function buildGoogleCalendarEventsListUrl(params: {
   orderBy?: 'startTime' | 'updated';
   /** Lower bound for event last-modification time (RFC3339). */
   updatedMin?: string | null;
+  /**
+   * Salon preview only. Import/backfill/FAST-6 keep the default false.
+   * Cancelled occurrences are omitted by Google unless this is true.
+   */
+  showDeleted?: boolean;
 }): string {
   const calendarId = params.calendarId.trim();
   if (!calendarId) {
@@ -982,7 +993,7 @@ export function buildGoogleCalendarEventsListUrl(params: {
   );
   url.searchParams.set('singleEvents', 'true');
   url.searchParams.set('orderBy', params.orderBy === 'updated' ? 'updated' : 'startTime');
-  url.searchParams.set('showDeleted', 'false');
+  url.searchParams.set('showDeleted', params.showDeleted ? 'true' : 'false');
   if (params.timeMin) url.searchParams.set('timeMin', params.timeMin);
   if (params.timeMax) url.searchParams.set('timeMax', params.timeMax);
   if (params.updatedMin?.trim()) {
@@ -1035,6 +1046,13 @@ export function mapGoogleEventPreviewEntry(
     row.originalStartTime !== undefined && row.originalStartTime !== null
       ? mapGoogleEventTimePreview(row.originalStartTime)
       : null;
+  const mappedStart = mapGoogleEventTimePreview(row.start);
+  const start =
+    mappedStart.dateTime || mappedStart.date
+      ? mappedStart
+      : originalStart && (originalStart.dateTime || originalStart.date)
+        ? originalStart
+        : mappedStart;
 
   return {
     id,
@@ -1052,7 +1070,7 @@ export function mapGoogleEventPreviewEntry(
       typeof row.description === 'string' ? row.description : null,
     location: typeof row.location === 'string' ? row.location : null,
     status: typeof row.status === 'string' ? row.status : null,
-    start: mapGoogleEventTimePreview(row.start),
+    start,
     end: mapGoogleEventTimePreview(row.end),
     recurringEventId:
       typeof row.recurringEventId === 'string' && row.recurringEventId.trim()
@@ -1063,6 +1081,49 @@ export function mapGoogleEventPreviewEntry(
     updated: typeof row.updated === 'string' ? row.updated : null,
     etag: typeof row.etag === 'string' ? row.etag : null,
     htmlLink: typeof row.htmlLink === 'string' ? row.htmlLink : null,
+    calendarId,
+    calendarName,
+  };
+}
+
+function fallbackGoogleEventPreviewEntry(
+  raw: unknown,
+  calendarId: string,
+  calendarName: string | null,
+  fallbackId: string,
+): GoogleEventPreviewItem {
+  const mapped = mapGoogleEventPreviewEntry(raw, calendarId, calendarName);
+  if (mapped) return mapped;
+  const row =
+    raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  const originalStart =
+    row.originalStartTime !== undefined && row.originalStartTime !== null
+      ? mapGoogleEventTimePreview(row.originalStartTime)
+      : null;
+  const mappedStart = mapGoogleEventTimePreview(row.start);
+  const start =
+    mappedStart.dateTime || mappedStart.date
+      ? mappedStart
+      : originalStart && (originalStart.dateTime || originalStart.date)
+        ? originalStart
+        : mappedStart;
+  return {
+    id: fallbackId,
+    iCalUID: null,
+    summary: typeof row.summary === 'string' ? row.summary : null,
+    description: null,
+    location: null,
+    status: typeof row.status === 'string' ? row.status : null,
+    start,
+    end: mapGoogleEventTimePreview(row.end),
+    recurringEventId: null,
+    originalStartTime: originalStart,
+    created: null,
+    updated: null,
+    etag: null,
+    htmlLink: null,
     calendarId,
     calendarName,
   };
@@ -1090,6 +1151,10 @@ export async function listGoogleCalendarEventsPreview(params: {
   maxEvents?: number;
   orderBy?: 'startTime' | 'updated';
   onPage?: (page: GoogleEventsListPage) => void | Promise<void>;
+  /** Salon preview only — cancelled Google occurrences. Import/backfill stay false. */
+  showDeleted?: boolean;
+  /** Salon preview only — never drop a Google items[] row. */
+  includeEveryGoogleItem?: boolean;
   /**
    * Salon preview live-trace only. One callback per fetched events.list page.
    * Receives Google items[] length before mapping. Never pass this from sync/backfill.
@@ -1097,7 +1162,11 @@ export async function listGoogleCalendarEventsPreview(params: {
   onPreviewLiveTracePage?: (
     page: GooglePreviewLiveTracePage,
   ) => void | Promise<void>;
-}): Promise<{ events: GoogleEventPreviewItem[]; truncated: boolean }> {
+}): Promise<{
+  events: GoogleEventPreviewItem[];
+  truncated: boolean;
+  rawOccurrenceCount: number;
+}> {
   const token = params.accessToken.trim();
   if (!token) {
     throw new GoogleCalendarOAuthError(
@@ -1121,6 +1190,8 @@ export async function listGoogleCalendarEventsPreview(params: {
   let pageToken: string | null = null;
   let pages = 0;
   let truncated = false;
+  let rawIndex = 0;
+  let rawOccurrenceCount = 0;
 
   do {
     if (pages >= maxPages || events.length >= maxEvents) {
@@ -1138,6 +1209,7 @@ export async function listGoogleCalendarEventsPreview(params: {
       pageToken,
       maxResults: pageSize,
       orderBy: params.orderBy,
+      showDeleted: params.showDeleted,
     });
 
     let response: Response;
@@ -1181,7 +1253,17 @@ export async function listGoogleCalendarEventsPreview(params: {
         truncated = true;
         break;
       }
-      const mapped = mapGoogleEventPreviewEntry(item, calendarId, calendarName);
+      rawIndex += 1;
+      rawOccurrenceCount += 1;
+      let mapped = mapGoogleEventPreviewEntry(item, calendarId, calendarName);
+      if (!mapped && params.includeEveryGoogleItem) {
+        mapped = fallbackGoogleEventPreviewEntry(
+          item,
+          calendarId,
+          calendarName,
+          `unmapped-${pages}-${rawIndex}`,
+        );
+      }
       if (mapped) {
         events.push(mapped);
         pageEvents.push(mapped);
@@ -1227,14 +1309,31 @@ export async function listGoogleCalendarEventsPreview(params: {
     }
   } while (pageToken);
 
-  return { events, truncated };
+  return { events, truncated, rawOccurrenceCount };
+}
+
+/** Occurrence start for identity: timed start, all-day date, then originalStartTime. */
+export function googlePreviewOccurrenceStart(
+  ev: Pick<GoogleEventPreviewItem, 'start'> & {
+    originalStartTime?: GoogleEventPreviewItem['originalStartTime'];
+  },
+): string {
+  return (
+    ev.start.dateTime ||
+    ev.start.date ||
+    ev.originalStartTime?.dateTime ||
+    ev.originalStartTime?.date ||
+    ''
+  );
 }
 
 /** Stable Google occurrence identity — calendar + event + occurrence start. */
 export function googlePreviewItemIdentity(
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'start' | 'calendarId'>,
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'start' | 'calendarId'> & {
+    originalStartTime?: GoogleEventPreviewItem['originalStartTime'];
+  },
 ): string {
-  return `${ev.calendarId}::${ev.id}::${ev.start.dateTime || ev.start.date || ''}`;
+  return `${ev.calendarId}::${ev.id}::${googlePreviewOccurrenceStart(ev)}`;
 }
 
 export function mergeGooglePreviewEventsByOccurrence(
@@ -1262,6 +1361,27 @@ export function googlePreviewRawItemStartValue(item: unknown): string | null {
   if (typeof row.dateTime === 'string' && row.dateTime.trim()) return row.dateTime.trim();
   if (typeof row.date === 'string' && row.date.trim()) return row.date.trim();
   return null;
+}
+
+/** Timed or all-day start, then originalStartTime (cancelled instances). */
+export function googlePreviewRawItemOccurrenceStart(item: unknown): string {
+  const start = googlePreviewRawItemStartValue(item);
+  if (start) return start;
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return '';
+  const ost = (item as { originalStartTime?: unknown }).originalStartTime;
+  return googlePreviewRawItemStartValue({ start: ost }) || '';
+}
+
+export function googlePreviewRawItemIdentity(
+  item: unknown,
+  calendarId: string,
+): string | null {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  const id = typeof (item as { id?: unknown }).id === 'string'
+    ? (item as { id: string }).id.trim()
+    : '';
+  if (!id) return null;
+  return `${calendarId}::${id}::${googlePreviewRawItemOccurrenceStart(item)}`;
 }
 
 /** Timed start only (dateTime). All-day date is ignored. */
@@ -1449,7 +1569,11 @@ async function listGoogleCalendarPreviewWithLiveTrace(params: {
   timeMax?: string;
   fetchImpl?: GoogleFetch;
   salonTimeZone: string;
-}): Promise<{ events: GoogleEventPreviewItem[]; truncated: boolean }> {
+}): Promise<{
+  events: GoogleEventPreviewItem[];
+  truncated: boolean;
+  rawOccurrenceCount: number;
+}> {
   const liveTracePages: GooglePreviewLiveTracePage[] = [];
   /**
    * One events.list from timeMin with no timeMax. Follow nextPageToken until
@@ -1457,7 +1581,7 @@ async function listGoogleCalendarPreviewWithLiveTrace(params: {
    * pages (Google may return << maxResults while nextPageToken is set);
    * 20 full-size pages would stop early and drop remaining occurrences.
    */
-  const { events, truncated } = await listGoogleCalendarEventsPreview({
+  const { events, truncated, rawOccurrenceCount } = await listGoogleCalendarEventsPreview({
     accessToken: params.accessToken,
     calendarId: params.calendarId,
     calendarName: params.calendarName,
@@ -1466,6 +1590,8 @@ async function listGoogleCalendarPreviewWithLiveTrace(params: {
     fetchImpl: params.fetchImpl,
     maxPages: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
     maxEvents: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
+    showDeleted: true,
+    includeEveryGoogleItem: true,
     onPreviewLiveTracePage: (page) => {
       liveTracePages.push(page);
       emitGooglePreviewLiveTrace({
@@ -1479,14 +1605,8 @@ async function listGoogleCalendarPreviewWithLiveTrace(params: {
     },
   });
 
-  const uniqueEvents: GoogleEventPreviewItem[] = [];
-  const seen = new Set<string>();
-  for (const ev of events) {
-    const key = googlePreviewItemIdentity(ev);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    uniqueEvents.push(ev);
-  }
+  const identityKeys = events.map((ev) => googlePreviewItemIdentity(ev));
+  const uniqueGoogleOccurrences = new Set(identityKeys).size;
 
   const rawItemsTotal = liveTracePages.reduce((n, page) => n + page.itemsOnPage, 0);
   const firstEventStart = liveTracePages[0]?.firstEventStart ?? null;
@@ -1499,8 +1619,8 @@ async function listGoogleCalendarPreviewWithLiveTrace(params: {
     selectedCalendarId: params.calendarId,
     pagesFetched: liveTracePages.length,
     rawItemsTotal,
-    uniqueGoogleOccurrences: uniqueEvents.length,
-    backendPreviewItems: uniqueEvents.length,
+    uniqueGoogleOccurrences,
+    backendPreviewItems: events.length,
     truncated,
     firstEventStart,
     lastEventStart,
@@ -1520,7 +1640,7 @@ async function listGoogleCalendarPreviewWithLiveTrace(params: {
       }
     }
   }
-  for (const ev of uniqueEvents) {
+  for (const ev of events) {
     const dateTime = ev.start.dateTime;
     if (!dateTime) continue;
     const date = googlePreviewTimedLocalDateKey(dateTime, params.salonTimeZone);
@@ -1537,7 +1657,7 @@ async function listGoogleCalendarPreviewWithLiveTrace(params: {
     });
   }
 
-  return { events: uniqueEvents, truncated };
+  return { events, truncated, rawOccurrenceCount };
 }
 
 export async function previewGoogleCalendarEventsForSalon(params: {
@@ -1620,6 +1740,7 @@ export async function previewGoogleCalendarEventsForSalon(params: {
 
   const listedGroups: GoogleEventPreviewItem[][] = [];
   let truncated = false;
+  let googleReceived = 0;
   for (const calendar of selectedCalendars) {
     const listed = await listGoogleCalendarPreviewWithLiveTrace({
       accessToken,
@@ -1631,9 +1752,11 @@ export async function previewGoogleCalendarEventsForSalon(params: {
       salonTimeZone,
     });
     listedGroups.push(listed.events);
+    googleReceived += listed.rawOccurrenceCount;
     if (listed.truncated) truncated = true;
   }
-  const events = mergeGooglePreviewEventsByOccurrence(listedGroups);
+  // Preview must not dedupe. Every Google items[] row stays a card.
+  const events = listedGroups.flat();
 
   // GOOGLE-CAL-FAST-4: load salon clients+services once, match all events in memory (read-only).
   let matchCatalog: CalendarMatchCatalog;
@@ -1670,9 +1793,11 @@ export async function previewGoogleCalendarEventsForSalon(params: {
   });
 
   const primary = selectedCalendars[0]!;
+  const previewCards = eventsWithParsed.length;
+  const hidden = Math.max(0, googleReceived - previewCards);
   return {
     events: eventsWithParsed,
-    count: eventsWithParsed.length,
+    count: previewCards,
     truncated,
     windowStart: window.timeMin,
     windowEnd: window.timeMax ?? '',
@@ -1680,6 +1805,9 @@ export async function previewGoogleCalendarEventsForSalon(params: {
     calendarName: primary.name,
     selectedCalendars,
     salonTimeZone,
+    googleReceived,
+    previewCards,
+    hidden,
   };
 }
 

@@ -712,6 +712,11 @@ export default function SalonIntegrations() {
   const [googlePreviewError, setGooglePreviewError] = useState<string | null>(null);
   const [googlePreviewTruncated, setGooglePreviewTruncated] = useState(false);
   const [googlePreviewLoaded, setGooglePreviewLoaded] = useState(false);
+  const [googlePreviewCoverage, setGooglePreviewCoverage] = useState<{
+    googleReceived: number;
+    previewCards: number;
+    hidden: number;
+  } | null>(null);
   const [googleStaffOptions, setGoogleStaffOptions] = useState<GoogleImportStaffOption[]>([]);
   const [googleAutoImportToggling, setGoogleAutoImportToggling] = useState(false);
   const [googleAutoImportError, setGoogleAutoImportError] = useState<string | null>(null);
@@ -905,6 +910,7 @@ export default function SalonIntegrations() {
       setGoogleBanner(t('integrations.google.calendarsSelectedBanner'));
       setGooglePreviewEvents([]);
       setGooglePreviewLoaded(false);
+      setGooglePreviewCoverage(null);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : t('integrations.google.selectError');
@@ -928,6 +934,7 @@ export default function SalonIntegrations() {
       setGoogleBanner(null);
       setGooglePreviewEvents([]);
       setGooglePreviewLoaded(false);
+      setGooglePreviewCoverage(null);
       setGooglePreviewTruncated(false);
       setGooglePreviewError(null);
       setGoogleStaffOptions([]);
@@ -950,12 +957,20 @@ export default function SalonIntegrations() {
       setGooglePreviewTruncated(Boolean(data.truncated));
       setGooglePreviewLoaded(true);
       setGoogleStaffOptions(data.staffOptions ?? []);
+      const previewCards = data.events.length;
+      const googleReceived = data.googleReceived ?? previewCards;
+      setGooglePreviewCoverage({
+        googleReceived,
+        previewCards,
+        hidden: googleReceived - previewCards,
+      });
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : t('integrations.google.previewError');
       setGooglePreviewError(message || t('integrations.google.previewError'));
       setGooglePreviewEvents([]);
       setGooglePreviewLoaded(false);
+      setGooglePreviewCoverage(null);
       setGooglePreviewTruncated(false);
     } finally {
       setGooglePreviewLoading(false);
@@ -1439,6 +1454,15 @@ export default function SalonIntegrations() {
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       {t('integrations.google.previewMatchNote')}
                     </p>
+                    {googlePreviewLoaded && googlePreviewCoverage ? (
+                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                        Google received: {googlePreviewCoverage.googleReceived}
+                        {' · '}
+                        Preview cards: {googlePreviewCoverage.previewCards}
+                        {' · '}
+                        Hidden: {googlePreviewCoverage.hidden}
+                      </p>
+                    ) : null}
                     {googlePreviewError ? (
                       <p className="text-sm text-red-600 dark:text-red-400">
                         {googlePreviewError}
@@ -1455,14 +1479,14 @@ export default function SalonIntegrations() {
                       </p>
                     ) : null}
                     {googlePreviewEvents.length > 0 ? (
-                      <div className="max-h-[32rem] space-y-3 overflow-auto pr-1">
+                      <div className="space-y-3 pr-1">
                         {googlePreviewEvents.map((ev) => {
                           const parsed = ev.parsed;
                           const minutesLabel = (n: number) =>
                             t('integrations.google.parsedMinutes').replace('{n}', String(n));
                           return (
                             <article
-                              key={`${ev.calendarId}::${ev.id}::${ev.start.dateTime || ev.start.date || ''}`}
+                              key={`${ev.calendarId}::${ev.id}::${ev.start.dateTime || ev.start.date || ev.originalStartTime?.dateTime || ev.originalStartTime?.date || ''}`}
                               className="rounded-md border border-gray-200 p-3 dark:border-gray-700"
                             >
                               <div className="space-y-1">

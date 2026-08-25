@@ -201,6 +201,9 @@ describe('GOOGLE-PREVIEW-MISSING-EVENTS coverage (paginated events.list)', () =>
     });
     assert.equal(preview.count, 9);
     assert.equal(preview.events.length, 9);
+    assert.equal(preview.googleReceived, 9);
+    assert.equal(preview.previewCards, 9);
+    assert.equal(preview.hidden, 0);
     assert.equal(preview.windowEnd, '');
     assert.equal(new Set(preview.events.map((e) => e.id)).size, 9);
     assert.equal(new Set(preview.events.map((e) => googlePreviewItemIdentity(e))).size, 9);
@@ -273,6 +276,114 @@ describe('GOOGLE-PREVIEW-MISSING-EVENTS coverage (paginated events.list)', () =>
     assert.equal(preview.events[0]?.id, 'bulk-0');
     assert.equal(preview.events[519]?.id, 'bulk-519');
   });
+
+  it('cancelled, all-day, unmatched, and originalStartTime-only rows all become cards', async () => {
+    const mixed: RawGoogleEvent[] = [
+      yerevanRange('keep-timed', 'Ani coloring', '2026-08-21T08:00:00', '2026-08-21T09:00:00'),
+      yerevanRange('keep-overlap', 'Lilit haircut', '2026-08-21T08:30:00', '2026-08-21T09:30:00'),
+      {
+        id: 'keep-allday',
+        summary: 'Holiday',
+        status: 'confirmed',
+        start: { date: '2026-08-22' } as unknown as { dateTime: string },
+        end: { date: '2026-08-23' } as unknown as { dateTime: string },
+      },
+      {
+        id: 'keep-cancelled',
+        summary: 'Cancelled visit',
+        status: 'cancelled',
+        originalStartTime: { dateTime: '2026-08-21T11:00:00+04:00' },
+        start: { dateTime: '' },
+        end: { dateTime: '' },
+      },
+      yerevanRange(
+        'keep-unmatched',
+        'unknownservicehere',
+        '2026-08-21T15:00:00',
+        '2026-08-21T16:00:00',
+      ),
+    ];
+    let seenShowDeleted: string | null = null;
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.includes('/token')) {
+        return new Response(JSON.stringify({ access_token: 'at', expires_in: 3600 }), {
+          status: 200,
+        });
+      }
+      seenShowDeleted = new URL(url).searchParams.get('showDeleted');
+      return new Response(JSON.stringify({ items: mixed }), { status: 200 });
+    };
+    const preview = await previewGoogleCalendarEventsForSalon({
+      db: dbWithRow(makeCredentialRow()),
+      salonId: 'salon-a',
+      fetchImpl,
+      now: NOW,
+      salonTimeZone: 'Asia/Yerevan',
+      matchCatalog: { clients: [], services: [] },
+    });
+    assert.equal(seenShowDeleted, 'true');
+    assert.equal(preview.googleReceived, 5);
+    assert.equal(preview.previewCards, 5);
+    assert.equal(preview.hidden, 0);
+    assert.equal(preview.events.length, 5);
+    assert.ok(preview.events.some((e) => e.id === 'keep-allday' && e.start.allDay));
+    assert.ok(preview.events.some((e) => e.id === 'keep-cancelled' && e.status === 'cancelled'));
+    const unmatched = preview.events.find((e) => e.id === 'keep-unmatched');
+    assert.equal(unmatched?.matchingStatus === 'matched', false);
+  });
+
+  it('same eventId in two calendars stays two preview cards', async () => {
+    const enc = encryptCalendarCredential(
+      serializeGoogleCalendarCredentialBlob({
+        refresh_token: 'rt-secret',
+        scope: GOOGLE_CALENDAR_OAUTH_SCOPE,
+        token_type: 'Bearer',
+      }),
+    );
+    const row = {
+      ...makeCredentialRow(),
+      credential_ciphertext: enc.ciphertext,
+      credential_iv: enc.iv,
+      credential_auth_tag: enc.authTag,
+      provider_config: {
+        selectedCalendars: [
+          { id: 'tatevik.miqaelyan@gmail.com', summary: 'A' },
+          { id: 'SetTime', summary: 'B' },
+        ],
+      },
+    };
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.includes('/token')) {
+        return new Response(JSON.stringify({ access_token: 'at', expires_in: 3600 }), {
+          status: 200,
+        });
+      }
+      const encoded = url.split('/calendars/')[1]?.split('/events')[0] ?? '';
+      const calendarId = decodeURIComponent(encoded);
+      return new Response(
+        JSON.stringify({
+          items: [
+            yerevanRange('abc', `${calendarId} copy`, '2026-08-21T08:00:00', '2026-08-21T09:00:00'),
+          ],
+        }),
+        { status: 200 },
+      );
+    };
+    const preview = await previewGoogleCalendarEventsForSalon({
+      db: dbWithRow(row),
+      salonId: 'salon-a',
+      fetchImpl,
+      now: NOW,
+      salonTimeZone: 'Asia/Yerevan',
+      matchCatalog: { clients: [], services: [] },
+    });
+    assert.equal(preview.events.length, 2);
+    assert.equal(preview.hidden, 0);
+    assert.equal(preview.googleReceived, 2);
+    assert.equal(new Set(preview.events.map((e) => googlePreviewItemIdentity(e))).size, 2);
+  });
 });
 
 describe('GOOGLE-PREVIEW-MISSING-EVENTS contracts', () => {
@@ -283,21 +394,28 @@ describe('GOOGLE-PREVIEW-MISSING-EVENTS contracts', () => {
     const slice = integrations.slice(start, start + 1800);
     assert.match(
       slice,
-      /key=\{`\$\{ev\.calendarId\}::\$\{ev\.id\}::\$\{ev\.start\.dateTime \|\| ev\.start\.date \|\| ''\}`\}/,
+      /key=\{`\$\{ev\.calendarId\}::\$\{ev\.id\}::\$\{ev\.start\.dateTime \|\| ev\.start\.date \|\| ev\.originalStartTime\?\.dateTime \|\| ev\.originalStartTime\?\.date \|\| ''\}`\}/,
     );
     assert.doesNotMatch(slice, /\.filter\(/);
     assert.doesNotMatch(slice, /importability === 'ready'|matchingStatus === 'matched'/);
+    assert.match(integrations, /Google received:/);
+    assert.match(integrations, /Preview cards:/);
+    assert.match(integrations, /Hidden:/);
+    assert.doesNotMatch(integrations, /max-h-\[32rem\]/);
     const setCall = integrations.slice(
       integrations.indexOf('const data = await api.calendar.getGoogleEventsPreview();'),
-      integrations.indexOf('const data = await api.calendar.getGoogleEventsPreview();') + 220,
+      integrations.indexOf('const data = await api.calendar.getGoogleEventsPreview();') + 420,
     );
     assert.match(setCall, /setGooglePreviewEvents\(data\.events\)/);
+    assert.match(setCall, /const previewCards = data\.events\.length/);
   });
 
   it('day-by-day listing is gone; preview uses one events.list with no timeMax', () => {
     const oauth = read('server/src/lib/googleCalendarOAuth.ts');
     assert.doesNotMatch(oauth, /buildGooglePreviewDayWindows|listGoogleCalendarEventsPreviewForSalon/);
     assert.doesNotMatch(oauth, /GOOGLE_EVENTS_SALON_PREVIEW_FETCH_FUTURE_DAYS|DAY_CONCURRENCY/);
+    assert.doesNotMatch(oauth, /mergeGooglePreviewEventsByOccurrence\(listedGroups\)/);
+    assert.match(oauth, /listedGroups\.flat\(\)/);
     assert.match(oauth, /maxPages: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS/);
     assert.match(oauth, /maxEvents: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS/);
     assert.match(oauth, /No future timeMax/);
