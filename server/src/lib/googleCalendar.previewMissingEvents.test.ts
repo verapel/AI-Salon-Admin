@@ -283,7 +283,7 @@ describe('GOOGLE-PREVIEW-MISSING-EVENTS contracts', () => {
     const slice = integrations.slice(start, start + 1800);
     assert.match(
       slice,
-      /key=\{`\$\{ev\.id\}::\$\{ev\.start\.dateTime \|\| ev\.start\.date \|\| ''\}`\}/,
+      /key=\{`\$\{ev\.calendarId\}::\$\{ev\.id\}::\$\{ev\.start\.dateTime \|\| ev\.start\.date \|\| ''\}`\}/,
     );
     assert.doesNotMatch(slice, /\.filter\(/);
     assert.doesNotMatch(slice, /importability === 'ready'|matchingStatus === 'matched'/);

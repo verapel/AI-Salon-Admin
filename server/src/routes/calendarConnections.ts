@@ -24,7 +24,9 @@ import {
   listGoogleCalendarsForSalon,
   loadGoogleCalendarAppConfig,
   previewGoogleCalendarEventsForSalon,
+  readSelectedGoogleCalendars,
   selectGoogleCalendarForSalon,
+  uniqueGoogleCalendarIds,
 } from '../lib/googleCalendarOAuth.js';
 import {
   CalendarMatchCatalogError,
@@ -69,7 +71,7 @@ const router = Router();
 const APPLE_PROVIDER = 'apple' as const;
 const GOOGLE_PROVIDER = GOOGLE_CALENDAR_PROVIDER;
 
-/** Explicit metadata columns — never select credential_* or provider_config for responses. */
+/** Internal metadata. provider_config is parsed for selectedCalendars and never copied onto the public DTO. */
 const CONNECTION_METADATA_SELECT = `
   id,
   provider,
@@ -83,7 +85,8 @@ const CONNECTION_METADATA_SELECT = `
   last_sync_started_at,
   last_error,
   created_at,
-  updated_at
+  updated_at,
+  provider_config
 `.replace(/\s+/g, ' ').trim();
 
 /**
@@ -106,6 +109,7 @@ type ConnectionMetadataRow = {
   last_error: string | null;
   created_at: string;
   updated_at: string;
+  provider_config?: unknown;
 };
 
 type ConnectionInternalRow = ConnectionMetadataRow & {
@@ -147,6 +151,7 @@ function toMetadataRow(row: ConnectionInternalRow): ConnectionMetadataRow {
     last_error: row.last_error,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    provider_config: row.provider_config,
   };
 }
 
@@ -166,6 +171,11 @@ export function mapCalendarConnectionSafe(
     selectedCalendarId: row.selected_calendar_id,
     selectedCalendarName: row.selected_calendar_name,
     selectedCalendarUrl: row.selected_calendar_url,
+    selectedCalendars: readSelectedGoogleCalendars({
+      selectedCalendarId: row.selected_calendar_id,
+      selectedCalendarName: row.selected_calendar_name,
+      providerConfig: row.provider_config,
+    }),
     status: row.status,
     importEnabled: row.import_enabled,
     lastSyncAt: row.last_sync_at,
@@ -537,22 +547,28 @@ router.get('/google/calendars', requireSalonWriteAccess, async (req, res) => {
 
 /**
  * PUT /api/calendar/google/calendar
- * Select a calendar after verifying it belongs to the authorized account.
+ * Select one or more calendars after verifying they belong to the authorized account.
+ * Body: { calendarId } (legacy) or { calendarIds: string[] }.
  */
 router.put('/google/calendar', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
-  const calendarId =
-    req.body && typeof req.body === 'object' && typeof (req.body as any).calendarId === 'string'
-      ? String((req.body as any).calendarId).trim()
-      : '';
-  if (!calendarId) {
+  const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : null;
+  let calendarIds: string[] = [];
+  if (body && Array.isArray(body.calendarIds)) {
+    calendarIds = uniqueGoogleCalendarIds(
+      body.calendarIds.filter((id): id is string => typeof id === 'string'),
+    );
+  } else if (body && typeof body.calendarId === 'string') {
+    calendarIds = uniqueGoogleCalendarIds([body.calendarId]);
+  }
+  if (!calendarIds.length) {
     return res.status(400).json({ error: 'calendarId is required' });
   }
   try {
     await selectGoogleCalendarForSalon({
       db: supabase as any,
       salonId,
-      calendarId,
+      calendarIds,
     });
     const connection = await loadGoogleConnectionPublic(salonId);
     return res.json({ connection });
@@ -839,6 +855,7 @@ router.post('/google/events/import', requireSalonWriteAccess, async (req, res) =
       salonTimeZone,
       body: {
         eventId: body.eventId,
+        calendarId: typeof body.calendarId === 'string' ? body.calendarId : undefined,
         recurrenceId:
           typeof body.recurrenceId === 'string' ? body.recurrenceId : undefined,
         staffId: body.staffId,
@@ -871,6 +888,8 @@ router.post('/google/events/import', requireSalonWriteAccess, async (req, res) =
           calendarConnectionId: String(connRow.id),
           ev: {
             id: body.eventId.trim(),
+            calendarId:
+              typeof body.calendarId === 'string' ? body.calendarId.trim() : '',
             recurringEventId: null,
             originalStartTime: body.recurrenceId
               ? { dateTime: body.recurrenceId, date: null, timeZone: null, allDay: false }

@@ -13,6 +13,7 @@ import {
 } from './calendarEventMatcher.js';
 import type { GoogleEventPreviewItem } from './googleCalendarOAuth.js';
 import { buildGoogleOccurrenceRecurrenceId } from './googleCalendarImport.js';
+import { pickGoogleIssueRow } from './googleCalendarReviewOverlay.js';
 
 export const GOOGLE_PROVISIONAL_NOTE = 'Создано из Google Calendar — требуется проверка';
 export const GOOGLE_PROVISIONAL_KEY_PREFIX = 'google_provisional_key:';
@@ -200,34 +201,42 @@ export async function loadGoogleCoverageClientSession(params: {
   return session;
 }
 
+type RememberedGoogleIssueRow = {
+  parsed_event?: unknown;
+  raw_event?: unknown;
+  external_calendar_id?: string | null;
+};
+
+function clientIdFromRememberedIssue(row: RememberedGoogleIssueRow | null): string | null {
+  if (!row) return null;
+  for (const payload of [row.parsed_event, row.raw_event]) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) continue;
+    const clientId = (payload as { clientId?: unknown }).clientId;
+    if (typeof clientId === 'string' && clientId) return clientId;
+  }
+  return null;
+}
+
 export async function loadRememberedGoogleCoverageClientId(params: {
   db: any;
   salonId: string;
   calendarConnectionId: string;
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>;
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>;
 }): Promise<string | null> {
   const recurrenceId = buildGoogleOccurrenceRecurrenceId(params.ev);
   try {
-    const { data } = await params.db
+    const listed = await params.db
       .from('calendar_import_issues')
-      .select('parsed_event, raw_event')
+      .select('parsed_event, raw_event, external_calendar_id')
       .eq('salon_id', params.salonId)
       .eq('calendar_connection_id', params.calendarConnectionId)
       .eq('external_uid', params.ev.id)
-      .eq('recurrence_id', recurrenceId)
-      .maybeSingle();
-    const parsed = data?.parsed_event;
-    if (parsed && typeof parsed === 'object' && typeof parsed.clientId === 'string' && parsed.clientId) {
-      return parsed.clientId;
-    }
-    const raw = data?.raw_event;
-    if (raw && typeof raw === 'object' && typeof raw.clientId === 'string' && raw.clientId) {
-      return raw.clientId;
-    }
+      .eq('recurrence_id', recurrenceId);
+    const rows: RememberedGoogleIssueRow[] = Array.isArray(listed?.data) ? listed.data : [];
+    return clientIdFromRememberedIssue(pickGoogleIssueRow(rows, params.ev.calendarId));
   } catch {
     return null;
   }
-  return null;
 }
 
 export async function resolveOrCreateGoogleCoverageClient(params: {

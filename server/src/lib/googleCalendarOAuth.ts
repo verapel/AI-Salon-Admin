@@ -50,6 +50,9 @@ export const GOOGLE_CALENDAR_PROVIDER = 'google' as const;
 /** FAST-6D/F: persisted events.list page cursor in provider_config. */
 export const GOOGLE_AUTO_IMPORT_PAGE_TOKEN_CONFIG_KEY = 'auto_import_page_token' as const;
 
+/** Extra selected Google calendars (selected_calendar_id stays the FAST-6 primary). */
+export const GOOGLE_SELECTED_CALENDARS_CONFIG_KEY = 'selectedCalendars' as const;
+
 /** Helper defaults (auto-pull / low-cap callers). Salon preview overrides these. */
 export const GOOGLE_EVENTS_PREVIEW_MAX_PAGES = 10;
 export const GOOGLE_EVENTS_PREVIEW_MAX_EVENTS = 500;
@@ -126,6 +129,69 @@ export type GoogleCalendarListItem = {
   timeZone: string | null;
 };
 
+/** Safe selected-calendar ref for public DTOs and preview (no provider_config dump). */
+export type GoogleSelectedCalendarRef = {
+  id: string;
+  name: string;
+};
+
+export function uniqueGoogleCalendarIds(ids: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of ids) {
+    const id = raw.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/**
+ * Resolve selected Google calendars.
+ * Prefer provider_config.selectedCalendars when present; otherwise the legacy
+ * selected_calendar_id column (existing single-calendar connections).
+ */
+export function readSelectedGoogleCalendars(params: {
+  selectedCalendarId?: string | null;
+  selectedCalendarName?: string | null;
+  providerConfig?: unknown;
+}): GoogleSelectedCalendarRef[] {
+  const fromConfig: GoogleSelectedCalendarRef[] = [];
+  const config = params.providerConfig;
+  if (config && typeof config === 'object' && !Array.isArray(config)) {
+    const raw = (config as Record<string, unknown>)[GOOGLE_SELECTED_CALENDARS_CONFIG_KEY];
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+        const row = item as Record<string, unknown>;
+        const id = typeof row.id === 'string' ? row.id.trim() : '';
+        if (!id) continue;
+        const name =
+          typeof row.summary === 'string' && row.summary.trim()
+            ? row.summary.trim()
+            : typeof row.name === 'string' && row.name.trim()
+              ? row.name.trim()
+              : id;
+        fromConfig.push({ id, name });
+      }
+    }
+  }
+  const uniqueConfig: GoogleSelectedCalendarRef[] = [];
+  const seen = new Set<string>();
+  for (const cal of fromConfig) {
+    if (seen.has(cal.id)) continue;
+    seen.add(cal.id);
+    uniqueConfig.push(cal);
+  }
+  if (uniqueConfig.length > 0) return uniqueConfig;
+
+  const id = params.selectedCalendarId?.trim() ?? '';
+  if (!id) return [];
+  const name = params.selectedCalendarName?.trim() || id;
+  return [{ id, name }];
+}
+
 /** Normalized Google event start/end for preview (dateTime vs all-day date). */
 export type GoogleEventTimePreview = {
   dateTime: string | null;
@@ -175,6 +241,7 @@ export type GoogleEventsPreviewResult = {
   windowEnd: string;
   calendarId: string;
   calendarName: string | null;
+  selectedCalendars?: GoogleSelectedCalendarRef[];
   /** Salon IANA timezone used for parsed local times (FAST-3B). */
   salonTimeZone?: string;
   /** Active salon staff for manual import selector (FAST-5B). */
@@ -753,13 +820,17 @@ export async function listGoogleCalendarsForSalon(params: {
 /** Calendar change must drop the previous events.list page cursor. */
 export function applyCalendarSelectProviderConfig(
   prevConfig: unknown,
-  selectedCalendar: Record<string, unknown>,
+  selectedCalendar: Record<string, unknown> | Record<string, unknown>[],
 ): Record<string, unknown> {
   const next: Record<string, unknown> =
     prevConfig && typeof prevConfig === 'object' && !Array.isArray(prevConfig)
       ? { ...(prevConfig as Record<string, unknown>) }
       : {};
-  next.selectedCalendar = selectedCalendar;
+  const list = (
+    Array.isArray(selectedCalendar) ? selectedCalendar : [selectedCalendar]
+  ).filter((item) => item && typeof item === 'object' && !Array.isArray(item));
+  next.selectedCalendar = list[0] ?? null;
+  next[GOOGLE_SELECTED_CALENDARS_CONFIG_KEY] = list;
   delete next[GOOGLE_AUTO_IMPORT_PAGE_TOKEN_CONFIG_KEY];
   return next;
 }
@@ -767,11 +838,22 @@ export function applyCalendarSelectProviderConfig(
 export async function selectGoogleCalendarForSalon(params: {
   db: any;
   salonId: string;
-  calendarId: string;
+  calendarId?: string;
+  calendarIds?: string[];
   fetchImpl?: GoogleFetch;
-}): Promise<{ selectedCalendarId: string; selectedCalendarName: string }> {
-  const calendarId = params.calendarId.trim();
-  if (!calendarId) {
+}): Promise<{
+  selectedCalendarId: string;
+  selectedCalendarName: string;
+  selectedCalendars: GoogleSelectedCalendarRef[];
+}> {
+  const requested = uniqueGoogleCalendarIds(
+    params.calendarIds && params.calendarIds.length > 0
+      ? params.calendarIds
+      : typeof params.calendarId === 'string'
+        ? [params.calendarId]
+        : [],
+  );
+  if (!requested.length) {
     throw new GoogleCalendarOAuthError(
       'GOOGLE_CALENDAR_NOT_FOUND',
       'calendarId is required',
@@ -783,18 +865,22 @@ export async function selectGoogleCalendarForSalon(params: {
     salonId: params.salonId,
     fetchImpl: params.fetchImpl,
   });
-  const match = calendars.find((c) => c.id === calendarId);
-  if (!match) {
-    throw new GoogleCalendarOAuthError(
-      'GOOGLE_CALENDAR_NOT_FOUND',
-      'Calendar was not found for this Google account',
-    );
+  const matches: GoogleCalendarListItem[] = [];
+  for (const calendarId of requested) {
+    const match = calendars.find((c) => c.id === calendarId);
+    if (!match) {
+      throw new GoogleCalendarOAuthError(
+        'GOOGLE_CALENDAR_NOT_FOUND',
+        'Calendar was not found for this Google account',
+      );
+    }
+    matches.push(match);
   }
 
   const now = new Date().toISOString();
   const { data: existing } = await params.db
     .from('calendar_connections')
-    .select('provider_config')
+    .select('provider_config, selected_calendar_id')
     .eq('salon_id', params.salonId)
     .eq('provider', GOOGLE_CALENDAR_PROVIDER)
     .maybeSingle();
@@ -806,20 +892,32 @@ export async function selectGoogleCalendarForSalon(params: {
       ? (existing.provider_config as Record<string, unknown>)
       : {};
 
-  const provider_config = applyCalendarSelectProviderConfig(prevConfig, {
+  const previousPrimary =
+    typeof existing?.selected_calendar_id === 'string'
+      ? existing.selected_calendar_id.trim()
+      : '';
+  const primary =
+    (previousPrimary && matches.find((c) => c.id === previousPrimary)) || matches[0]!;
+
+  const selectedPayload = matches.map((match) => ({
     id: match.id,
     summary: match.summary,
     timeZone: match.timeZone,
     primary: match.primary,
     accessRole: match.accessRole,
     selectedAt: now,
-  });
+  }));
+
+  const provider_config = applyCalendarSelectProviderConfig(prevConfig, selectedPayload);
+  if (selectedPayload[0] && primary.id !== selectedPayload[0].id) {
+    provider_config.selectedCalendar = selectedPayload.find((c) => c.id === primary.id) ?? selectedPayload[0];
+  }
 
   const { error } = await params.db
     .from('calendar_connections')
     .update({
-      selected_calendar_id: match.id,
-      selected_calendar_name: match.summary,
+      selected_calendar_id: primary.id,
+      selected_calendar_name: primary.summary,
       selected_calendar_url: null,
       import_enabled: false,
       last_error: null,
@@ -836,9 +934,11 @@ export async function selectGoogleCalendarForSalon(params: {
     );
   }
 
+  const selectedCalendars = matches.map((c) => ({ id: c.id, name: c.summary }));
   return {
-    selectedCalendarId: match.id,
-    selectedCalendarName: match.summary,
+    selectedCalendarId: primary.id,
+    selectedCalendarName: primary.summary,
+    selectedCalendars,
   };
 }
 
@@ -1130,11 +1230,27 @@ export async function listGoogleCalendarEventsPreview(params: {
   return { events, truncated };
 }
 
-/** Stable Google occurrence identity — never date/client/match keys. */
+/** Stable Google occurrence identity — calendar + event + occurrence start. */
 export function googlePreviewItemIdentity(
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'start'>,
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'start' | 'calendarId'>,
 ): string {
-  return `${ev.id}::${ev.start.dateTime || ev.start.date || ''}`;
+  return `${ev.calendarId}::${ev.id}::${ev.start.dateTime || ev.start.date || ''}`;
+}
+
+export function mergeGooglePreviewEventsByOccurrence(
+  groups: GoogleEventPreviewItem[][],
+): GoogleEventPreviewItem[] {
+  const seen = new Set<string>();
+  const merged: GoogleEventPreviewItem[] = [];
+  for (const group of groups) {
+    for (const ev of group) {
+      const key = googlePreviewItemIdentity(ev);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(ev);
+    }
+  }
+  return merged;
 }
 
 /** events.list item start (dateTime or date). No summary/title. */
@@ -1325,6 +1441,105 @@ export async function listGoogleCalendarEventsForAutoPull(params: {
   };
 }
 
+async function listGoogleCalendarPreviewWithLiveTrace(params: {
+  accessToken: string;
+  calendarId: string;
+  calendarName: string | null;
+  timeMin: string;
+  timeMax?: string;
+  fetchImpl?: GoogleFetch;
+  salonTimeZone: string;
+}): Promise<{ events: GoogleEventPreviewItem[]; truncated: boolean }> {
+  const liveTracePages: GooglePreviewLiveTracePage[] = [];
+  /**
+   * One events.list from timeMin with no timeMax. Follow nextPageToken until
+   * Google is done or maxEvents is hit. maxPages must be able to cover sparse
+   * pages (Google may return << maxResults while nextPageToken is set);
+   * 20 full-size pages would stop early and drop remaining occurrences.
+   */
+  const { events, truncated } = await listGoogleCalendarEventsPreview({
+    accessToken: params.accessToken,
+    calendarId: params.calendarId,
+    calendarName: params.calendarName,
+    timeMin: params.timeMin,
+    ...(params.timeMax ? { timeMax: params.timeMax } : {}),
+    fetchImpl: params.fetchImpl,
+    maxPages: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
+    maxEvents: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
+    onPreviewLiveTracePage: (page) => {
+      liveTracePages.push(page);
+      emitGooglePreviewLiveTrace({
+        operation: 'google_preview_page',
+        pageNumber: page.pageNumber,
+        itemsOnPage: page.itemsOnPage,
+        hasNextPageToken: page.hasNextPageToken,
+        firstEventStart: page.firstEventStart,
+        lastEventStart: page.lastEventStart,
+      });
+    },
+  });
+
+  const uniqueEvents: GoogleEventPreviewItem[] = [];
+  const seen = new Set<string>();
+  for (const ev of events) {
+    const key = googlePreviewItemIdentity(ev);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueEvents.push(ev);
+  }
+
+  const rawItemsTotal = liveTracePages.reduce((n, page) => n + page.itemsOnPage, 0);
+  const firstEventStart = liveTracePages[0]?.firstEventStart ?? null;
+  const lastEventStart = liveTracePages.length
+    ? liveTracePages[liveTracePages.length - 1]!.lastEventStart
+    : null;
+
+  emitGooglePreviewLiveTrace({
+    operation: 'google_preview_summary',
+    selectedCalendarId: params.calendarId,
+    pagesFetched: liveTracePages.length,
+    rawItemsTotal,
+    uniqueGoogleOccurrences: uniqueEvents.length,
+    backendPreviewItems: uniqueEvents.length,
+    truncated,
+    firstEventStart,
+    lastEventStart,
+  });
+
+  const rawGoogleTimedByDate: Record<string, number> = {};
+  const backendPreviewByDate: Record<string, number> = {};
+  for (const date of GOOGLE_PREVIEW_LIVE_TRACE_DATES) {
+    rawGoogleTimedByDate[date] = 0;
+    backendPreviewByDate[date] = 0;
+  }
+  for (const page of liveTracePages) {
+    for (const dateTime of page.rawTimedStarts) {
+      const date = googlePreviewTimedLocalDateKey(dateTime, params.salonTimeZone);
+      if (date && date in rawGoogleTimedByDate) {
+        rawGoogleTimedByDate[date] += 1;
+      }
+    }
+  }
+  for (const ev of uniqueEvents) {
+    const dateTime = ev.start.dateTime;
+    if (!dateTime) continue;
+    const date = googlePreviewTimedLocalDateKey(dateTime, params.salonTimeZone);
+    if (date && date in backendPreviewByDate) {
+      backendPreviewByDate[date] += 1;
+    }
+  }
+  for (const date of GOOGLE_PREVIEW_LIVE_TRACE_DATES) {
+    emitGooglePreviewLiveTrace({
+      operation: 'google_preview_day',
+      date,
+      rawGoogleTimedEvents: rawGoogleTimedByDate[date] ?? 0,
+      backendPreviewEvents: backendPreviewByDate[date] ?? 0,
+    });
+  }
+
+  return { events: uniqueEvents, truncated };
+}
+
 export async function previewGoogleCalendarEventsForSalon(params: {
   db: any;
   salonId: string;
@@ -1353,8 +1568,12 @@ export async function previewGoogleCalendarEventsForSalon(params: {
     );
   }
 
-  const calendarId = row.selected_calendar_id?.trim() ?? '';
-  if (!calendarId) {
+  const selectedCalendars = readSelectedGoogleCalendars({
+    selectedCalendarId: row.selected_calendar_id,
+    selectedCalendarName: row.selected_calendar_name,
+    providerConfig: row.provider_config,
+  });
+  if (!selectedCalendars.length) {
     throw new GoogleCalendarOAuthError(
       'GOOGLE_CALENDAR_NOT_SELECTED',
       'Google calendar is not selected',
@@ -1388,7 +1607,6 @@ export async function previewGoogleCalendarEventsForSalon(params: {
   }
 
   const window = buildGoogleEventsPreviewWindow(params.now ?? new Date());
-  const calendarName = row.selected_calendar_name?.trim() || null;
 
   // GOOGLE-CAL-FAST-3B: attach pure deterministic parse (no DB writes).
   let salonTimeZone: string;
@@ -1400,34 +1618,22 @@ export async function previewGoogleCalendarEventsForSalon(params: {
     salonTimeZone = resolveParserTimezone(undefined);
   }
 
-  const liveTracePages: GooglePreviewLiveTracePage[] = [];
-  /**
-   * One events.list from timeMin with no timeMax. Follow nextPageToken until
-   * Google is done or maxEvents is hit. maxPages must be able to cover sparse
-   * pages (Google may return << maxResults while nextPageToken is set);
-   * 20 full-size pages would stop early and drop remaining occurrences.
-   */
-  const { events, truncated } = await listGoogleCalendarEventsPreview({
-    accessToken,
-    calendarId,
-    calendarName,
-    timeMin: window.timeMin,
-    ...(window.timeMax ? { timeMax: window.timeMax } : {}),
-    fetchImpl: params.fetchImpl,
-    maxPages: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
-    maxEvents: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
-    onPreviewLiveTracePage: (page) => {
-      liveTracePages.push(page);
-      emitGooglePreviewLiveTrace({
-        operation: 'google_preview_page',
-        pageNumber: page.pageNumber,
-        itemsOnPage: page.itemsOnPage,
-        hasNextPageToken: page.hasNextPageToken,
-        firstEventStart: page.firstEventStart,
-        lastEventStart: page.lastEventStart,
-      });
-    },
-  });
+  const listedGroups: GoogleEventPreviewItem[][] = [];
+  let truncated = false;
+  for (const calendar of selectedCalendars) {
+    const listed = await listGoogleCalendarPreviewWithLiveTrace({
+      accessToken,
+      calendarId: calendar.id,
+      calendarName: calendar.name,
+      timeMin: window.timeMin,
+      ...(window.timeMax ? { timeMax: window.timeMax } : {}),
+      fetchImpl: params.fetchImpl,
+      salonTimeZone,
+    });
+    listedGroups.push(listed.events);
+    if (listed.truncated) truncated = true;
+  }
+  const events = mergeGooglePreviewEventsByOccurrence(listedGroups);
 
   // GOOGLE-CAL-FAST-4: load salon clients+services once, match all events in memory (read-only).
   let matchCatalog: CalendarMatchCatalog;
@@ -1463,66 +1669,16 @@ export async function previewGoogleCalendarEventsForSalon(params: {
     };
   });
 
-  const rawItemsTotal = liveTracePages.reduce((n, page) => n + page.itemsOnPage, 0);
-  const uniqueGoogleOccurrences = new Set(
-    eventsWithParsed.map((ev) => googlePreviewItemIdentity(ev)),
-  ).size;
-  const firstEventStart = liveTracePages[0]?.firstEventStart ?? null;
-  const lastEventStart = liveTracePages.length
-    ? liveTracePages[liveTracePages.length - 1]!.lastEventStart
-    : null;
-
-  emitGooglePreviewLiveTrace({
-    operation: 'google_preview_summary',
-    selectedCalendarId: calendarId,
-    pagesFetched: liveTracePages.length,
-    rawItemsTotal,
-    uniqueGoogleOccurrences,
-    backendPreviewItems: eventsWithParsed.length,
-    truncated,
-    firstEventStart,
-    lastEventStart,
-  });
-
-  const rawGoogleTimedByDate: Record<string, number> = {};
-  const backendPreviewByDate: Record<string, number> = {};
-  for (const date of GOOGLE_PREVIEW_LIVE_TRACE_DATES) {
-    rawGoogleTimedByDate[date] = 0;
-    backendPreviewByDate[date] = 0;
-  }
-  for (const page of liveTracePages) {
-    for (const dateTime of page.rawTimedStarts) {
-      const date = googlePreviewTimedLocalDateKey(dateTime, salonTimeZone);
-      if (date && date in rawGoogleTimedByDate) {
-        rawGoogleTimedByDate[date] += 1;
-      }
-    }
-  }
-  for (const ev of eventsWithParsed) {
-    const dateTime = ev.start.dateTime;
-    if (!dateTime) continue;
-    const date = googlePreviewTimedLocalDateKey(dateTime, salonTimeZone);
-    if (date && date in backendPreviewByDate) {
-      backendPreviewByDate[date] += 1;
-    }
-  }
-  for (const date of GOOGLE_PREVIEW_LIVE_TRACE_DATES) {
-    emitGooglePreviewLiveTrace({
-      operation: 'google_preview_day',
-      date,
-      rawGoogleTimedEvents: rawGoogleTimedByDate[date] ?? 0,
-      backendPreviewEvents: backendPreviewByDate[date] ?? 0,
-    });
-  }
-
+  const primary = selectedCalendars[0]!;
   return {
     events: eventsWithParsed,
     count: eventsWithParsed.length,
     truncated,
     windowStart: window.timeMin,
     windowEnd: window.timeMax ?? '',
-    calendarId,
-    calendarName,
+    calendarId: primary.id,
+    calendarName: primary.name,
+    selectedCalendars,
     salonTimeZone,
   };
 }

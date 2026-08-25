@@ -464,6 +464,8 @@ export interface CalendarConnectionPublic {
   selectedCalendarId: string | null;
   selectedCalendarName: string | null;
   selectedCalendarUrl: string | null;
+  /** All selected Google calendars. Falls back to selectedCalendarId for legacy rows. */
+  selectedCalendars: Array<{ id: string; name: string }>;
   status: CalendarConnectionStatus;
   importEnabled: boolean;
   lastSyncAt: string | null;
@@ -661,6 +663,7 @@ export interface GoogleEventsPreviewResponse {
   windowEnd: string;
   calendarId: string;
   calendarName: string | null;
+  selectedCalendars?: Array<{ id: string; name: string }>;
   salonTimeZone?: string;
   staffOptions?: GoogleImportStaffOption[];
   autoImportEnabled?: boolean;
@@ -668,6 +671,7 @@ export interface GoogleEventsPreviewResponse {
 
 export interface GoogleEventImportRequest {
   eventId: string;
+  calendarId?: string;
   recurrenceId?: string;
   staffId: string;
   serviceId: string;

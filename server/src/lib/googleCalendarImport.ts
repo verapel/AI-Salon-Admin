@@ -19,6 +19,7 @@ import {
   GOOGLE_CALENDAR_PROVIDER,
   loadGoogleCalendarAppConfig,
   mapGoogleEventPreviewEntry,
+  readSelectedGoogleCalendars,
   refreshGoogleAccessToken,
   type GoogleEventPreviewItem,
   type GoogleFetch,
@@ -122,8 +123,11 @@ export function buildGoogleOccurrenceKey(params: {
 }
 
 /**
- * FIX-3: Recurring occurrences match only uid+recurrence (never a bare series id).
- * One-off events keep bare uid for existing links.
+ * Keys used when *indexing* a stored row.
+ * Calendar-scoped rows index only calendarId+uid(+recurrence).
+ * Legacy rows without calendarId keep bare uid(+recurrence).
+ * Recurring occurrences never use a bare series id (FIX-3).
+ * Do not encode calendarId into external_uid.
  */
 export function googleStoredOccurrenceKeys(params: {
   calendarId?: string | null;
@@ -134,17 +138,44 @@ export function googleStoredOccurrenceKeys(params: {
   if (!uid) return [];
   const rec = (params.recurrenceId || '').trim();
   const cal = (params.calendarId || '').trim();
-  if (rec) {
-    const keys = [`${uid}:${rec}`];
-    if (cal) keys.unshift(`${cal}:${uid}:${rec}`);
-    return keys;
+  if (cal) {
+    return rec ? [`${cal}:${uid}:${rec}`] : [`${cal}:${uid}`];
   }
-  const keys = [uid];
-  if (cal) keys.unshift(`${cal}:${uid}`);
-  return keys;
+  return rec ? [`${uid}:${rec}`] : [uid];
 }
 
+/**
+ * Keys used when *looking up* a live Google event.
+ * Prefer calendar-scoped identity; fall back to legacy bare keys so
+ * unscoped single-calendar rows still match.
+ */
 export function googleOccurrenceLookupKeys(ev: {
+  id: string;
+  calendarId?: string | null;
+  recurringEventId?: string | null;
+  originalStartTime?: {
+    dateTime?: string | null;
+    date?: string | null;
+  } | null;
+}): string[] {
+  const recurrenceId = buildGoogleOccurrenceRecurrenceId(ev);
+  const scoped = googleStoredOccurrenceKeys({
+    calendarId: ev.calendarId,
+    eventId: ev.id,
+    recurrenceId,
+  });
+  const cal = (ev.calendarId || '').trim();
+  if (!cal) return scoped;
+  const legacy = googleStoredOccurrenceKeys({
+    calendarId: '',
+    eventId: ev.id,
+    recurrenceId,
+  });
+  return [...scoped, ...legacy.filter((key) => !scoped.includes(key))];
+}
+
+/** In-memory remember-after-write: calendar-scoped only when calendarId is present. */
+export function googleRememberedOccurrenceKeys(ev: {
   id: string;
   calendarId?: string | null;
   recurringEventId?: string | null;
@@ -158,6 +189,21 @@ export function googleOccurrenceLookupKeys(ev: {
     eventId: ev.id,
     recurrenceId: buildGoogleOccurrenceRecurrenceId(ev),
   });
+}
+
+/** Mirror of commit_google_calendar_manual_import selected-calendar gate. */
+export function isGoogleCalendarAllowedForManualImport(params: {
+  selectedCalendarId?: string | null;
+  providerConfig?: unknown;
+  calendarId: string;
+}): boolean {
+  const wanted = params.calendarId.trim();
+  if (!wanted) return false;
+  if ((params.selectedCalendarId || '').trim() === wanted) return true;
+  return readSelectedGoogleCalendars({
+    selectedCalendarId: params.selectedCalendarId,
+    providerConfig: params.providerConfig,
+  }).some((cal) => cal.id === wanted);
 }
 
 /**
@@ -368,6 +414,8 @@ export async function fetchGoogleCalendarEventById(params: {
 
 export type ManualGoogleImportRequest = {
   eventId: string;
+  /** Source Google calendar. Defaults to the connection primary. */
+  calendarId?: string;
   recurrenceId?: string;
   staffId: string;
   serviceId: string;
@@ -429,13 +477,29 @@ export async function executeManualGoogleCalendarImport(params: {
   if (connErr || !conn?.id) {
     throw new GoogleCalendarImportError('google_not_connected', 'Google Calendar is not connected');
   }
-  const calendarId = String(conn.selected_calendar_id || '').trim();
-  if (!calendarId) {
+  const primaryCalendarId = String(conn.selected_calendar_id || '').trim();
+  const calendarId = (body.calendarId || primaryCalendarId).trim();
+  if (
+    !calendarId ||
+    !isGoogleCalendarAllowedForManualImport({
+      selectedCalendarId: primaryCalendarId,
+      providerConfig: conn.provider_config,
+      calendarId,
+    })
+  ) {
     throw new GoogleCalendarImportError(
       'google_calendar_not_selected',
       'Google calendar is not selected',
     );
   }
+  const selectedRefs = readSelectedGoogleCalendars({
+    selectedCalendarId: primaryCalendarId,
+    selectedCalendarName: conn.selected_calendar_name,
+    providerConfig: conn.provider_config,
+  });
+  const calendarName =
+    selectedRefs.find((cal) => cal.id === calendarId)?.name ||
+    (calendarId === primaryCalendarId ? conn.selected_calendar_name : null);
 
   let refreshToken: string;
   try {
@@ -486,7 +550,7 @@ export async function executeManualGoogleCalendarImport(params: {
   const mapped = mapGoogleEventPreviewEntry(
     rawEvent,
     calendarId,
-    conn.selected_calendar_name ?? null,
+    calendarName ?? null,
   );
   if (!mapped) {
     throw new GoogleCalendarImportError('google_event_not_importable', 'Could not map Google event');

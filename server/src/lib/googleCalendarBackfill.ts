@@ -12,7 +12,6 @@ import {
 import { parseExternalCalendarEvent, resolveParserTimezone } from './calendarEventParser.js';
 import {
   decideGoogleAutoImport,
-  googleEventOccurrenceKeys,
   isPilotTatevStaffName,
   readAutoImportStaffIdFromConfig,
   resolvePilotGoogleAutoImportStaff,
@@ -21,13 +20,18 @@ import {
 import {
   executeManualGoogleCalendarImport,
   GoogleCalendarImportError,
+  buildGoogleOccurrenceRecurrenceId,
+  googleStoredOccurrenceKeys,
   type ManualGoogleImportResult,
 } from './googleCalendarImport.js';
 import {
   GOOGLE_CALENDAR_PROVIDER,
+  GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
   GoogleCalendarOAuthError,
+  googlePreviewItemIdentity,
   listGoogleCalendarEventsPreview,
   loadGoogleCalendarAppConfig,
+  readSelectedGoogleCalendars,
   refreshGoogleAccessToken,
   type GoogleEventPreviewItem,
   type GoogleEventsListPage,
@@ -348,7 +352,11 @@ function rememberImportedOccurrence(
   ev: GoogleEventPreviewItem,
   importedKeys: Set<string>,
 ): void {
-  for (const key of googleEventOccurrenceKeys(ev)) {
+  for (const key of googleStoredOccurrenceKeys({
+    calendarId: ev.calendarId,
+    eventId: ev.id,
+    recurrenceId: buildGoogleOccurrenceRecurrenceId(ev),
+  })) {
     importedKeys.add(key);
   }
 }
@@ -534,8 +542,12 @@ export async function importGoogleCalendarLast30Days(params: {
     );
   }
 
-  const calendarId = String(conn.selected_calendar_id || '').trim();
-  if (!calendarId) {
+  const selectedCalendars = readSelectedGoogleCalendars({
+    selectedCalendarId: conn.selected_calendar_id,
+    selectedCalendarName: conn.selected_calendar_name,
+    providerConfig: conn.provider_config,
+  });
+  if (selectedCalendars.length === 0) {
     throw new GoogleCalendarOAuthError(
       'GOOGLE_CALENDAR_NOT_SELECTED',
       'Google calendar is not selected',
@@ -609,8 +621,13 @@ export async function importGoogleCalendarLast30Days(params: {
     });
   };
 
+  const seenOccurrences = new Set<string>();
+
   const processEvents = async (events: GoogleEventPreviewItem[]) => {
     for (const ev of events) {
+      const identity = googlePreviewItemIdentity(ev);
+      if (seenOccurrences.has(identity)) continue;
+      seenOccurrences.add(identity);
       summary.scanned += 1;
       let settled = false;
       const finish = (terminal: GoogleSyncTerminal) => {
@@ -810,6 +827,7 @@ export async function importGoogleCalendarLast30Days(params: {
           fetchImpl: params.fetchImpl,
           body: {
             eventId: ev.id,
+            calendarId: ev.calendarId,
             staffId: decision.staffId,
             serviceId: decision.serviceId,
             client:
@@ -937,24 +955,28 @@ export async function importGoogleCalendarLast30Days(params: {
       );
     }
 
-    const listed = await listGoogleCalendarEventsForBackfill({
-      accessToken,
-      calendarId,
-      calendarName: conn.selected_calendar_name ?? null,
-      timeMin: window.timeMin,
-      ...(window.timeMax ? { timeMax: window.timeMax } : {}),
-      fetchImpl: params.fetchImpl,
-      maxPages: params.maxPages,
-      maxEvents: params.maxEvents,
-      onPage: async (page) => {
-        pagesProcessed = page.pageIndex;
-        await params.onPage?.(page);
-        const slice = selectGoogleEventsForBackfill(page.events, window);
-        await processEvents(slice);
-        emitProgress();
-      },
-    });
-    truncated = listed.truncated;
+    const perCalendarCap = params.maxEvents ?? GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS;
+    const perCalendarPages = params.maxPages ?? GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS;
+    for (const calendar of selectedCalendars) {
+      const listed = await listGoogleCalendarEventsForBackfill({
+        accessToken,
+        calendarId: calendar.id,
+        calendarName: calendar.name,
+        timeMin: window.timeMin,
+        ...(window.timeMax ? { timeMax: window.timeMax } : {}),
+        fetchImpl: params.fetchImpl,
+        maxPages: perCalendarPages,
+        maxEvents: perCalendarCap,
+        onPage: async (page) => {
+          pagesProcessed += 1;
+          await params.onPage?.(page);
+          const slice = selectGoogleEventsForBackfill(page.events, window);
+          await processEvents(slice);
+          emitProgress();
+        },
+      });
+      if (listed.truncated) truncated = true;
+    }
     knownTotal = summary.scanned;
     emitProgress();
   }

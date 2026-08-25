@@ -238,7 +238,7 @@ export function googleOccurrenceNeedsAutoReconcile(params: {
 }
 
 export function findOverlayRecord(
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>,
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>,
   index: GoogleReviewCoverageIndex,
 ): GoogleReviewOverlayRecord | null {
   const keys = googleOccurrenceLookupKeys(ev);
@@ -419,7 +419,7 @@ async function touchImportedLink(params: {
   params.record.etag = params.ev.etag || params.record.etag;
   params.record.lastModified = params.ev.updated || params.record.lastModified;
   try {
-    await params.db
+    let query = params.db
       .from('appointment_external_links')
       .update({
         external_etag: params.ev.etag || null,
@@ -431,6 +431,11 @@ async function touchImportedLink(params: {
       .eq('calendar_connection_id', params.calendarConnectionId)
       .eq('external_uid', params.ev.id)
       .eq('recurrence_id', recurrenceId);
+    const calendarId = (params.ev.calendarId || '').trim();
+    if (calendarId) {
+      query = query.eq('external_calendar_id', calendarId);
+    }
+    await query;
   } catch {
     // Fingerprint write is best-effort.
   }

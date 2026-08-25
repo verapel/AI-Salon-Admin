@@ -9,6 +9,7 @@ import type { CalendarEventMatchingPreview } from './calendarEventMatcher.js';
 import {
   buildGoogleOccurrenceRecurrenceId,
   googleOccurrenceLookupKeys,
+  googleRememberedOccurrenceKeys,
   googleStoredOccurrenceKeys,
 } from './googleCalendarImport.js';
 import type { GoogleEventPreviewItem } from './googleCalendarOAuth.js';
@@ -18,6 +19,25 @@ function isImportedGoogleOccurrence(
   importedKeys: Set<string>,
 ): boolean {
   return googleOccurrenceLookupKeys(ev).some((k) => importedKeys.has(k));
+}
+
+function googleLegacyOverlayMatchesImported(
+  eventId: string,
+  recurrenceId: string,
+  importedKeys: Set<string>,
+): boolean {
+  const uid = eventId.trim();
+  if (!uid) return false;
+  const rec = recurrenceId.trim();
+  if (importedKeys.has(rec ? `${uid}:${rec}` : uid)) return true;
+  for (const key of importedKeys) {
+    if (rec) {
+      if (key.endsWith(`:${uid}:${rec}`)) return true;
+    } else if (key.endsWith(`:${uid}`) && key.split(':').length === 2) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export const GOOGLE_REVIEW_ISSUE_PROVIDER = 'google' as const;
@@ -106,6 +126,53 @@ export function isGoogleEventAllDay(ev: Pick<GoogleEventPreviewItem, 'start' | '
  * Timed, non-cancelled Google events can appear on the salon calendar.
  * All-day and cancelled/deleted events are not shown as active blocks.
  */
+function googleIssueRowCalendarId(row: {
+  external_calendar_id?: string | null;
+  raw_event?: unknown;
+}): string {
+  if (typeof row.external_calendar_id === 'string' && row.external_calendar_id.trim()) {
+    return row.external_calendar_id.trim();
+  }
+  const raw = row.raw_event;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const calendarId = (raw as Record<string, unknown>).calendarId;
+    if (typeof calendarId === 'string' && calendarId.trim()) return calendarId.trim();
+  }
+  return '';
+}
+
+export function pickGoogleIssueRow<T extends { external_calendar_id?: string | null; raw_event?: unknown }>(
+  rows: T[],
+  calendarId?: string | null,
+): T | null {
+  if (!rows.length) return null;
+  const cal = (calendarId || '').trim();
+  if (!cal) return rows[0] ?? null;
+  const scoped = rows.find((row) => googleIssueRowCalendarId(row) === cal);
+  if (scoped) return scoped;
+  return rows.find((row) => !googleIssueRowCalendarId(row)) ?? null;
+}
+
+async function loadOpenGoogleIssueRows(
+  db: any,
+  params: {
+    salonId: string;
+    calendarConnectionId: string;
+    ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>;
+  },
+): Promise<any[]> {
+  const recurrenceId = buildGoogleOccurrenceRecurrenceId(params.ev);
+  const listed = await db
+    .from('calendar_import_issues')
+    .select('id, external_calendar_id, raw_event')
+    .eq('salon_id', params.salonId)
+    .eq('calendar_connection_id', params.calendarConnectionId)
+    .eq('external_uid', params.ev.id)
+    .eq('recurrence_id', recurrenceId)
+    .eq('status', 'open');
+  return Array.isArray(listed?.data) ? listed.data : [];
+}
+
 export function googleReviewOccurrenceLookupKeys(
   ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'> & {
     calendarId?: string | null;
@@ -145,7 +212,7 @@ export async function loadGoogleReviewCoverageIndex(params: {
     const { data, error } = await params.db
       .from('calendar_import_issues')
       .select(
-        'id, external_uid, recurrence_id, parsed_event, raw_event, status, external_etag, reason_code',
+        'id, external_uid, recurrence_id, parsed_event, raw_event, status, external_etag, reason_code, external_calendar_id',
       )
       .eq('salon_id', params.salonId)
       .eq('calendar_connection_id', params.calendarConnectionId);
@@ -158,7 +225,12 @@ export async function loadGoogleReviewCoverageIndex(params: {
         typeof row?.recurrence_id === 'string' && row.recurrence_id.trim()
           ? row.recurrence_id.trim()
           : '';
-      const keys = googleStoredOccurrenceKeys({ eventId: uid, recurrenceId: rec });
+      const cal = googleIssueRowCalendarId(row);
+      const keys = googleStoredOccurrenceKeys({
+        calendarId: cal,
+        eventId: uid,
+        recurrenceId: rec,
+      });
       for (const key of keys) overlayKeys.add(key);
       const parsed = row?.parsed_event;
       const raw = row?.raw_event;
@@ -190,7 +262,7 @@ export async function loadGoogleReviewCoverageIndex(params: {
 }
 
 export function findRememberedCoverageClientId(
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>,
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>,
   clientByKey: Map<string, string>,
 ): string | null {
   for (const key of googleReviewOccurrenceLookupKeys(ev)) {
@@ -201,19 +273,19 @@ export function findRememberedCoverageClientId(
 }
 
 export function isGoogleReviewOverlayRepresented(
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>,
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>,
   overlayKeys: Set<string>,
 ): boolean {
   return googleReviewOccurrenceLookupKeys(ev).some((key) => overlayKeys.has(key));
 }
 
 export function rememberGoogleReviewCoverage(
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>,
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>,
   index: GoogleReviewCoverageIndex,
   clientId?: string | null,
   record?: GoogleReviewOverlayRecord | null,
 ): void {
-  for (const key of googleReviewOccurrenceLookupKeys(ev)) {
+  for (const key of googleRememberedOccurrenceKeys(ev)) {
     index.overlayKeys.add(key);
     if (clientId) index.clientByKey.set(key, clientId);
     if (record) index.overlayByKey.set(key, record);
@@ -224,22 +296,20 @@ export async function dismissGoogleReviewOverlay(params: {
   db: any;
   salonId: string;
   calendarConnectionId: string;
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>;
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>;
 }): Promise<boolean> {
-  const recurrenceId = buildGoogleOccurrenceRecurrenceId(params.ev);
   const nowIso = new Date().toISOString();
   try {
+    const existing = pickGoogleIssueRow(await loadOpenGoogleIssueRows(params.db, params), params.ev.calendarId);
+    if (!existing?.id) return true;
     const { error } = await params.db
       .from('calendar_import_issues')
       .update({
         status: 'dismissed',
         updated_at: nowIso,
       })
-      .eq('salon_id', params.salonId)
-      .eq('calendar_connection_id', params.calendarConnectionId)
-      .eq('external_uid', params.ev.id)
-      .eq('recurrence_id', recurrenceId)
-      .eq('status', 'open');
+      .eq('id', existing.id)
+      .eq('salon_id', params.salonId);
     return !error;
   } catch {
     return false;
@@ -484,6 +554,7 @@ export async function upsertGoogleCalendarReviewIssue(params: {
   const payload = {
     salon_id: params.salonId,
     calendar_connection_id: params.calendarConnectionId,
+    external_calendar_id: (params.ev.calendarId || '').trim() || null,
     external_uid: params.ev.id,
     recurrence_id: recurrenceId,
     external_etag: params.ev.etag,
@@ -504,21 +575,13 @@ export async function upsertGoogleCalendarReviewIssue(params: {
   };
 
   try {
-    const existing = await params.db
-      .from('calendar_import_issues')
-      .select('id')
-      .eq('salon_id', params.salonId)
-      .eq('calendar_connection_id', params.calendarConnectionId)
-      .eq('external_uid', params.ev.id)
-      .eq('recurrence_id', recurrenceId)
-      .eq('status', 'open')
-      .maybeSingle();
+    const existing = pickGoogleIssueRow(await loadOpenGoogleIssueRows(params.db, params), params.ev.calendarId);
 
-    if (existing?.data?.id) {
+    if (existing?.id) {
       const { error } = await params.db
         .from('calendar_import_issues')
         .update(payload)
-        .eq('id', existing.data.id)
+        .eq('id', existing.id)
         .eq('salon_id', params.salonId);
       return !error;
     }
@@ -528,7 +591,25 @@ export async function upsertGoogleCalendarReviewIssue(params: {
       created_at: nowIso,
     });
     if (!error) return true;
-    const { error: updErr } = await params.db
+    const cal = (params.ev.calendarId || '').trim();
+    const raced = pickGoogleIssueRow(
+      await loadOpenGoogleIssueRows(params.db, params),
+      params.ev.calendarId,
+    );
+    if (raced?.id) {
+      let byId = params.db
+        .from('calendar_import_issues')
+        .update(payload)
+        .eq('id', raced.id)
+        .eq('salon_id', params.salonId);
+      if (cal) byId = byId.eq('external_calendar_id', cal);
+      else {
+        byId = byId.or('external_calendar_id.is.null,external_calendar_id.eq.');
+      }
+      const { error: byIdErr } = await byId;
+      return !byIdErr;
+    }
+    let upd = params.db
       .from('calendar_import_issues')
       .update(payload)
       .eq('salon_id', params.salonId)
@@ -536,6 +617,9 @@ export async function upsertGoogleCalendarReviewIssue(params: {
       .eq('external_uid', params.ev.id)
       .eq('recurrence_id', recurrenceId)
       .eq('status', 'open');
+    if (cal) upd = upd.eq('external_calendar_id', cal);
+    else upd = upd.or('external_calendar_id.is.null,external_calendar_id.eq.');
+    const { error: updErr } = await upd;
     return !updErr;
   } catch {
     return false;
@@ -546,12 +630,13 @@ export async function resolveGoogleCalendarReviewIssue(params: {
   db: any;
   salonId: string;
   calendarConnectionId: string;
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'recurringEventId' | 'originalStartTime'>;
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>;
   appointmentId?: string | null;
 }): Promise<void> {
-  const recurrenceId = buildGoogleOccurrenceRecurrenceId(params.ev);
   const nowIso = new Date().toISOString();
   try {
+    const existing = pickGoogleIssueRow(await loadOpenGoogleIssueRows(params.db, params), params.ev.calendarId);
+    if (!existing?.id) return;
     await params.db
       .from('calendar_import_issues')
       .update({
@@ -560,11 +645,8 @@ export async function resolveGoogleCalendarReviewIssue(params: {
         resolved_at: nowIso,
         updated_at: nowIso,
       })
-      .eq('salon_id', params.salonId)
-      .eq('calendar_connection_id', params.calendarConnectionId)
-      .eq('external_uid', params.ev.id)
-      .eq('recurrence_id', recurrenceId)
-      .eq('status', 'open');
+      .eq('id', existing.id)
+      .eq('salon_id', params.salonId);
   } catch {
     // Overlay resolve is best-effort; RPC uniqueness remains authoritative.
   }
@@ -643,7 +725,7 @@ export async function listGoogleReviewCalendarItems(params: {
 }): Promise<GoogleReviewCalendarItem[]> {
   let query = params.db
     .from('calendar_import_issues')
-    .select('id, external_uid, recurrence_id, reason_code, parsed_event, calendar_connection_id')
+    .select('id, external_uid, recurrence_id, reason_code, parsed_event, calendar_connection_id, external_calendar_id, raw_event')
     .eq('salon_id', params.salonId)
     .eq('status', 'open');
   if (params.calendarConnectionId) {
@@ -673,13 +755,21 @@ export async function listGoogleReviewCalendarItems(params: {
       if (!mapped) continue;
       const synthetic = {
         id: mapped.eventId,
-        calendarId: '',
+        calendarId: googleIssueRowCalendarId(row),
         recurringEventId: mapped.recurrenceId || null,
         originalStartTime: mapped.recurrenceId
           ? { dateTime: mapped.recurrenceId, date: null, timeZone: null, allDay: false }
           : null,
       };
-      if (isImportedGoogleOccurrence(synthetic as GoogleEventPreviewItem, visibleImportedKeys)) {
+      if (
+        isImportedGoogleOccurrence(synthetic as GoogleEventPreviewItem, visibleImportedKeys) ||
+        (!synthetic.calendarId &&
+          googleLegacyOverlayMatchesImported(
+            mapped.eventId,
+            mapped.recurrenceId,
+            visibleImportedKeys,
+          ))
+      ) {
         continue;
       }
       items.push(mapped);

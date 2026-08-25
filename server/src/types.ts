@@ -163,6 +163,8 @@ export interface CalendarConnectionPublic {
   selectedCalendarId: string | null;
   selectedCalendarName: string | null;
   selectedCalendarUrl: string | null;
+  /** All selected Google calendars. Falls back to selectedCalendarId for legacy rows. */
+  selectedCalendars: Array<{ id: string; name: string }>;
   status: CalendarConnectionStatus;
   importEnabled: boolean;
   lastSyncAt: string | null;

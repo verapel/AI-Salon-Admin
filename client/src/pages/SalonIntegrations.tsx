@@ -27,6 +27,24 @@ function isCredentialsStoredState(connection: CalendarConnectionPublic | null): 
   return true;
 }
 
+function googleSelectedCalendarRefs(
+  connection: CalendarConnectionPublic | null,
+): Array<{ id: string; name: string }> {
+  if (!connection) return [];
+  if (Array.isArray(connection.selectedCalendars) && connection.selectedCalendars.length > 0) {
+    return connection.selectedCalendars.filter((cal) => Boolean(cal?.id));
+  }
+  if (connection.selectedCalendarId) {
+    return [
+      {
+        id: connection.selectedCalendarId,
+        name: connection.selectedCalendarName || connection.selectedCalendarId,
+      },
+    ];
+  }
+  return [];
+}
+
 function formatEventInstant(time: GoogleEventTimePreview): string {
   if (time.allDay && time.date) return time.date;
   if (time.dateTime) return time.dateTime;
@@ -367,7 +385,7 @@ function GoogleEventImportPanel({
 }: {
   event: GoogleEventPreviewItem;
   staffOptions: GoogleImportStaffOption[];
-  onImported: (eventId: string) => void;
+  onImported: (event: { id: string; calendarId: string }) => void;
 }) {
   const { t } = useLanguage();
   const readiness = event.importReadiness;
@@ -469,6 +487,7 @@ function GoogleEventImportPanel({
     try {
       await api.calendar.importGoogleEvent({
         eventId: event.id,
+        calendarId: event.calendarId,
         recurrenceId: readiness?.recurrenceId || undefined,
         staffId,
         serviceId: matching.service.serviceId,
@@ -485,12 +504,12 @@ function GoogleEventImportPanel({
       });
       setLocalImported(true);
       setConfirmOpen(false);
-      onImported(event.id);
+      onImported({ id: event.id, calendarId: event.calendarId });
     } catch (err: unknown) {
       if (err instanceof ApiError && err.code === 'google_event_already_imported') {
         setLocalImported(true);
         setConfirmOpen(false);
-        onImported(event.id);
+        onImported({ id: event.id, calendarId: event.calendarId });
       } else {
         const message =
           err instanceof Error ? err.message : t('integrations.google.importError');
@@ -682,6 +701,7 @@ export default function SalonIntegrations() {
   const [googleCalendarsError, setGoogleCalendarsError] = useState<string | null>(null);
   const [googleSelecting, setGoogleSelecting] = useState(false);
   const [showCalendarPicker, setShowCalendarPicker] = useState(false);
+  const [googleDraftCalendarIds, setGoogleDraftCalendarIds] = useState<string[]>([]);
 
   const [googleDisconnectOpen, setGoogleDisconnectOpen] = useState(false);
   const [googleDisconnectError, setGoogleDisconnectError] = useState<string | null>(null);
@@ -762,7 +782,8 @@ export default function SalonIntegrations() {
       setGoogleBanner(t('integrations.google.connectedBanner'));
       setShowCalendarPicker(true);
       void refreshConnections().then((conn) => {
-        if (conn && isCredentialsStoredState(conn) && !conn.selectedCalendarId) {
+        if (conn && isCredentialsStoredState(conn) && googleSelectedCalendarRefs(conn).length === 0) {
+          setGoogleDraftCalendarIds([]);
           void loadGoogleCalendars();
         }
       });
@@ -853,15 +874,37 @@ export default function SalonIntegrations() {
     }
   };
 
-  const handleSelectGoogleCalendar = async (calendarId: string) => {
+  const openGoogleCalendarPicker = () => {
+    setShowCalendarPicker(true);
+    setGoogleDraftCalendarIds(
+      googleSelectedCalendarRefs(googleConnection).map((cal) => cal.id),
+    );
+    void loadGoogleCalendars();
+  };
+
+  const toggleGoogleDraftCalendar = (calendarId: string) => {
+    setGoogleDraftCalendarIds((prev) =>
+      prev.includes(calendarId)
+        ? prev.filter((id) => id !== calendarId)
+        : [...prev, calendarId],
+    );
+  };
+
+  const handleSaveGoogleCalendars = async () => {
     if (googleSelecting) return;
+    if (googleDraftCalendarIds.length === 0) {
+      setGoogleCalendarsError(t('integrations.google.selectAtLeastOne'));
+      return;
+    }
     setGoogleSelecting(true);
     setGoogleCalendarsError(null);
     try {
-      const result = await api.calendar.selectGoogleCalendar(calendarId);
+      const result = await api.calendar.selectGoogleCalendars(googleDraftCalendarIds);
       setGoogleConnection(result.connection);
       setShowCalendarPicker(false);
-      setGoogleBanner(t('integrations.google.calendarSelectedBanner'));
+      setGoogleBanner(t('integrations.google.calendarsSelectedBanner'));
+      setGooglePreviewEvents([]);
+      setGooglePreviewLoaded(false);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : t('integrations.google.selectError');
@@ -879,6 +922,7 @@ export default function SalonIntegrations() {
       const result = await api.calendar.disconnectGoogle();
       setGoogleConnection(result.connection);
       setGoogleCalendars([]);
+      setGoogleDraftCalendarIds([]);
       setShowCalendarPicker(false);
       setGoogleDisconnectOpen(false);
       setGoogleBanner(null);
@@ -1071,7 +1115,8 @@ export default function SalonIntegrations() {
     appleStored && (appleConnection?.verificationPending ?? true);
 
   const googleStored = isCredentialsStoredState(googleConnection);
-  const googleSelected = Boolean(googleConnection?.selectedCalendarId);
+  const googleSelectedRefs = googleSelectedCalendarRefs(googleConnection);
+  const googleSelected = googleSelectedRefs.length > 0;
   const needsCalendarPick =
     googleStored && (!googleSelected || showCalendarPicker);
 
@@ -1111,7 +1156,9 @@ export default function SalonIntegrations() {
                   </span>
                   {googleSelected ? (
                     <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                      {t('integrations.google.status.calendarSelected')}
+                      {googleSelectedRefs.length > 1
+                        ? t('integrations.google.status.calendarsSelected')
+                        : t('integrations.google.status.calendarSelected')}
                     </span>
                   ) : (
                     <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
@@ -1153,13 +1200,26 @@ export default function SalonIntegrations() {
                         t('integrations.google.valueUnknown')}
                     </dd>
                   </div>
-                  {googleConnection?.selectedCalendarName ? (
-                    <div>
+                  {googleSelectedRefs.length > 0 ? (
+                    <div className="sm:col-span-2">
                       <dt className="text-gray-500 dark:text-gray-400">
-                        {t('integrations.google.selectedCalendar')}
+                        {googleSelectedRefs.length > 1
+                          ? t('integrations.google.selectedCalendars')
+                          : t('integrations.google.selectedCalendar')}
                       </dt>
                       <dd className="font-medium text-gray-900 dark:text-white">
-                        {googleConnection.selectedCalendarName}
+                        <ul className="mt-1 space-y-1">
+                          {googleSelectedRefs.map((cal) => (
+                            <li key={cal.id} className="truncate">
+                              {cal.name}
+                              {cal.name !== cal.id ? (
+                                <span className="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+                                  ({cal.id})
+                                </span>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
                       </dd>
                     </div>
                   ) : null}
@@ -1264,52 +1324,69 @@ export default function SalonIntegrations() {
                         type="button"
                         className="btn-secondary"
                         disabled={googleCalendarsLoading}
-                        onClick={() => {
-                          setShowCalendarPicker(true);
-                          void loadGoogleCalendars();
-                        }}
+                        onClick={openGoogleCalendarPicker}
                       >
                         {googleCalendarsLoading
                           ? t('integrations.google.loadingCalendars')
                           : t('integrations.google.loadCalendars')}
                       </button>
                     </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {t('integrations.google.selectCalendarsHint')}
+                    </p>
                     {googleCalendarsError ? (
                       <p className="text-sm text-red-600 dark:text-red-400">
                         {googleCalendarsError}
                       </p>
                     ) : null}
                     {googleCalendars.length > 0 ? (
-                      <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
-                        {googleCalendars.map((cal) => (
-                          <li
-                            key={cal.id}
-                            className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
-                          >
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
-                                {cal.summary}
-                                {cal.primary
-                                  ? ` (${t('integrations.google.primary')})`
-                                  : ''}
-                              </p>
-                              <p className="truncate text-xs text-gray-500 dark:text-gray-400">
-                                {cal.timeZone || cal.id}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              className="btn-primary"
-                              disabled={googleSelecting}
-                              onClick={() => handleSelectGoogleCalendar(cal.id)}
-                            >
-                              {googleSelecting
-                                ? t('integrations.google.selecting')
-                                : t('integrations.google.select')}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
+                      <div className="space-y-2">
+                        <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
+                          {googleCalendars.map((cal) => {
+                            const checked = googleDraftCalendarIds.includes(cal.id);
+                            return (
+                              <li key={cal.id} className="px-3 py-2">
+                                <label className="flex cursor-pointer items-start gap-3">
+                                  <input
+                                    type="checkbox"
+                                    className="mt-1 h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                                    checked={checked}
+                                    disabled={googleSelecting}
+                                    onChange={() => toggleGoogleDraftCalendar(cal.id)}
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
+                                      {cal.summary}
+                                      {cal.primary
+                                        ? ` (${t('integrations.google.primary')})`
+                                        : ''}
+                                    </p>
+                                    <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                                      {cal.id}
+                                      {cal.timeZone ? ` · ${cal.timeZone}` : ''}
+                                    </p>
+                                  </div>
+                                  {checked ? (
+                                    <span className="shrink-0 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                                      {t('integrations.google.calendarMarkedSelected')}
+                                    </span>
+                                  ) : null}
+                                </label>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          disabled={googleSelecting || googleDraftCalendarIds.length === 0}
+                          onClick={() => void handleSaveGoogleCalendars()}
+                        >
+                          {googleSelecting
+                            ? t('integrations.google.selecting')
+                            : t('integrations.google.saveCalendarSelection')}
+                        </button>
+                      </div>
                     ) : null}
                   </div>
                 ) : null}
@@ -1334,12 +1411,9 @@ export default function SalonIntegrations() {
                       type="button"
                       className="btn-secondary"
                       disabled={googleCalendarsLoading}
-                      onClick={() => {
-                        setShowCalendarPicker(true);
-                        void loadGoogleCalendars();
-                      }}
+                      onClick={openGoogleCalendarPicker}
                     >
-                      {t('integrations.google.changeCalendar')}
+                      {t('integrations.google.changeCalendars')}
                     </button>
                   ) : null}
                   <button
@@ -1388,7 +1462,7 @@ export default function SalonIntegrations() {
                             t('integrations.google.parsedMinutes').replace('{n}', String(n));
                           return (
                             <article
-                              key={`${ev.id}::${ev.start.dateTime || ev.start.date || ''}`}
+                              key={`${ev.calendarId}::${ev.id}::${ev.start.dateTime || ev.start.date || ''}`}
                               className="rounded-md border border-gray-200 p-3 dark:border-gray-700"
                             >
                               <div className="space-y-1">
@@ -1398,6 +1472,13 @@ export default function SalonIntegrations() {
                                 <h3 className="text-base font-medium text-gray-900 dark:text-gray-100">
                                   {ev.summary || '—'}
                                 </h3>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                  {t('integrations.google.previewSourceCalendar')}:{' '}
+                                  {ev.calendarName || ev.calendarId}
+                                  {ev.calendarName && ev.calendarName !== ev.calendarId
+                                    ? ` (${ev.calendarId})`
+                                    : ''}
+                                </p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">
                                   {t('integrations.google.parsedGoogleTime')}:{' '}
                                   {formatEventInstant(ev.start)}
@@ -1537,10 +1618,11 @@ export default function SalonIntegrations() {
                               <GoogleEventImportPanel
                                 event={ev}
                                 staffOptions={googleStaffOptions}
-                                onImported={(eventId) => {
+                                onImported={(imported) => {
                                   setGooglePreviewEvents((prev) =>
                                     prev.map((item) =>
-                                      item.id === eventId
+                                      item.id === imported.id &&
+                                      item.calendarId === imported.calendarId
                                         ? {
                                             ...item,
                                             importReadiness: item.importReadiness

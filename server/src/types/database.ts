@@ -602,6 +602,7 @@ export interface Database {
           id: string;
           salon_id: string;
           calendar_connection_id: string;
+          external_calendar_id: string | null;
           external_uid: string;
           recurrence_id: string;
           external_etag: string | null;
@@ -619,6 +620,7 @@ export interface Database {
           id?: string;
           salon_id: string;
           calendar_connection_id: string;
+          external_calendar_id?: string | null;
           external_uid: string;
           recurrence_id?: string;
           external_etag?: string | null;
@@ -636,6 +638,7 @@ export interface Database {
           id?: string;
           salon_id?: string;
           calendar_connection_id?: string;
+          external_calendar_id?: string | null;
           external_uid?: string;
           recurrence_id?: string;
           external_etag?: string | null;

@@ -247,6 +247,14 @@ export const api = {
           body: JSON.stringify({ calendarId }),
         },
       ),
+    selectGoogleCalendars: (calendarIds: string[]) =>
+      request<{ connection: import('@/types').CalendarConnectionPublic | null }>(
+        '/calendar/google/calendar',
+        {
+          method: 'PUT',
+          body: JSON.stringify({ calendarIds }),
+        },
+      ),
     getGoogleEventsPreview: () =>
       request<import('@/types').GoogleEventsPreviewResponse>(
         '/calendar/google/events/preview',
