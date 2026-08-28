@@ -26,6 +26,8 @@ import {
   parsePercentage,
   parseProductPricing,
   parseVolume,
+  resolveStockQuantityFields,
+  STOCK_PIECE_UNIT,
 } from './productFields.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -304,6 +306,144 @@ describe('PRODUCTS-2 excel and photo import', () => {
     assert.equal(rows[0]?.volume, '1000 ml');
     assert.equal(rows[0]?.priceMin, 2000);
     assert.equal(rows[0]?.priceMax, 3000);
+    assert.equal(rows[0]?.quantity, 1);
+    assert.equal(rows[0]?.unit, STOCK_PIECE_UNIT);
+  });
+
+  it('never treats oxide photo volume as inventory quantity', () => {
+    const stuffedUnit = draftsFromPhotoPayload({
+      products: [
+        {
+          name: 'Oxydant 3%',
+          brand: 'Loreal',
+          category: 'oxide',
+          quantity: 1,
+          unit: 'L',
+          percentage: '3%',
+        },
+      ],
+    });
+    assert.equal(stuffedUnit[0]?.quantity, 1);
+    assert.equal(stuffedUnit[0]?.unit, STOCK_PIECE_UNIT);
+    assert.equal(stuffedUnit[0]?.volume, '1 L');
+    assert.equal(stuffedUnit[0]?.percentage, 3);
+
+    const stuffedQuantity = draftsFromPhotoPayload({
+      products: [
+        {
+          name: 'Oxydant 6%',
+          brand: 'Loreal',
+          category: 'oxide',
+          quantity: '1 L',
+          unit: 'L',
+          percentage: 6,
+        },
+      ],
+    });
+    assert.equal(stuffedQuantity[0]?.quantity, 1);
+    assert.equal(stuffedQuantity[0]?.unit, STOCK_PIECE_UNIT);
+    assert.equal(stuffedQuantity[0]?.volume, '1 L');
+    assert.equal(stuffedQuantity[0]?.percentage, 6);
+
+    const mlAsUnit = draftsFromPhotoPayload({
+      products: [
+        {
+          name: 'Oxydant 9%',
+          brand: 'Loreal',
+          category: 'oxide',
+          quantity: 1000,
+          unit: 'ml',
+          percentage: 9,
+        },
+      ],
+    });
+    assert.equal(mlAsUnit[0]?.quantity, 1);
+    assert.equal(mlAsUnit[0]?.unit, STOCK_PIECE_UNIT);
+    assert.equal(mlAsUnit[0]?.volume, '1000 ml');
+    assert.equal(mlAsUnit[0]?.percentage, 9);
+
+    const volumeKept = draftsFromPhotoPayload({
+      products: [
+        {
+          name: 'Oxydant 12%',
+          brand: 'Loreal',
+          category: 'oxide',
+          quantity: 1,
+          unit: 'L',
+          volume: '1000 ml',
+          percentage: 12,
+        },
+      ],
+    });
+    assert.equal(volumeKept[0]?.quantity, 1);
+    assert.equal(volumeKept[0]?.unit, STOCK_PIECE_UNIT);
+    assert.equal(volumeKept[0]?.volume, '1000 ml');
+    assert.equal(volumeKept[0]?.percentage, 12);
+
+    const oneMlNotInvented = resolveStockQuantityFields({ quantity: 1, unit: 'ml', volume: '' });
+    assert.equal(oneMlNotInvented.quantity, 1);
+    assert.equal(oneMlNotInvented.unit, STOCK_PIECE_UNIT);
+    assert.equal(oneMlNotInvented.volume, '');
+
+    const vision = read('server/src/lib/productPhotoVision.ts');
+    assert.match(vision, /NUMBER OF PIECES/);
+    assert.match(vision, /unit is always шт/);
+    assert.match(vision, /NEVER quantity "1 L"/);
+    assert.match(vision, /volume is bottle SIZE/);
+    assert.doesNotMatch(vision, /quantity.*1 L.*unit/);
+  });
+
+  it('keeps paint and care photo quantity as pieces with volume separate', () => {
+    const paint = draftsFromPhotoPayload({
+      products: [
+        {
+          name: 'Majirel',
+          brand: 'Loreal',
+          codeShade: '6.1',
+          category: 'paint',
+          quantity: 2,
+          unit: 'pcs',
+          volume: '50 ml',
+        },
+      ],
+    });
+    assert.equal(paint[0]?.quantity, 2);
+    assert.equal(paint[0]?.unit, STOCK_PIECE_UNIT);
+    assert.equal(paint[0]?.volume, '50 ml');
+    assert.equal(paint[0]?.percentage, null);
+
+    const care = draftsFromPhotoPayload({
+      products: [
+        {
+          name: 'Hydra',
+          brand: 'KAARAL',
+          category: 'care',
+          quantity: 3,
+          volume: '500 ml',
+        },
+      ],
+    });
+    assert.equal(care[0]?.quantity, 3);
+    assert.equal(care[0]?.volume, '500 ml');
+    assert.notEqual(care[0]?.unit, 'L');
+    assert.notEqual(care[0]?.unit, 'ml');
+    assert.equal(care[0]?.percentage, null);
+
+    const paintVolumeUnit = draftsFromPhotoPayload({
+      products: [
+        {
+          name: 'BACO 5.01',
+          brand: 'Kaaral',
+          category: 'paint',
+          quantity: 1,
+          unit: 'L',
+          volume: '100 ml',
+        },
+      ],
+    });
+    assert.equal(paintVolumeUnit[0]?.quantity, 1);
+    assert.equal(paintVolumeUnit[0]?.unit, STOCK_PIECE_UNIT);
+    assert.equal(paintVolumeUnit[0]?.volume, '100 ml');
   });
 
   it('parses multi-label photo JSON without writing to the database', () => {

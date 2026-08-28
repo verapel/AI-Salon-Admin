@@ -7,18 +7,21 @@ const PHOTO_PROMPT = `You extract salon products from ONE photo that may contain
 Sections: paint/краска, oxide/оксид, care/уход.
 
 Return ONLY JSON:
-{"products":[{"name":"","brand":"","line":"","codeShade":"","category":"paint|oxide|care","quantity":1,"unit":"","volume":"","percentage":null,"price":0,"priceMin":null,"priceMax":null,"currency":"AMD","supplier":""}]}
+{"products":[{"name":"","brand":"","line":"","codeShade":"","category":"paint|oxide|care","quantity":1,"unit":"шт.","volume":"","percentage":null,"price":0,"priceMin":null,"priceMax":null,"currency":"AMD","supplier":""}]}
 
 Rules:
 - Each visible distinct product/label is its own array item. 1 product → 1 item. 2 products → 2 items. N products → N items.
 - Do not merge different bottles/tubes into one object.
 - codeShade is the tone/code printed on the tube (examples: 5.01, 5.18, 8.11, SL12.0, 6.1).
-- volume as printed: 100 ml, 250 ml, 500 ml, 1 L.
-- percentage is oxidant strength without % if visible: 1.5, 3, 6, 9, 12. Otherwise null.
+- quantity is the NUMBER OF PIECES (bottles/tubes/шт). Integer only. One bottle → 1. Never ml, L, liters, or volume.
+- unit is always шт. Never put ml, L, liter, or volume into unit or quantity.
+- volume is bottle SIZE as printed, a separate field: 100 ml, 250 ml, 500 ml, 1000 ml, 1 L.
+- percentage is oxidant strength without % if visible: 1.5, 3, 6, 9, 12. Otherwise null. Separate from quantity and volume.
+- Oxide example: quantity=1, unit=шт., volume=1000 ml, percentage=3. NEVER quantity "1 L".
 - If a price range is visible, fill priceMin and priceMax and set price to 0.
 - currency is AMD, USD, RUB, or EUR. Default AMD. Do not invent FX.
 - category: paint (краска), oxide (оксид), care (уход).
-- If quantity is not printed, use 1.
+- If quantity is not printed, use 1 (one piece).
 - Do not invent supplier or price; use "" / 0 / null when unknown.
 - Never include commentary.`;
 

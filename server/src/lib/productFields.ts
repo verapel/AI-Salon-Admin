@@ -41,6 +41,75 @@ export function parseVolume(value: unknown): string {
   return compact;
 }
 
+/** Inventory stock is always pieces, never bottle volume. */
+export const STOCK_PIECE_UNIT = 'шт.';
+
+const VOLUME_UNIT_TOKEN_RE = /^(ml|мл|l|л|liter|litre|литры?|литр(?:а|ов)?)(?:\.|)$/i;
+const VOLUME_IN_TEXT_RE = /(\d+(?:[.,]\d+)?)\s*(ml|мл|l|л|liter|litre|литр(?:а|ов)?)\b/i;
+const PIECE_UNIT_RE = /^(pcs?|pieces?|шт\.?|штук[аи]?|հատ|bottle|bottles)$/i;
+
+export function isVolumeUnitToken(value: unknown): boolean {
+  const text = asTrimmed(value);
+  if (!text) return false;
+  return VOLUME_UNIT_TOKEN_RE.test(text) || Boolean(extractVolumeFromText(text));
+}
+
+export function extractVolumeFromText(value: unknown): string {
+  const text = asTrimmed(value);
+  if (!text || !VOLUME_IN_TEXT_RE.test(text)) return '';
+  return parseVolume(text);
+}
+
+function parsePieceCount(value: unknown, fallback: number): number {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value >= 0 ? Math.trunc(value) : fallback;
+  }
+  const text = String(value).trim();
+  if (extractVolumeFromText(text)) return fallback;
+  const match = text.match(/^(\d+)/);
+  if (!match) return fallback;
+  return Number(match[1]);
+}
+
+/**
+ * Quantity is bottle/tube count (шт.). Volume (ml/L) never becomes the stock unit.
+ * If the model stuffed "1 L" into quantity or unit, recover it as volume.
+ */
+export function resolveStockQuantityFields(input: {
+  quantity?: unknown;
+  unit?: unknown;
+  volume?: unknown;
+}): { quantity: number; unit: string; volume: string } {
+  let volume = parseVolume(input.volume);
+  const volumeFromQuantity = extractVolumeFromText(input.quantity);
+  if (volumeFromQuantity) {
+    if (!volume) volume = volumeFromQuantity;
+    return { quantity: 1, unit: STOCK_PIECE_UNIT, volume };
+  }
+
+  const volumeFromUnit = extractVolumeFromText(input.unit);
+  if (volumeFromUnit) {
+    if (!volume) volume = volumeFromUnit;
+    return { quantity: parsePieceCount(input.quantity, 1), unit: STOCK_PIECE_UNIT, volume };
+  }
+
+  const unitText = asTrimmed(input.unit) ?? '';
+  const quantity = parsePieceCount(input.quantity, 1);
+  if (VOLUME_UNIT_TOKEN_RE.test(unitText)) {
+    const isLiter = /^(l|л|liter|litre|литр)/i.test(unitText);
+    const isMl = /^(ml|мл)(?:\.|)?$/i.test(unitText);
+    if (!volume && (isLiter || (isMl && quantity >= 50))) {
+      volume = parseVolume(`${quantity} ${unitText}`);
+      return { quantity: 1, unit: STOCK_PIECE_UNIT, volume };
+    }
+    return { quantity, unit: STOCK_PIECE_UNIT, volume };
+  }
+
+  const unit = !unitText || PIECE_UNIT_RE.test(unitText) ? STOCK_PIECE_UNIT : unitText;
+  return { quantity, unit, volume };
+}
+
 /** Optional oxidant/developer strength. Stored as 1.5, 3, 6, 9, 12. */
 export function parsePercentage(value: unknown): number | null {
   const text = asTrimmed(value);

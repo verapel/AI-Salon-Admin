@@ -6,6 +6,7 @@ import {
   parseProductPricing,
   persistProductPricing,
   parseVolume,
+  resolveStockQuantityFields,
   type ProductCurrency,
 } from './productFields.js';
 import {
@@ -291,7 +292,6 @@ export function emptyDraft(): ProductDraft {
 }
 
 export function sanitizeDraft(input: Partial<ProductDraft> | Record<string, unknown>): ProductDraft {
-  const quantity = parseNonNegativeInt(input.quantity, 1);
   const minQuantity = parseNonNegativeInt(input.minQuantity, 0);
   const price = parseNonNegativeNumber(input.price, 0);
   const brand = normalizeIdentityPart(input.brand);
@@ -311,16 +311,21 @@ export function sanitizeDraft(input: Partial<ProductDraft> | Record<string, unkn
     priceRange: raw.priceRange ?? raw.price_range,
     currency: raw.currency,
   });
+  const stock = resolveStockQuantityFields({
+    quantity: raw.quantity,
+    unit: raw.unit,
+    volume: raw.volume ?? raw.size ?? raw.ml,
+  });
   return {
     name,
     brand,
     line,
     codeShade,
     category: normalizeIdentityPart(input.category),
-    quantity: quantity ?? 1,
+    quantity: stock.quantity,
     minQuantity: minQuantity ?? 0,
-    unit: normalizeIdentityPart(input.unit),
-    volume: parseVolume(raw.volume ?? raw.size ?? raw.ml),
+    unit: stock.unit,
+    volume: stock.volume,
     percentage: parsePercentage(raw.percentage ?? raw.percent ?? raw.vol),
     price: pricing.price || (price ?? 0),
     priceMin: pricing.priceMin,

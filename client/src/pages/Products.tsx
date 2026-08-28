@@ -31,6 +31,7 @@ import {
   type ProductSection,
 } from '@/lib/productSection';
 import { asAmount, formatProductExactPrice, formatProductPriceRange } from '@/lib/productFormat';
+import { stockQuantityDisplayUnit } from '@/lib/stockQuantity';
 import { SALON_CURRENCIES } from '@/lib/currency';
 import { numericDisplayValue, parseDecimalInput, parseIntegerInput } from '@/lib/numericInput';
 import type { Product, ProductDraft, ProductImportResult, ProductStockStatus } from '@/types';
@@ -430,32 +431,35 @@ export default function Products() {
     );
   }
 
-  const quantityControls = (product: Product, compact = false) => (
-    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-      <button
-        type="button"
-        onClick={() => handleQuantity(product, -1)}
-        disabled={actionBusy === product.id || product.quantity <= 0}
-        className={compact ? 'btn-ghost p-1.5' : 'btn-ghost min-h-[44px] min-w-[44px] p-2'}
-        aria-label={t('products.qtyDecreaseAria')}
-      >
-        <Minus className="h-4 w-4" />
-      </button>
-      <span className="min-w-[3ch] text-center tabular-nums font-medium text-gray-900 dark:text-white">
-        {product.quantity}
-        {product.unit ? ` ${product.unit}` : ''}
-      </span>
-      <button
-        type="button"
-        onClick={() => handleQuantity(product, 1)}
-        disabled={actionBusy === product.id}
-        className={compact ? 'btn-ghost p-1.5' : 'btn-ghost min-h-[44px] min-w-[44px] p-2'}
-        aria-label={t('products.qtyIncreaseAria')}
-      >
-        <Plus className="h-4 w-4" />
-      </button>
-    </div>
-  );
+  const quantityControls = (product: Product, compact = false) => {
+    const unitLabel = stockQuantityDisplayUnit(product.unit, section, t('products.unitPieces'));
+    return (
+      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          onClick={() => handleQuantity(product, -1)}
+          disabled={actionBusy === product.id || product.quantity <= 0}
+          className={compact ? 'btn-ghost p-1.5' : 'btn-ghost min-h-[44px] min-w-[44px] p-2'}
+          aria-label={t('products.qtyDecreaseAria')}
+        >
+          <Minus className="h-4 w-4" />
+        </button>
+        <span className="min-w-[3ch] text-center tabular-nums font-medium text-gray-900 dark:text-white">
+          {product.quantity}
+          {unitLabel ? ` ${unitLabel}` : ''}
+        </span>
+        <button
+          type="button"
+          onClick={() => handleQuantity(product, 1)}
+          disabled={actionBusy === product.id}
+          className={compact ? 'btn-ghost p-1.5' : 'btn-ghost min-h-[44px] min-w-[44px] p-2'}
+          aria-label={t('products.qtyIncreaseAria')}
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  };
 
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-clip space-y-4 animate-fade-in">
@@ -596,8 +600,20 @@ export default function Products() {
                   </span>
                 </div>
                 <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 text-[11px] leading-tight text-gray-500 dark:text-gray-400">
-                  {product.volume ? <span className="min-w-0 break-words">{product.volume}</span> : null}
-                  {product.percentage != null ? <span>{product.percentage}%</span> : null}
+                  {product.volume ? (
+                    <span className="min-w-0 break-words">
+                      {section === 'oxide'
+                        ? `${t('products.fieldVolume')}: ${product.volume}`
+                        : product.volume}
+                    </span>
+                  ) : null}
+                  {product.percentage != null ? (
+                    <span>
+                      {section === 'oxide'
+                        ? `${t('products.fieldPercentage')}: ${product.percentage}%`
+                        : `${product.percentage}%`}
+                    </span>
+                  ) : null}
                   <span className="shrink-0">{salonCurrency}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">

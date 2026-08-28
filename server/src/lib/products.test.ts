@@ -314,6 +314,12 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.match(ru, /'products\.addPhoto': 'Добавить по фото'/);
     assert.match(ru, /'products\.exportExcel': 'Экспорт Excel'/);
 
+    const stockQty = read('client/src/lib/stockQuantity.ts');
+    assert.match(stockQty, /export function isVolumeLikeUnit/);
+    assert.match(stockQty, /export function stockQuantityDisplayUnit/);
+    assert.match(stockQty, /section === 'oxide'/);
+    assert.match(stockQty, /isVolumeLikeUnit\(unit\)/);
+
     assert.match(page, /api\.products\.create/);
     assert.match(page, /api\.products\.update/);
     assert.match(page, /api\.products\.delete/);
@@ -338,9 +344,14 @@ describe('PRODUCTS-1 products foundation', () => {
 
     const mobileCards = page.slice(page.indexOf('space-y-2 sm:hidden'), page.indexOf('hidden sm:block'));
     const desktopTable = page.slice(page.indexOf('hidden sm:block'), page.indexOf('products.photoProcessing'));
+    assert.match(page, /stockQuantityDisplayUnit\(product\.unit, section, t\('products\.unitPieces'\)\)/);
     assert.match(mobileCards, /openEdit\(product\)/);
     assert.match(mobileCards, /formatProductExactPrice\(product, salonCurrency\)/);
     assert.match(mobileCards, /formatProductPriceRange\(product, salonCurrency\)/);
+    assert.match(mobileCards, /section === 'oxide'[\s\S]*products\.fieldVolume[\s\S]*product\.volume/);
+    assert.match(mobileCards, /section === 'oxide'[\s\S]*products\.fieldPercentage[\s\S]*product\.percentage/);
+    assert.doesNotMatch(mobileCards, /product\.quantity\}\s*\n\s*\{product\.unit/);
+    assert.match(ru, /'products\.unitPieces': 'шт\.'/);
     assert.doesNotMatch(mobileCards, /type="checkbox"/);
     assert.doesNotMatch(mobileCards, /w-full rounded-lg px-3 py-2/);
     assert.doesNotMatch(mobileCards, /aria-pressed/);
