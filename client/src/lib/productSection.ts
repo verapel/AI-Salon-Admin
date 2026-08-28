@@ -1,5 +1,9 @@
 export type ProductSection = 'paint' | 'oxide' | 'care';
 
+export function isProductSection(value: string | null | undefined): value is ProductSection {
+  return value === 'paint' || value === 'oxide' || value === 'care';
+}
+
 export const PRODUCT_SECTION_CATEGORY: Record<ProductSection, string> = {
   paint: 'paint',
   oxide: 'oxide',

@@ -69,8 +69,8 @@ export const GOOGLE_AUTO_IMPORT_STAFF_CONFIG_KEY = 'auto_import_staff_id' as con
 /** ISO watermark: only events with Google `created` strictly after this instant are auto-imported. */
 export const GOOGLE_AUTO_IMPORT_SINCE_CONFIG_KEY = 'auto_import_since' as const;
 
-/** Pilot interval: 5 minutes. */
-export const GOOGLE_CALENDAR_PULL_INTERVAL_MS = 5 * 60 * 1000;
+/** Automatic Google Calendar pull interval: 1 minute. */
+export const GOOGLE_CALENDAR_PULL_INTERVAL_MS = 60 * 1000;
 
 /** Stale lock reclaim window. */
 export const GOOGLE_CALENDAR_PULL_LOCK_STALE_MS = 10 * 60 * 1000;

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Camera,
@@ -14,6 +15,7 @@ import {
   Upload,
 } from 'lucide-react';
 import SearchInput from '@/components/ui/SearchInput';
+import NumericInput from '@/components/ui/NumericInput';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import IndeterminateProgress from '@/components/ui/IndeterminateProgress';
@@ -24,9 +26,11 @@ import { exportProductsXlsx } from '@/lib/productExport';
 import {
   categoryForProductSection,
   isProductInSection,
+  isProductSection,
   type ProductSection,
 } from '@/lib/productSection';
-import { asAmount, formatProductExactPrice, formatProductPrice, formatProductPriceRange } from '@/lib/productFormat';
+import { asAmount, formatProductExactPrice, formatProductPriceRange } from '@/lib/productFormat';
+import { numericDisplayValue, parseDecimalInput, parseIntegerInput } from '@/lib/numericInput';
 import type { Product, ProductDraft, ProductImportResult, ProductStockStatus } from '@/types';
 
 type StockFilter = 'all' | ProductStockStatus | 'purchase';
@@ -39,14 +43,14 @@ const emptyForm = () => ({
   line: '',
   codeShade: '',
   category: '',
-  quantity: 0,
-  minQuantity: 0,
+  quantity: '',
+  minQuantity: '',
   unit: '',
   volume: '',
-  percentage: '' as string,
-  price: 0,
-  priceMin: '' as string,
-  priceMax: '' as string,
+  percentage: '',
+  price: '',
+  priceMin: '',
+  priceMax: '',
   currency: 'AMD',
   supplier: '',
   markedForPurchase: false,
@@ -76,13 +80,27 @@ function statusBadgeClass(status: ProductStockStatus) {
   return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300';
 }
 
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {label}
+      </dt>
+      <dd className="mt-0.5 break-words text-sm text-gray-900 dark:text-white">{value || '—'}</dd>
+    </div>
+  );
+}
+
 export default function Products() {
   const { t } = useLanguage();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawSection = searchParams.get('section');
+  const section = isProductSection(rawSection) ? rawSection : null;
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<StockFilter>('all');
-  const [section, setSection] = useState<ProductSection | null>(null);
+  const [detailProduct, setDetailProduct] = useState<Product | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -110,6 +128,12 @@ export default function Products() {
   useEffect(() => {
     loadProducts();
   }, []);
+
+  useEffect(() => {
+    setSearch('');
+    setFilter('all');
+    setDetailProduct(null);
+  }, [section]);
 
   const sectionProducts = section
     ? products.filter((product) => isProductInSection(product, section))
@@ -142,10 +166,17 @@ export default function Products() {
       ? [...searched].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
       : searched;
 
+  const liveDetail =
+    detailProduct ? products.find((product) => product.id === detailProduct.id) ?? detailProduct : null;
+
   const openSection = (next: ProductSection) => {
-    setSection(next);
+    setSearchParams({ section: next });
     setSearch('');
     setFilter('all');
+  };
+
+  const handleSectionBack = () => {
+    setSearchParams({}, { replace: true });
   };
 
   const openCreate = () => {
@@ -164,12 +195,12 @@ export default function Products() {
       line: product.line,
       codeShade: product.codeShade,
       category: product.category,
-      quantity: product.quantity,
-      minQuantity: product.minQuantity,
+      quantity: numericDisplayValue(product.quantity),
+      minQuantity: numericDisplayValue(product.minQuantity),
       unit: product.unit,
       volume: product.volume ?? '',
       percentage: product.percentage == null ? '' : String(product.percentage),
-      price: product.price,
+      price: numericDisplayValue(product.price),
       priceMin: product.priceMin == null ? '' : String(product.priceMin),
       priceMax: product.priceMax == null ? '' : String(product.priceMax),
       currency: product.currency || 'AMD',
@@ -177,6 +208,7 @@ export default function Products() {
       markedForPurchase: product.markedForPurchase,
     });
     setFormError('');
+    setDetailProduct(null);
     setModalOpen(true);
   };
 
@@ -190,7 +222,10 @@ export default function Products() {
         ...(section
           ? { ...form, category: categoryForProductSection(section, form.category) }
           : form),
-        percentage: form.percentage === '' ? null : Number(form.percentage),
+        quantity: parseIntegerInput(form.quantity, 0),
+        minQuantity: parseIntegerInput(form.minQuantity, 0),
+        percentage: form.percentage === '' ? null : parseDecimalInput(form.percentage),
+        price: parseDecimalInput(form.price) ?? 0,
         priceMin: asAmount(form.priceMin),
         priceMax: asAmount(form.priceMax),
       };
@@ -220,6 +255,7 @@ export default function Products() {
     setActionBusy(id);
     try {
       await api.products.delete(id);
+      setDetailProduct((current) => (current?.id === id ? null : current));
       loadProducts();
     } catch (err) {
       console.error(err);
@@ -408,13 +444,40 @@ export default function Products() {
     );
   }
 
+  const quantityControls = (product: Product, compact = false) => (
+    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => handleQuantity(product, -1)}
+        disabled={actionBusy === product.id || product.quantity <= 0}
+        className={compact ? 'btn-ghost p-1.5' : 'btn-ghost min-h-[44px] min-w-[44px] p-2'}
+        aria-label={t('products.qtyDecreaseAria')}
+      >
+        <Minus className="h-4 w-4" />
+      </button>
+      <span className="min-w-[3ch] text-center tabular-nums font-medium text-gray-900 dark:text-white">
+        {product.quantity}
+        {product.unit ? ` ${product.unit}` : ''}
+      </span>
+      <button
+        type="button"
+        onClick={() => handleQuantity(product, 1)}
+        disabled={actionBusy === product.id}
+        className={compact ? 'btn-ghost p-1.5' : 'btn-ghost min-h-[44px] min-w-[44px] p-2'}
+        aria-label={t('products.qtyIncreaseAria')}
+      >
+        <Plus className="h-4 w-4" />
+      </button>
+    </div>
+  );
+
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-clip space-y-4 animate-fade-in">
       <div className="flex w-full min-w-0 max-w-full flex-col gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <button
             type="button"
-            onClick={() => setSection(null)}
+            onClick={handleSectionBack}
             className="btn-ghost min-h-[44px] min-w-[44px] shrink-0 p-2 sm:min-h-0 sm:min-w-0"
             aria-label={t('products.sectionBack')}
           >
@@ -525,90 +588,38 @@ export default function Products() {
         <>
           <div className="space-y-3 sm:hidden">
             {filtered.map((product) => (
-              <div key={product.id} className="card w-full min-w-0 max-w-full space-y-3 p-4">
+              <button
+                key={product.id}
+                type="button"
+                onClick={() => setDetailProduct(product)}
+                className="card w-full min-w-0 max-w-full space-y-2 p-4 text-left"
+                aria-label={t('products.openDetailsAria')}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-gray-900 dark:text-white">
                       {product.name}
                     </p>
                     <p className="truncate text-sm text-gray-500 dark:text-gray-400">
-                      {[product.brand, product.line, product.codeShade].filter(Boolean).join(' · ') ||
-                        product.category ||
-                        '—'}
-                    </p>
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      {[
-                        product.volume ? `${t('products.fieldVolume')}: ${product.volume}` : null,
-                        product.percentage != null
-                          ? `${t('products.fieldPercentage')}: ${product.percentage}%`
-                          : null,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
+                      {[product.brand, product.codeShade].filter(Boolean).join(' · ') || '—'}
                     </p>
                   </div>
                   <span className={`badge shrink-0 text-xs ${statusBadgeClass(product.stockStatus)}`}>
                     {statusLabel(product.stockStatus, t)}
                   </span>
                 </div>
-                <label className="flex min-h-[44px] items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-                    checked={product.markedForPurchase}
-                    disabled={actionBusy === product.id}
-                    onChange={() => handlePurchaseToggle(product)}
-                  />
-                  {t('products.markedForPurchase')}
-                </label>
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleQuantity(product, -1)}
-                      disabled={actionBusy === product.id || product.quantity <= 0}
-                      className="btn-ghost min-h-[44px] min-w-[44px] p-2"
-                      aria-label={t('products.qtyDecreaseAria')}
-                    >
-                      <Minus className="h-4 w-4" />
-                    </button>
-                    <span className="min-w-[3ch] text-center tabular-nums font-medium text-gray-900 dark:text-white">
-                      {product.quantity}
-                      {product.unit ? ` ${product.unit}` : ''}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleQuantity(product, 1)}
-                      disabled={actionBusy === product.id}
-                      className="btn-ghost min-h-[44px] min-w-[44px] p-2"
-                      aria-label={t('products.qtyIncreaseAria')}
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
+                  {quantityControls(product)}
+                  <div className="min-w-0 text-right text-sm">
+                    <p className="font-medium text-gray-900 dark:text-white">
+                      {formatProductExactPrice(product)}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {formatProductPriceRange(product)}
+                    </p>
                   </div>
-                  <span className="font-medium text-gray-900 dark:text-white">
-                    {formatProductPrice(product)}
-                  </span>
                 </div>
-                <div className="flex justify-end gap-1 border-t pt-3 dark:border-gray-700">
-                  <button
-                    onClick={() => openEdit(product)}
-                    disabled={actionBusy === product.id}
-                    className="btn-ghost min-h-[44px] min-w-[44px] p-2"
-                    aria-label={t('products.editAria')}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(product.id)}
-                    disabled={actionBusy === product.id}
-                    className="btn-ghost min-h-[44px] min-w-[44px] p-2 text-red-500"
-                    aria-label={t('products.deleteAria')}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
+              </button>
             ))}
           </div>
 
@@ -620,18 +631,6 @@ export default function Products() {
                     <tr className="border-b bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50">
                       <th className="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">
                         {t('products.columnProduct')}
-                      </th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">
-                        {t('products.columnBrand')}
-                      </th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">
-                        {t('products.columnCode')}
-                      </th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">
-                        {t('products.columnVolume')}
-                      </th>
-                      <th className="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">
-                        {t('products.columnPercentage')}
                       </th>
                       <th className="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">
                         {t('products.columnQty')}
@@ -652,51 +651,18 @@ export default function Products() {
                   </thead>
                   <tbody className="divide-y dark:divide-gray-700">
                     {filtered.map((product) => (
-                      <tr key={product.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                      <tr
+                        key={product.id}
+                        className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/30"
+                        onClick={() => setDetailProduct(product)}
+                      >
                         <td className="px-4 py-3">
                           <div className="font-medium text-gray-900 dark:text-white">{product.name}</div>
                           <div className="text-xs text-gray-500 dark:text-gray-400">
-                            {[product.line, product.category].filter(Boolean).join(' · ') || '—'}
+                            {[product.brand, product.codeShade].filter(Boolean).join(' · ') || '—'}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
-                          {product.brand || '—'}
-                        </td>
-                        <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
-                          {product.codeShade || '—'}
-                        </td>
-                        <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
-                          {product.volume || '—'}
-                        </td>
-                        <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
-                          {product.percentage != null ? `${product.percentage}%` : '—'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleQuantity(product, -1)}
-                              disabled={actionBusy === product.id || product.quantity <= 0}
-                              className="btn-ghost p-1.5"
-                              aria-label={t('products.qtyDecreaseAria')}
-                            >
-                              <Minus className="h-4 w-4" />
-                            </button>
-                            <span className="min-w-[3ch] text-center tabular-nums font-medium text-gray-900 dark:text-white">
-                              {product.quantity}
-                              {product.unit ? ` ${product.unit}` : ''}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleQuantity(product, 1)}
-                              disabled={actionBusy === product.id}
-                              className="btn-ghost p-1.5"
-                              aria-label={t('products.qtyIncreaseAria')}
-                            >
-                              <Plus className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
+                        <td className="px-4 py-3">{quantityControls(product, true)}</td>
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap gap-1.5">
                             <span className={`badge ${statusBadgeClass(product.stockStatus)}`}>
@@ -716,7 +682,14 @@ export default function Products() {
                           {formatProductPriceRange(product)}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex justify-end gap-1">
+                          <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => setDetailProduct(product)}
+                              className="btn-ghost p-1.5"
+                              aria-label={t('products.openDetailsAria')}
+                            >
+                              <Package className="h-4 w-4" />
+                            </button>
                             <button
                               onClick={() => openEdit(product)}
                               disabled={actionBusy === product.id}
@@ -744,6 +717,79 @@ export default function Products() {
           </div>
         </>
       )}
+
+      <Modal
+        open={Boolean(liveDetail)}
+        onClose={() => setDetailProduct(null)}
+        title={t('products.detailsTitle')}
+        size="lg"
+      >
+        {liveDetail ? (
+          <div className="min-w-0 space-y-4">
+            <div>
+              <h3 className="break-words text-lg font-semibold text-gray-900 dark:text-white">
+                {liveDetail.name}
+              </h3>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {[liveDetail.brand, liveDetail.line].filter(Boolean).join(' · ') || '—'}
+              </p>
+            </div>
+            <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <DetailRow label={t('products.fieldCategory')} value={liveDetail.category} />
+              <DetailRow label={t('products.fieldCodeShade')} value={liveDetail.codeShade} />
+              <DetailRow label={t('products.fieldVolume')} value={liveDetail.volume} />
+              <DetailRow
+                label={t('products.fieldPercentage')}
+                value={liveDetail.percentage != null ? `${liveDetail.percentage}%` : ''}
+              />
+              <DetailRow
+                label={t('products.fieldQuantity')}
+                value={`${liveDetail.quantity}${liveDetail.unit ? ` ${liveDetail.unit}` : ''}`}
+              />
+              <DetailRow
+                label={t('products.columnStatus')}
+                value={statusLabel(liveDetail.stockStatus, t)}
+              />
+              <DetailRow label={t('products.columnPrice')} value={formatProductExactPrice(liveDetail)} />
+              <DetailRow
+                label={t('products.fieldPriceRange')}
+                value={formatProductPriceRange(liveDetail)}
+              />
+              <DetailRow label={t('products.fieldCurrency')} value={liveDetail.currency || 'AMD'} />
+              <DetailRow label={t('products.fieldSupplier')} value={liveDetail.supplier} />
+            </dl>
+            <label
+              className="flex min-h-[44px] items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                checked={liveDetail.markedForPurchase}
+                disabled={actionBusy === liveDetail.id}
+                onChange={() => handlePurchaseToggle(liveDetail)}
+              />
+              {t('products.markedForPurchase')}
+            </label>
+            <div className="flex flex-wrap justify-end gap-2 border-t pt-3 dark:border-gray-700">
+              <button type="button" className="btn-secondary" onClick={() => setDetailProduct(null)}>
+                {t('common.cancel')}
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => openEdit(liveDetail)}>
+                <Pencil className="h-4 w-4" /> {t('common.edit')}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost text-red-500"
+                onClick={() => handleDelete(liveDetail.id)}
+                disabled={actionBusy === liveDetail.id}
+              >
+                <Trash2 className="h-4 w-4" /> {t('common.delete')}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       <Modal
         open={photoProcessingOpen}
@@ -829,7 +875,7 @@ export default function Products() {
             </div>
           ) : (
             <div className="table-scroll">
-              <table className="w-full min-w-[720px] text-sm">
+              <table className="w-full min-w-[720px] max-w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-gray-500 dark:border-gray-700 dark:text-gray-400">
                     <th className="py-2 pr-2">{t('products.fieldName')}</th>
@@ -893,15 +939,13 @@ export default function Products() {
                         />
                       </td>
                       <td className="py-1 pr-2">
-                        <input
-                          className="input-field"
-                          type="number"
-                          min={0}
-                          value={row.quantity}
-                          onChange={(e) =>
+                        <NumericInput
+                          integer
+                          value={numericDisplayValue(row.quantity)}
+                          onChange={(next) =>
                             setPreviewRows((prev) =>
                               prev.map((item, i) =>
-                                i === index ? { ...item, quantity: Number(e.target.value) } : item
+                                i === index ? { ...item, quantity: parseIntegerInput(next, 0) } : item
                               )
                             )
                           }
@@ -919,16 +963,15 @@ export default function Products() {
                         />
                       </td>
                       <td className="py-1 pr-2">
-                        <input
-                          className="input-field"
-                          value={row.percentage ?? ''}
-                          onChange={(e) =>
+                        <NumericInput
+                          value={row.percentage == null ? '' : String(row.percentage)}
+                          onChange={(next) =>
                             setPreviewRows((prev) =>
                               prev.map((item, i) =>
                                 i === index
                                   ? {
                                       ...item,
-                                      percentage: e.target.value === '' ? null : Number(e.target.value),
+                                      percentage: next === '' ? null : parseDecimalInput(next),
                                     }
                                   : item
                               )
@@ -937,51 +980,37 @@ export default function Products() {
                         />
                       </td>
                       <td className="py-1 pr-2">
-                        <input
-                          className="input-field"
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={row.price}
-                          onChange={(e) =>
+                        <NumericInput
+                          value={numericDisplayValue(row.price)}
+                          onChange={(next) =>
                             setPreviewRows((prev) =>
-                              prev.map((item, i) => (i === index ? { ...item, price: Number(e.target.value) } : item))
+                              prev.map((item, i) =>
+                                i === index ? { ...item, price: parseDecimalInput(next) ?? 0 } : item
+                              )
                             )
                           }
                         />
                       </td>
                       <td className="py-1 pr-2">
-                        <div className="flex gap-1">
-                          <input
-                            className="input-field"
-                            placeholder="min"
-                            value={row.priceMin ?? ''}
-                            onChange={(e) =>
+                        <div className="flex min-w-0 gap-1">
+                          <NumericInput
+                            placeholder={t('products.fieldPriceMin')}
+                            value={row.priceMin == null ? '' : String(row.priceMin)}
+                            onChange={(next) =>
                               setPreviewRows((prev) =>
                                 prev.map((item, i) =>
-                                  i === index
-                                    ? {
-                                        ...item,
-                                        priceMin: asAmount(e.target.value),
-                                      }
-                                    : item
+                                  i === index ? { ...item, priceMin: asAmount(next) } : item
                                 )
                               )
                             }
                           />
-                          <input
-                            className="input-field"
-                            placeholder="max"
-                            value={row.priceMax ?? ''}
-                            onChange={(e) =>
+                          <NumericInput
+                            placeholder={t('products.fieldPriceMax')}
+                            value={row.priceMax == null ? '' : String(row.priceMax)}
+                            onChange={(next) =>
                               setPreviewRows((prev) =>
                                 prev.map((item, i) =>
-                                  i === index
-                                    ? {
-                                        ...item,
-                                        priceMax: asAmount(e.target.value),
-                                      }
-                                    : item
+                                  i === index ? { ...item, priceMax: asAmount(next) } : item
                                 )
                               )
                             }
@@ -1094,24 +1123,20 @@ export default function Products() {
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
               <label className="mb-1.5 block text-sm font-medium">{t('products.fieldQuantity')}</label>
-              <input
-                className="input-field"
-                type="number"
-                min={0}
-                step={1}
+              <NumericInput
+                integer
                 value={form.quantity}
-                onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })}
+                onChange={(quantity) => setForm({ ...form, quantity })}
+                placeholder="0"
               />
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium">{t('products.fieldMinQuantity')}</label>
-              <input
-                className="input-field"
-                type="number"
-                min={0}
-                step={1}
+              <NumericInput
+                integer
                 value={form.minQuantity}
-                onChange={(e) => setForm({ ...form, minQuantity: Number(e.target.value) })}
+                onChange={(minQuantity) => setForm({ ...form, minQuantity })}
+                placeholder="0"
               />
             </div>
             <div>
@@ -1136,10 +1161,9 @@ export default function Products() {
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium">{t('products.fieldPercentage')}</label>
-              <input
-                className="input-field"
+              <NumericInput
                 value={form.percentage}
-                onChange={(e) => setForm({ ...form, percentage: e.target.value })}
+                onChange={(percentage) => setForm({ ...form, percentage })}
                 placeholder="1.5, 3, 6, 9, 12"
               />
             </div>
@@ -1147,31 +1171,24 @@ export default function Products() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-sm font-medium">{t('products.fieldPrice')}</label>
-              <input
-                className="input-field"
-                type="number"
-                min={0}
-                step="0.01"
+              <NumericInput
                 value={form.price}
-                onChange={(e) => setForm({ ...form, price: Number(e.target.value) })}
+                onChange={(price) => setForm({ ...form, price })}
+                placeholder="0"
               />
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium">{t('products.fieldPriceRange')}</label>
               <div className="grid grid-cols-2 gap-2">
-                <input
-                  className="input-field"
-                  inputMode="numeric"
+                <NumericInput
                   placeholder={t('products.fieldPriceMin')}
                   value={form.priceMin}
-                  onChange={(e) => setForm({ ...form, priceMin: e.target.value })}
+                  onChange={(priceMin) => setForm({ ...form, priceMin })}
                 />
-                <input
-                  className="input-field"
-                  inputMode="numeric"
+                <NumericInput
                   placeholder={t('products.fieldPriceMax')}
                   value={form.priceMax}
-                  onChange={(e) => setForm({ ...form, priceMax: e.target.value })}
+                  onChange={(priceMax) => setForm({ ...form, priceMax })}
                 />
               </div>
             </div>

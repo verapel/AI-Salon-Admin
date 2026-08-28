@@ -18,19 +18,24 @@ import {
 import { cn } from '@/lib/utils';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
 
-const navItems: { to: string; icon: typeof LayoutDashboard; labelKey: TranslationKey }[] = [
-  { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
-  { to: '/calendar', icon: Calendar, labelKey: 'nav.calendar' },
-  { to: '/clients', icon: Users, labelKey: 'nav.clients' },
-  { to: '/services', icon: Scissors, labelKey: 'nav.services' },
-  { to: '/products', icon: Package, labelKey: 'nav.products' },
-  { to: '/staff', icon: UserCog, labelKey: 'nav.staff' },
-  { to: '/staff-access', icon: KeyRound, labelKey: 'nav.staffAccess' },
-  { to: '/schedule', icon: Clock, labelKey: 'nav.schedule' },
-  { to: '/bookings', icon: CalendarPlus, labelKey: 'nav.bookings' },
-  { to: '/statistics', icon: BarChart3, labelKey: 'nav.statistics' },
-  { to: '/reminders', icon: Bell, labelKey: 'nav.reminders' },
-  { to: '/integrations', icon: Plug, labelKey: 'nav.integrations' },
+const navItems: {
+  to: string;
+  icon: typeof LayoutDashboard;
+  labelKey: TranslationKey;
+  mobileClass: string;
+}[] = [
+  { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard', mobileClass: 'order-6 lg:order-none' },
+  { to: '/calendar', icon: Calendar, labelKey: 'nav.calendar', mobileClass: 'order-1 lg:order-none' },
+  { to: '/clients', icon: Users, labelKey: 'nav.clients', mobileClass: 'order-2 lg:order-none' },
+  { to: '/services', icon: Scissors, labelKey: 'nav.services', mobileClass: 'order-3 lg:order-none' },
+  { to: '/products', icon: Package, labelKey: 'nav.products', mobileClass: 'order-4 lg:order-none' },
+  { to: '/staff', icon: UserCog, labelKey: 'nav.staff', mobileClass: 'order-5 lg:order-none' },
+  { to: '/staff-access', icon: KeyRound, labelKey: 'nav.staffAccess', mobileClass: 'order-7 lg:order-none' },
+  { to: '/schedule', icon: Clock, labelKey: 'nav.schedule', mobileClass: 'order-8 lg:order-none' },
+  { to: '/bookings', icon: CalendarPlus, labelKey: 'nav.bookings', mobileClass: 'order-9 lg:order-none' },
+  { to: '/statistics', icon: BarChart3, labelKey: 'nav.statistics', mobileClass: 'order-10 lg:order-none' },
+  { to: '/reminders', icon: Bell, labelKey: 'nav.reminders', mobileClass: 'order-11 lg:order-none' },
+  { to: '/integrations', icon: Plug, labelKey: 'nav.integrations', mobileClass: 'order-12 lg:order-none' },
 ];
 
 interface SidebarProps {
@@ -71,8 +76,8 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
           </button>
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto p-4">
-          {navItems.map(({ to, icon: Icon, labelKey }) => (
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-4">
+          {navItems.map(({ to, icon: Icon, labelKey, mobileClass }) => (
             <NavLink
               key={to}
               to={to}
@@ -81,6 +86,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
               className={({ isActive }) =>
                 cn(
                   'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
+                  mobileClass,
                   isActive
                     ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/50 dark:text-brand-300'
                     : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'

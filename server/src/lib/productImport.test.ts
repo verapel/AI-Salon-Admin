@@ -214,7 +214,7 @@ describe('PRODUCTS-2 excel and photo import', () => {
     const productsPage = read('client/src/pages/Products.tsx');
     assert.match(
       productsPage,
-      /import \{ asAmount, formatProductExactPrice, formatProductPrice, formatProductPriceRange \} from '@\/lib\/productFormat'/
+      /import \{ asAmount, formatProductExactPrice, formatProductPriceRange \} from '@\/lib\/productFormat'/
     );
     assert.match(productsPage, /products\.columnPrice/);
     assert.match(productsPage, /products\.fieldPriceRange/);

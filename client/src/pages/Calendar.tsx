@@ -1,10 +1,17 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import Modal from '@/components/ui/Modal';
 import { useLanguage, type LangCode, type TranslationKey } from '@/context/LanguageContext';
 import { api } from '@/lib/api';
 import { getStatusColor } from '@/lib/utils';
+import {
+  DESKTOP_HOUR_HEIGHT_PX,
+  MOBILE_HOUR_HEIGHT_PX,
+  isNowWithinHours,
+  layoutDayEvents,
+  nowLineOffset,
+} from '@/lib/calendarLayout';
 import type { Appointment, GoogleReviewCalendarItem, Staff } from '@/types';
 
 type CalendarBlock = {
@@ -75,7 +82,7 @@ const DEFAULT_HOUR_END = 19;
 
 /** Default 08–19, expanded so early/late timed Google (or salon) blocks stay visible. */
 function hoursForVisibleDays(
-  blocks: Array<{ date: string; startTime: string }>,
+  blocks: Array<{ date: string; startTime: string; endTime?: string }>,
   days: Date[],
 ): number[] {
   const daySet = new Set(days.map(toLocalDateStr));
@@ -83,10 +90,10 @@ function hoursForVisibleDays(
   let max = DEFAULT_HOUR_END;
   for (const block of blocks) {
     if (!daySet.has(block.date)) continue;
-    const hour = parseInt(block.startTime.split(':')[0], 10);
-    if (!Number.isFinite(hour)) continue;
-    if (hour < min) min = hour;
-    if (hour > max) max = hour;
+    const startHour = parseInt(block.startTime.split(':')[0], 10);
+    const endHour = parseInt((block.endTime || block.startTime).split(':')[0], 10);
+    if (Number.isFinite(startHour) && startHour < min) min = startHour;
+    if (Number.isFinite(endHour) && endHour > max) max = endHour;
   }
   min = Math.max(0, min);
   max = Math.min(23, max);
@@ -94,7 +101,7 @@ function hoursForVisibleDays(
 }
 
 /** Shared desktop week grid: fixed time column + 7 equal day columns */
-const WEEK_GRID_CLASS = 'grid grid-cols-[3.5rem_repeat(7,minmax(0,1fr))]';
+const WEEK_GRID_CLASS = 'grid grid-cols-[3.25rem_repeat(7,minmax(0,1fr))]';
 
 type MobileCalendarView = 'today' | 'week' | 'month';
 
@@ -132,12 +139,6 @@ function sortBlocksForDisplay(a: CalendarBlock, b: CalendarBlock): number {
   const byTime = a.startTime.localeCompare(b.startTime);
   if (byTime !== 0) return byTime;
   return (a.staffName ?? '').localeCompare(b.staffName ?? '');
-}
-
-function blocksInHour(blocks: CalendarBlock[], hour: number): CalendarBlock[] {
-  return blocks
-    .filter((a) => parseInt(a.startTime.split(':')[0], 10) === hour)
-    .sort(sortBlocksForDisplay);
 }
 
 function groupBlocksByTime(blocks: CalendarBlock[]): [string, CalendarBlock[]][] {
@@ -208,6 +209,133 @@ function BirthdayIndicator({ visible }: { visible: boolean }) {
   );
 }
 
+function eventCardClass(block: CalendarBlock): string {
+  if (block.kind === 'google_review') {
+    return 'bg-amber-100 text-amber-900 ring-1 ring-amber-200/80 dark:bg-amber-950/50 dark:text-amber-100 dark:ring-amber-800/60';
+  }
+  return `${getStatusColor(block.status || 'scheduled')} ring-1 ring-black/5 dark:ring-white/10`;
+}
+
+function CalendarEventCard({
+  block,
+  compact,
+  showStaff,
+  onReview,
+}: {
+  block: CalendarBlock;
+  compact?: boolean;
+  showStaff: boolean;
+  onReview: (review: GoogleReviewCalendarItem) => void;
+}) {
+  const { t } = useLanguage();
+  return (
+    <div
+      className={`relative h-full overflow-hidden rounded-md px-1.5 py-0.5 text-left text-[11px] leading-tight ${eventCardClass(block)}`}
+      role={block.kind === 'google_review' ? 'button' : undefined}
+      onClick={
+        block.kind === 'google_review' && block.review ? () => onReview(block.review!) : undefined
+      }
+    >
+      <BirthdayIndicator visible={isBirthdayIndicatorVisible(block.date, block.clientBirthday)} />
+      <p className="truncate font-semibold">{block.title}</p>
+      {!compact && block.kind === 'google_review' ? (
+        <p className="truncate opacity-80">{t('calendar.googleNeedsReview')}</p>
+      ) : null}
+      {!compact && block.kind !== 'google_review' && block.subtitle ? (
+        <p className="truncate opacity-80">{block.subtitle}</p>
+      ) : null}
+      {showStaff && block.staffName ? <p className="truncate opacity-70">{block.staffName}</p> : null}
+      <p className="tabular-nums opacity-70">
+        {formatTime24(block.startTime)}–{formatTime24(block.endTime)}
+      </p>
+    </div>
+  );
+}
+
+function DayTimeline({
+  hours,
+  blocks,
+  hourHeight,
+  showNow,
+  now,
+  showStaff,
+  onReview,
+  compact,
+}: {
+  hours: number[];
+  blocks: CalendarBlock[];
+  hourHeight: number;
+  showNow: boolean;
+  now: Date;
+  showStaff: boolean;
+  onReview: (review: GoogleReviewCalendarItem) => void;
+  compact?: boolean;
+}) {
+  const hourStart = hours[0] ?? DEFAULT_HOUR_START;
+  const hourEnd = hours[hours.length - 1] ?? DEFAULT_HOUR_END;
+  const laidOut = layoutDayEvents(blocks, hourStart, hourEnd, hourHeight);
+  const totalHeight = hours.length * hourHeight;
+  const nowTop = nowLineOffset(hourStart, hourHeight, now);
+  const nowVisible = showNow && isNowWithinHours(hourStart, hourEnd, now);
+
+  return (
+    <div className="relative min-w-0" style={{ height: totalHeight }}>
+      {hours.map((hour, index) => (
+        <div
+          key={hour}
+          className="absolute inset-x-0 border-t border-gray-200 dark:border-gray-800"
+          style={{ top: index * hourHeight, height: hourHeight }}
+        >
+          <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-gray-100 dark:border-gray-800/80" />
+        </div>
+      ))}
+      {laidOut.map((laid) => {
+        const style: CSSProperties = {
+          top: laid.top,
+          height: laid.height,
+          left: `calc(${(laid.column / laid.columnCount) * 100}% + 1px)`,
+          width: `calc(${100 / laid.columnCount}% - 2px)`,
+        };
+        return (
+          <div key={laid.item.id} className="absolute z-10 min-w-0" style={style}>
+            <CalendarEventCard
+              block={laid.item}
+              compact={compact || laid.height < 36}
+              showStaff={showStaff}
+              onReview={onReview}
+            />
+          </div>
+        );
+      })}
+      {nowVisible ? (
+        <div
+          className="pointer-events-none absolute inset-x-0 z-20 flex items-center"
+          style={{ top: nowTop }}
+        >
+          <span className="h-2 w-2 shrink-0 -translate-x-1 rounded-full bg-red-500" />
+          <span className="h-px flex-1 bg-red-500" />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TimeGutter({ hours, hourHeight }: { hours: number[]; hourHeight: number }) {
+  return (
+    <div className="relative shrink-0" style={{ height: hours.length * hourHeight }}>
+      {hours.map((hour, index) => (
+        <div
+          key={hour}
+          className="absolute right-1 -translate-y-1/2 text-[10px] tabular-nums text-gray-400 dark:text-gray-500"
+          style={{ top: index * hourHeight }}
+        >
+          {`${String(hour).padStart(2, '0')}:00`}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Calendar() {
   const { language, t } = useLanguage();
   const locale = LOCALE[language];
@@ -220,6 +348,7 @@ export default function Calendar() {
   const [mobileView, setMobileView] = useState<MobileCalendarView>('today');
   const [mobileMonthDay, setMobileMonthDay] = useState(() => toLocalDateStr(new Date()));
   const [reviewOpen, setReviewOpen] = useState<GoogleReviewCalendarItem | null>(null);
+  const [now, setNow] = useState(() => new Date());
 
   const calendarBlocks = useMemo(() => {
     return [
@@ -235,12 +364,6 @@ export default function Calendar() {
 
   const weekDays = useMemo(() => weekDaysFrom(currentDate), [currentDate]);
 
-  const todayDate = useMemo(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  }, []);
-
-  const todayStr = toLocalDateStr(todayDate);
   const mobileWeekDays = useMemo(() => weekDaysFrom(currentDate), [currentDate]);
   const mobileMonthCells = useMemo(() => monthGridFrom(currentDate), [currentDate]);
   const weekHours = useMemo(
@@ -254,9 +377,15 @@ export default function Calendar() {
     setCurrentDate(next);
   };
 
+  const navigateDay = (direction: number) => {
+    const next = new Date(currentDate);
+    next.setDate(next.getDate() + direction);
+    setCurrentDate(next);
+  };
+
   const todayAppointments = useMemo(
-    () => filteredAppointments.filter((a) => a.date === todayStr).sort(sortBlocksForDisplay),
-    [filteredAppointments, todayStr]
+    () => filteredAppointments.filter((a) => a.date === toLocalDateStr(currentDate)).sort(sortBlocksForDisplay),
+    [filteredAppointments, currentDate]
   );
 
   const monthSelectedAppointments = useMemo(
@@ -267,17 +396,16 @@ export default function Calendar() {
     [filteredAppointments, mobileMonthDay]
   );
 
-  const mobileTimeGroups = useMemo(
-    () => groupBlocksByTime(todayAppointments),
-    [todayAppointments]
-  );
-
   const monthSelectedTimeGroups = useMemo(
     () => groupBlocksByTime(monthSelectedAppointments),
     [monthSelectedAppointments]
   );
 
   const showStaffOnCards = staffFilter === 'all';
+  const todayHours = useMemo(
+    () => hoursForVisibleDays(todayAppointments, [currentDate]),
+    [todayAppointments, currentDate]
+  );
 
   useEffect(() => {
     Promise.all([
@@ -292,6 +420,11 @@ export default function Calendar() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 30_000);
+    return () => window.clearInterval(id);
   }, []);
 
   const getAppointmentsForDay = (date: Date) => {
@@ -470,7 +603,59 @@ export default function Calendar() {
       {/* MOBILE: today / week / month */}
       <div className="lg:hidden">
         {mobileView === 'today'
-          ? renderMobileBlocks(todayAppointments, mobileTimeGroups, emptyTodayMessage)
+          ? (
+            <div className="w-full min-w-0 space-y-3">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => navigateDay(-1)}
+                  className="btn-ghost"
+                  aria-label={t('calendar.prevDay')}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <h3
+                  className={`min-w-0 truncate text-sm font-semibold ${
+                    isToday(currentDate) ? 'text-brand-600 dark:text-brand-400' : 'text-gray-900 dark:text-white'
+                  }`}
+                >
+                  {formatMobileDate(currentDate)}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => navigateDay(1)}
+                  className="btn-ghost"
+                  aria-label={t('calendar.nextDay')}
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
+              {todayAppointments.length === 0 ? (
+                <div className="card py-12 text-center">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{emptyTodayMessage}</p>
+                </div>
+              ) : (
+                <div className="card overflow-hidden p-0">
+                  <div className="flex min-w-0">
+                    <div className="w-12 shrink-0 border-r dark:border-gray-800">
+                      <TimeGutter hours={todayHours} hourHeight={MOBILE_HOUR_HEIGHT_PX} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <DayTimeline
+                        hours={todayHours}
+                        blocks={todayAppointments}
+                        hourHeight={MOBILE_HOUR_HEIGHT_PX}
+                        showNow={isToday(currentDate)}
+                        now={now}
+                        showStaff={showStaffOnCards}
+                        onReview={setReviewOpen}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
           : null}
 
         {mobileView === 'week' ? (
@@ -498,6 +683,7 @@ export default function Calendar() {
             </div>
             {mobileWeekDays.map((day) => {
               const dayBlocks = getAppointmentsForDay(day).sort(sortBlocksForDisplay);
+              const dayHours = hoursForVisibleDays(dayBlocks, [day]);
               return (
                 <div key={toLocalDateStr(day)} className="w-full min-w-0">
                   <p
@@ -512,7 +698,25 @@ export default function Calendar() {
                   {dayBlocks.length === 0 ? (
                     <p className="text-xs text-gray-500 dark:text-gray-400">{emptyDayMessage}</p>
                   ) : (
-                    renderMobileBlocks(dayBlocks, groupBlocksByTime(dayBlocks), emptyDayMessage)
+                    <div className="card overflow-hidden p-0">
+                      <div className="flex min-w-0">
+                        <div className="w-12 shrink-0 border-r dark:border-gray-800">
+                          <TimeGutter hours={dayHours} hourHeight={MOBILE_HOUR_HEIGHT_PX} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <DayTimeline
+                            hours={dayHours}
+                            blocks={dayBlocks}
+                            hourHeight={MOBILE_HOUR_HEIGHT_PX}
+                            showNow={isToday(day)}
+                            now={now}
+                            showStaff={showStaffOnCards}
+                            onReview={setReviewOpen}
+                            compact
+                          />
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
               );
@@ -596,7 +800,7 @@ export default function Calendar() {
       {/* DESKTOP: week grid — lg+ */}
       <div className="hidden lg:block">
         <div className="card overflow-hidden p-0">
-          <div className="max-h-[600px] overflow-y-auto overflow-x-clip">
+          <div className="max-h-[min(70vh,720px)] overflow-y-auto overflow-x-clip">
             <div
               className={`sticky top-0 z-10 border-b bg-white dark:border-gray-700 dark:bg-gray-900 ${WEEK_GRID_CLASS}`}
             >
@@ -614,9 +818,9 @@ export default function Calendar() {
                     {day.toLocaleDateString(locale, { weekday: 'short' })}
                   </p>
                   <p
-                    className={`text-lg font-bold ${
+                    className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-lg font-bold ${
                       isToday(day)
-                        ? 'text-brand-600 dark:text-brand-400'
+                        ? 'bg-brand-600 text-white'
                         : 'text-gray-900 dark:text-white'
                     }`}
                   >
@@ -626,58 +830,32 @@ export default function Calendar() {
               ))}
             </div>
 
-            {weekHours.map((hour) => (
-              <div
-                key={hour}
-                className={`${WEEK_GRID_CLASS} border-b last:border-b-0 dark:border-gray-700`}
-              >
-                <div className="border-r p-3 text-xs tabular-nums text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                  {`${String(hour).padStart(2, '0')}:00`}
-                </div>
-                {weekDays.map((day) => {
-                  const dayAppts = blocksInHour(getAppointmentsForDay(day), hour);
-                  return (
-                    <div
-                      key={day.toISOString() + hour}
-                      className="flex min-h-[60px] min-w-0 flex-col gap-1 border-r p-1 last:border-r-0 dark:border-gray-700"
-                    >
-                      {dayAppts.map((apt) => (
-                        <div
-                          key={apt.id}
-                          className={`relative shrink-0 rounded-md p-1.5 text-xs leading-tight ${
-                            apt.kind === 'google_review'
-                              ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-100'
-                              : getStatusColor(apt.status || 'scheduled')
-                          }`}
-                          role={apt.kind === 'google_review' ? 'button' : undefined}
-                          onClick={
-                            apt.kind === 'google_review' && apt.review
-                              ? () => setReviewOpen(apt.review ?? null)
-                              : undefined
-                          }
-                        >
-                          <BirthdayIndicator
-                            visible={isBirthdayIndicatorVisible(apt.date, apt.clientBirthday)}
-                          />
-                          <p className="truncate font-medium">{apt.title}</p>
-                          {apt.kind === 'google_review' ? (
-                            <p className="truncate opacity-80">{t('calendar.googleNeedsReview')}</p>
-                          ) : (
-                            <p className="truncate opacity-75">{apt.subtitle}</p>
-                          )}
-                          {showStaffOnCards && apt.staffName && (
-                            <p className="truncate opacity-70">{apt.staffName}</p>
-                          )}
-                          <p className="tabular-nums opacity-60">
-                            {formatTime24(apt.startTime)}–{formatTime24(apt.endTime)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
+            <div className={`${WEEK_GRID_CLASS}`}>
+              <div className="border-r dark:border-gray-700">
+                <TimeGutter hours={weekHours} hourHeight={DESKTOP_HOUR_HEIGHT_PX} />
               </div>
-            ))}
+              {weekDays.map((day) => {
+                const dayBlocks = getAppointmentsForDay(day);
+                return (
+                  <div
+                    key={day.toISOString()}
+                    className={`min-w-0 border-r last:border-r-0 dark:border-gray-700 ${
+                      isToday(day) ? 'bg-brand-50/40 dark:bg-brand-950/20' : ''
+                    }`}
+                  >
+                    <DayTimeline
+                      hours={weekHours}
+                      blocks={dayBlocks}
+                      hourHeight={DESKTOP_HOUR_HEIGHT_PX}
+                      showNow={isToday(day)}
+                      now={now}
+                      showStaff={showStaffOnCards}
+                      onReview={setReviewOpen}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>

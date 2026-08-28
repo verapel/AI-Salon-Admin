@@ -887,7 +887,7 @@ describe('GOOGLE-CAL-FAST-6B auto pull (executed)', () => {
     assert.equal(u.searchParams.get('updatedMin'), SINCE);
     assert.equal(u.searchParams.get('timeMin'), null);
     assert.equal(u.searchParams.get('timeMax'), null);
-    assert.equal(GOOGLE_CALENDAR_PULL_INTERVAL_MS, 5 * 60 * 1000);
+    assert.equal(GOOGLE_CALENDAR_PULL_INTERVAL_MS, 60 * 1000);
     assert.equal(GOOGLE_CALENDAR_PULL_MAX_IMPORTS, 20);
     assert.equal(GOOGLE_CALENDAR_PULL_MAX_CONNECTIONS, 10);
     assert.equal(GOOGLE_CALENDAR_PULL_MAX_LIST_PAGES, 20);

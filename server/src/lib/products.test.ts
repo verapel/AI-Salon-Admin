@@ -337,13 +337,18 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.doesNotMatch(toggle, /openEdit|setModalOpen\(true\)/);
 
     const mobileCards = page.slice(page.indexOf('space-y-3 sm:hidden'), page.indexOf('hidden sm:block'));
-    const desktopTable = page.slice(page.indexOf('hidden sm:block'));
-    assert.match(mobileCards, /type="checkbox"/);
-    assert.match(mobileCards, /checked=\{product\.markedForPurchase\}/);
-    assert.match(mobileCards, /onChange=\{\(\) => handlePurchaseToggle\(product\)\}/);
+    const desktopTable = page.slice(page.indexOf('hidden sm:block'), page.indexOf('products.detailsTitle'));
+    assert.match(mobileCards, /setDetailProduct\(product\)/);
+    assert.match(mobileCards, /formatProductExactPrice\(product\)/);
+    assert.match(mobileCards, /formatProductPriceRange\(product\)/);
+    assert.doesNotMatch(mobileCards, /type="checkbox"/);
     assert.doesNotMatch(mobileCards, /w-full rounded-lg px-3 py-2/);
     assert.doesNotMatch(mobileCards, /aria-pressed/);
-    assert.doesNotMatch(desktopTable, /handlePurchaseToggle/);
+    assert.match(page, /handlePurchaseToggle/);
+    assert.match(page, /products\.detailsTitle/);
+    assert.match(page, /setSearchParams\(\{ section: next \}\)/);
+    assert.doesNotMatch(desktopTable, /columnBrand/);
+    assert.doesNotMatch(desktopTable, /columnVolume/);
   });
 
   it('paint, oxide, and care sections split on category without a new table', () => {

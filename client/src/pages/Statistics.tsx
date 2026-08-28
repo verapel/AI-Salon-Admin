@@ -19,7 +19,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import { useLanguage, type LangCode, type TranslationKey } from '@/context/LanguageContext';
 import { useTheme } from '@/context/ThemeContext';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatCurrencyAxis } from '@/lib/utils';
 import type { AnalyticsData } from '@/types';
 
 const COLORS = ['#c026d3', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
@@ -127,8 +127,8 @@ export default function Statistics() {
                   />
                   <YAxis
                     tick={{ fontSize: 11, fill: tickFill }}
-                    tickFormatter={(v) => `$${v}`}
-                    width={52}
+                    tickFormatter={(v) => formatCurrencyAxis(v)}
+                    width={64}
                   />
                   <Tooltip
                     formatter={(value: number) => [formatCurrency(value), t('statistics.tooltipRevenue')]}

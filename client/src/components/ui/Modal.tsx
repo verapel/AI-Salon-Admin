@@ -40,7 +40,7 @@ export default function Modal({ open, onClose, title, children, size = 'md' }: M
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto px-4 py-4 sm:px-6">
+        <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-6">
           {children}
         </div>
       </div>
