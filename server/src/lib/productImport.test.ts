@@ -224,8 +224,8 @@ describe('PRODUCTS-2 excel and photo import', () => {
       desktopTable,
       /columnPrice[\s\S]*fieldPriceRange[\s\S]*columnActions/
     );
-    assert.match(desktopTable, /formatProductExactPrice\(product\)/);
-    assert.match(desktopTable, /formatProductPriceRange\(product\)/);
+    assert.match(desktopTable, /formatProductExactPrice\(product, salonCurrency\)/);
+    assert.match(desktopTable, /formatProductPriceRange\(product, salonCurrency\)/);
     assert.doesNotMatch(desktopTable, /formatProductPrice\(product\)/);
     assert.doesNotMatch(productsPage, /0 AMD/);
     const clientFormatter = read('client/src/lib/productFormat.ts');

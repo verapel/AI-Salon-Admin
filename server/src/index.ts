@@ -23,6 +23,7 @@ import authRouter from './routes/auth.js';
 import internalRouter from './routes/internal.js';
 import staffPortalRouter from './routes/staffPortal.js';
 import calendarConnectionsRouter from './routes/calendarConnections.js';
+import salonSettingsRouter from './routes/salonSettings.js';
 import googleCalendarOAuthCallbackRouter from './routes/googleCalendarOAuthCallback.js';
 import whatsappWebhookRouter from './routes/whatsappWebhook.js';
 import instagramWebhookRouter from './routes/instagramWebhook.js';
@@ -1187,6 +1188,7 @@ const noopAuth: RequestHandler = (_req, _res, next) => next();
 const salonAuth = API_AUTH_REQUIRED ? requireSalonAuth : noopAuth;
 const developerAuth = API_AUTH_REQUIRED ? requireDeveloperAuth : noopAuth;
 
+app.use('/api/salon', salonAuth, salonSettingsRouter);
 app.use('/api/clients', salonAuth, requireSalonCabinetAccess, clientsRouter);
 app.use('/api/services', salonAuth, requireSalonCabinetAccess, servicesRouter);
 app.use('/api/products', salonAuth, requireSalonCabinetAccess, productsRouter);

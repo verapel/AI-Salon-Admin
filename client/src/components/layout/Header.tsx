@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Menu, Moon, Sun, Bell, X, Globe, Check, LogOut } from 'lucide-react';
+import { Menu, Moon, Sun, Bell, X, Globe, Check, LogOut, Coins } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTheme } from '@/context/ThemeContext';
-import { useLanguage, LANGUAGES, type LangCode } from '@/context/LanguageContext';
+import { useLanguage, LANGUAGES, type LangCode, type TranslationKey } from '@/context/LanguageContext';
 import { useAuth } from '@/context/AuthContext';
+import { useCurrency } from '@/context/CurrencyContext';
 import { api } from '@/lib/api';
 import { formatDate, formatTime } from '@/lib/utils';
+import { CURRENCY_META, SALON_CURRENCIES, type SalonCurrency } from '@/lib/currency';
 import type { InAppNotification, NotificationFeed } from '@/types';
 
 const LANG_ABBR: Record<LangCode, string> = {
@@ -33,8 +35,10 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
   const { signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { language, setLanguage, t } = useLanguage();
+  const { currency, setCurrency } = useCurrency();
   const [panelOpen, setPanelOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
+  const [currencyOpen, setCurrencyOpen] = useState(false);
   const [items, setItems] = useState<InAppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -45,6 +49,8 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
   const panelRef = useRef<HTMLDivElement>(null);
   const langRef = useRef<HTMLButtonElement>(null);
   const langPanelRef = useRef<HTMLDivElement>(null);
+  const currencyRef = useRef<HTMLButtonElement>(null);
+  const currencyPanelRef = useRef<HTMLDivElement>(null);
 
   function applyFeed(feed: NotificationFeed) {
     setItems(feed.items);
@@ -116,6 +122,27 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
     };
   }, [langOpen]);
 
+  useEffect(() => {
+    if (!currencyOpen) return;
+
+    const handleOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (currencyPanelRef.current?.contains(target) || currencyRef.current?.contains(target)) {
+        return;
+      }
+      setCurrencyOpen(false);
+    };
+
+    const id = window.setTimeout(() => {
+      document.addEventListener('mousedown', handleOutside);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(id);
+      document.removeEventListener('mousedown', handleOutside);
+    };
+  }, [currencyOpen]);
+
   const close = () => setPanelOpen(false);
 
   async function handleDismissAll() {
@@ -151,6 +178,15 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
   function handleLanguageChange(code: LangCode) {
     setLanguage(code);
     setLangOpen(false);
+  }
+
+  async function handleCurrencyChange(code: SalonCurrency) {
+    setCurrencyOpen(false);
+    try {
+      await setCurrency(code);
+    } catch (err) {
+      console.error(err);
+    }
   }
 
   async function handleSignOut() {
@@ -319,6 +355,59 @@ export default function Header({ title, subtitle, onMenuClick, actions }: Header
                         <span>{lang.label}</span>
                       </span>
                       {language === lang.code && (
+                        <Check className="h-4 w-4 shrink-0 text-brand-600 dark:text-brand-400" />
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        {/* Currency selector — salon application setting */}
+        <div className="relative">
+          <button
+            ref={currencyRef}
+            onClick={() => setCurrencyOpen((v) => !v)}
+            className="btn-ghost flex items-center gap-1.5"
+            aria-label={t('header.selectCurrency')}
+          >
+            <Coins className="h-5 w-5" />
+            <span className="hidden sm:inline text-xs font-bold">
+              {CURRENCY_META[currency].symbol} {currency}
+            </span>
+          </button>
+
+          {currencyOpen && (
+            <div
+              ref={currencyPanelRef}
+              className="absolute right-0 top-full z-50 mt-2 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+            >
+              <div className="border-b px-3 py-2 dark:border-gray-700">
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{t('header.currency')}</p>
+              </div>
+              <ul className="py-1">
+                {SALON_CURRENCIES.map((code) => (
+                  <li key={code}>
+                    <button
+                      type="button"
+                      onClick={() => void handleCurrencyChange(code)}
+                      className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-sm transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
+                        currency === code
+                          ? 'font-medium text-brand-600 dark:text-brand-400'
+                          : 'text-gray-700 dark:text-gray-300'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="inline-flex h-6 w-8 shrink-0 items-center justify-center rounded-md text-sm font-bold leading-none">
+                          {CURRENCY_META[code].symbol}
+                        </span>
+                        <span>
+                          {code} · {t(`currency.${code}` as TranslationKey)}
+                        </span>
+                      </span>
+                      {currency === code && (
                         <Check className="h-4 w-4 shrink-0 text-brand-600 dark:text-brand-400" />
                       )}
                     </button>

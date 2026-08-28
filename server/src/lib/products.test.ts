@@ -336,16 +336,16 @@ describe('PRODUCTS-1 products foundation', () => {
     assert.match(toggle, /markedForPurchase:\s*!product\.markedForPurchase/);
     assert.doesNotMatch(toggle, /openEdit|setModalOpen\(true\)/);
 
-    const mobileCards = page.slice(page.indexOf('space-y-3 sm:hidden'), page.indexOf('hidden sm:block'));
-    const desktopTable = page.slice(page.indexOf('hidden sm:block'), page.indexOf('products.detailsTitle'));
-    assert.match(mobileCards, /setDetailProduct\(product\)/);
-    assert.match(mobileCards, /formatProductExactPrice\(product\)/);
-    assert.match(mobileCards, /formatProductPriceRange\(product\)/);
+    const mobileCards = page.slice(page.indexOf('space-y-2 sm:hidden'), page.indexOf('hidden sm:block'));
+    const desktopTable = page.slice(page.indexOf('hidden sm:block'), page.indexOf('products.photoProcessing'));
+    assert.match(mobileCards, /openEdit\(product\)/);
+    assert.match(mobileCards, /formatProductExactPrice\(product, salonCurrency\)/);
+    assert.match(mobileCards, /formatProductPriceRange\(product, salonCurrency\)/);
     assert.doesNotMatch(mobileCards, /type="checkbox"/);
     assert.doesNotMatch(mobileCards, /w-full rounded-lg px-3 py-2/);
     assert.doesNotMatch(mobileCards, /aria-pressed/);
     assert.match(page, /handlePurchaseToggle/);
-    assert.match(page, /products\.detailsTitle/);
+    assert.doesNotMatch(page, /products\.detailsTitle/);
     assert.match(page, /setSearchParams\(\{ section: next \}\)/);
     assert.doesNotMatch(desktopTable, /columnBrand/);
     assert.doesNotMatch(desktopTable, /columnVolume/);

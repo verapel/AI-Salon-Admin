@@ -18,8 +18,8 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
 import { useLanguage, type LangCode, type TranslationKey } from '@/context/LanguageContext';
 import { useTheme } from '@/context/ThemeContext';
+import { useCurrency } from '@/context/CurrencyContext';
 import { api } from '@/lib/api';
-import { formatCurrency, formatCurrencyAxis } from '@/lib/utils';
 import type { AnalyticsData } from '@/types';
 
 const COLORS = ['#c026d3', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
@@ -38,6 +38,7 @@ function statusLabel(status: string, t: (key: TranslationKey) => string) {
 
 export default function Statistics() {
   const { language, t } = useLanguage();
+  const { formatCurrency, formatCurrencyAxis } = useCurrency();
   const { theme } = useTheme();
   const locale = LOCALE[language];
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);

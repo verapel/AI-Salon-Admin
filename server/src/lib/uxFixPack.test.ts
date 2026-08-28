@@ -76,14 +76,14 @@ describe('UX fix pack', () => {
 
   it('3. product tables keep exact price and a separate range column', () => {
     const page = read('client/src/pages/Products.tsx');
-    const desktop = page.slice(page.indexOf('hidden sm:block'), page.indexOf('products.detailsTitle'));
-    const mobile = page.slice(page.indexOf('space-y-3 sm:hidden'), page.indexOf('hidden sm:block'));
+    const desktop = page.slice(page.indexOf('hidden sm:block'), page.indexOf('products.photoProcessing'));
+    const mobile = page.slice(page.indexOf('space-y-2 sm:hidden'), page.indexOf('hidden sm:block'));
     assert.match(desktop, /columnPrice[\s\S]*fieldPriceRange[\s\S]*columnActions/);
-    assert.match(desktop, /formatProductExactPrice\(product\)/);
-    assert.match(desktop, /formatProductPriceRange\(product\)/);
+    assert.match(desktop, /formatProductExactPrice\(product, salonCurrency\)/);
+    assert.match(desktop, /formatProductPriceRange\(product, salonCurrency\)/);
     assert.doesNotMatch(desktop, /formatProductPrice\(product\)/);
-    assert.match(mobile, /formatProductExactPrice\(product\)/);
-    assert.match(mobile, /formatProductPriceRange\(product\)/);
+    assert.match(mobile, /formatProductExactPrice\(product, salonCurrency\)/);
+    assert.match(mobile, /formatProductPriceRange\(product, salonCurrency\)/);
     assert.equal(formatProductExactPrice({ price: 2500, currency: 'AMD' }), '2 500 AMD');
     assert.equal(formatProductExactPrice({ price: 0, currency: 'AMD' }), '—');
     assert.equal(
@@ -103,30 +103,41 @@ describe('UX fix pack', () => {
     assert.doesNotMatch(page, /navigate\('\/calendar'\)/);
   });
 
-  it('5. mobile nav puts Calendar first and Clients immediately after', () => {
+  it('5. mobile nav starts with Calendar, Clients, then Services', () => {
     const sidebar = read('client/src/components/layout/Sidebar.tsx');
-    assert.match(sidebar, /to: '\/calendar'[\s\S]*mobileClass: 'order-1 lg:order-none'/);
-    assert.match(sidebar, /to: '\/clients'[\s\S]*mobileClass: 'order-2 lg:order-none'/);
-    assert.match(sidebar, /to: '\/services'[\s\S]*mobileClass: 'order-3 lg:order-none'/);
-    assert.match(sidebar, /to: '\/products'[\s\S]*mobileClass: 'order-4 lg:order-none'/);
-    assert.match(sidebar, /to: '\/staff'[\s\S]*mobileClass: 'order-5 lg:order-none'/);
-    assert.match(sidebar, /to: '\/'[\s\S]*mobileClass: 'order-6 lg:order-none'/);
-    assert.match(sidebar, /lg:order-none/);
+    const mobile = sidebar.slice(sidebar.indexOf('mobileNavItems'), sidebar.indexOf('interface SidebarProps'));
+    const desktop = sidebar.slice(sidebar.indexOf('desktopNavItems'), sidebar.indexOf('mobileNavItems'));
+    assert.match(mobile, /to: '\/calendar'[\s\S]*to: '\/clients'[\s\S]*to: '\/services'/);
+    assert.ok(mobile.indexOf("to: '/calendar'") < mobile.indexOf("to: '/clients'"));
+    assert.ok(mobile.indexOf("to: '/clients'") < mobile.indexOf("to: '/services'"));
+    assert.ok(mobile.indexOf("to: '/services'") < mobile.indexOf("to: '/products'"));
+    assert.match(desktop, /to: '\/'[\s\S]*to: '\/calendar'[\s\S]*to: '\/clients'[\s\S]*to: '\/services'/);
+    assert.ok(desktop.indexOf("to: '/'") < desktop.indexOf("to: '/calendar'"));
+    assert.match(sidebar, /lg:hidden/);
+    assert.match(sidebar, /hidden[\s\S]*lg:flex/);
+    assert.doesNotMatch(sidebar, /mobileClass/);
   });
 
-  it('6. revenue formatting uses AMD not USD', () => {
+  it('6. revenue formatting uses salon currency, default AMD, not hardcoded USD', () => {
     assert.equal(formatCurrency(2500), '2 500 AMD');
     assert.equal(formatCurrency(0), '0 AMD');
+    assert.equal(formatCurrency(2500, 'RUB'), '2 500 RUB');
+    assert.equal(formatCurrency(2500, 'USD'), '2 500 USD');
     assert.equal(formatCurrencyAxis(2500), '2 500');
-    const utils = read('client/src/lib/utils.ts');
+    const currencyLib = read('client/src/lib/currency.ts');
+    const header = read('client/src/components/layout/Header.tsx');
     const stats = read('client/src/pages/Statistics.tsx');
     const dashboard = read('client/src/pages/Dashboard.tsx');
-    assert.match(utils, /currency = 'AMD'/);
-    assert.doesNotMatch(utils, /currency: 'USD'/);
+    assert.match(currencyLib, /DEFAULT_SALON_CURRENCY: SalonCurrency = 'AMD'/);
+    assert.doesNotMatch(currencyLib, /DEFAULT_SALON_CURRENCY[^\n]*USD/);
+    assert.match(header, /SALON_CURRENCIES/);
+    assert.match(header, /header\.selectCurrency/);
     assert.match(stats, /formatCurrency\(value\)/);
     assert.match(stats, /formatCurrencyAxis/);
     assert.doesNotMatch(stats, /`\$\{v\}`/);
     assert.match(dashboard, /formatCurrency\(stats\?\.monthlyRevenue/);
+    assert.match(read('server/src/routes/salonSettings.ts'), /parseSalonCurrency/);
+    assert.doesNotMatch(read('server/src/routes/salonSettings.ts'), /\*  [0-9]|amount \*|exchange|fxRate/);
   });
 
   it('7. calendar positions appointments on a timed day/week grid', () => {
@@ -174,12 +185,14 @@ describe('UX fix pack', () => {
     assert.match(products, /SearchInput/);
   });
 
-  it('9. product list is essential columns; details open on row tap', () => {
+  it('9. product row tap opens edit immediately; mobile cards stay compact and complete', () => {
     const page = read('client/src/pages/Products.tsx');
-    assert.match(page, /setDetailProduct\(product\)/);
-    assert.match(page, /products\.detailsTitle/);
-    assert.match(page, /openEdit\(liveDetail\)/);
-    const desktop = page.slice(page.indexOf('hidden sm:block'), page.indexOf('products.detailsTitle'));
+    assert.match(page, /onClick=\{\(\) => openEdit\(product\)\}/);
+    assert.doesNotMatch(page, /setDetailProduct/);
+    assert.doesNotMatch(page, /products\.detailsTitle/);
+    assert.doesNotMatch(page, /liveDetail/);
+    const desktop = page.slice(page.indexOf('hidden sm:block'), page.indexOf('products.photoProcessing'));
+    const mobile = page.slice(page.indexOf('space-y-2 sm:hidden'), page.indexOf('hidden sm:block'));
     assert.doesNotMatch(desktop, /columnVolume/);
     assert.doesNotMatch(desktop, /columnPercentage/);
     assert.match(desktop, /columnProduct/);
@@ -187,6 +200,15 @@ describe('UX fix pack', () => {
     assert.match(desktop, /columnStatus/);
     assert.match(desktop, /columnPrice/);
     assert.match(desktop, /fieldPriceRange/);
+    assert.match(desktop, /onClick=\{\(\) => openEdit\(product\)\}/);
+    assert.match(mobile, /openEdit\(product\)/);
+    assert.match(mobile, /formatProductExactPrice\(product, salonCurrency\)/);
+    assert.match(mobile, /formatProductPriceRange\(product, salonCurrency\)/);
+    assert.match(mobile, /product\.line/);
+    assert.match(mobile, /product\.volume/);
+    assert.match(mobile, /product\.percentage/);
+    assert.match(mobile, /salonCurrency/);
+    assert.match(mobile, /p-3/);
     assert.match(page, /api\.products\.parsePhoto/);
     assert.match(page, /api\.products\.parseImport/);
   });

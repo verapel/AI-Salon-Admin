@@ -1,17 +1,10 @@
-/** Salon monetary display: space thousands + AMD, matching product price formatting. */
-export function formatCurrency(amount: number, currency = 'AMD'): string {
-  const n = Number.isFinite(amount) ? Math.round(amount) : 0;
-  const abs = Math.abs(n)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  const signed = n < 0 ? `-${abs}` : abs;
-  return `${signed} ${currency}`;
-}
-
-/** Compact axis tick without the currency suffix. */
-export function formatCurrencyAxis(amount: number): string {
-  return formatCurrency(amount).replace(/ AMD$/, '');
-}
+export {
+  formatCurrency,
+  formatCurrencyAxis,
+  formatMoneyAmount,
+  parseSalonCurrency,
+  DEFAULT_SALON_CURRENCY,
+} from './currency';
 
 export function formatDate(dateStr: string): string {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {

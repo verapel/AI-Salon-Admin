@@ -65,6 +65,14 @@ export const api = {
         staffId: string | null;
       }>('/auth/me'),
   },
+  salon: {
+    getSettings: () => request<{ currency: string }>('/salon/settings'),
+    updateSettings: (data: { currency: string }) =>
+      request<{ currency: string }>('/salon/settings', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+  },
   clients: {
     getAll: () => request<import('@/types').Client[]>('/clients'),
     get: (id: string) => request<import('@/types').Client>(`/clients/${id}`),

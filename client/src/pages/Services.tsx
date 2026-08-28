@@ -5,8 +5,8 @@ import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
+import { useCurrency } from '@/context/CurrencyContext';
 import { api } from '@/lib/api';
-import { formatCurrency } from '@/lib/utils';
 import type { Service } from '@/types';
 
 const CATEGORIES = ['Hair', 'Color', 'Nails', 'Skincare', 'Beauty', 'General'] as const;
@@ -37,6 +37,7 @@ function formatDurationLocalized(
 
 export default function Services() {
   const { t } = useLanguage();
+  const { currency, formatCurrency } = useCurrency();
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -294,7 +295,9 @@ export default function Services() {
               />
             </div>
             <div>
-              <label className="mb-1.5 block text-sm font-medium">{t('services.fieldPrice')}</label>
+              <label className="mb-1.5 block text-sm font-medium">
+                {t('services.fieldPrice')} ({currency})
+              </label>
               <input
                 className="input-field"
                 type="number"

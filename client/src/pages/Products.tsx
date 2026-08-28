@@ -21,6 +21,7 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import IndeterminateProgress from '@/components/ui/IndeterminateProgress';
 import EmptyState from '@/components/ui/EmptyState';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
+import { useCurrency } from '@/context/CurrencyContext';
 import { api, ApiError } from '@/lib/api';
 import { exportProductsXlsx } from '@/lib/productExport';
 import {
@@ -30,6 +31,7 @@ import {
   type ProductSection,
 } from '@/lib/productSection';
 import { asAmount, formatProductExactPrice, formatProductPriceRange } from '@/lib/productFormat';
+import { SALON_CURRENCIES } from '@/lib/currency';
 import { numericDisplayValue, parseDecimalInput, parseIntegerInput } from '@/lib/numericInput';
 import type { Product, ProductDraft, ProductImportResult, ProductStockStatus } from '@/types';
 
@@ -37,7 +39,7 @@ type StockFilter = 'all' | ProductStockStatus | 'purchase';
 
 const STOCK_FILTERS: StockFilter[] = ['all', 'in_stock', 'low', 'out', 'purchase'];
 
-const emptyForm = () => ({
+const emptyForm = (currency = 'AMD') => ({
   name: '',
   brand: '',
   line: '',
@@ -51,7 +53,7 @@ const emptyForm = () => ({
   price: '',
   priceMin: '',
   priceMax: '',
-  currency: 'AMD',
+  currency,
   supplier: '',
   markedForPurchase: false,
 });
@@ -80,19 +82,9 @@ function statusBadgeClass(status: ProductStockStatus) {
   return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300';
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-        {label}
-      </dt>
-      <dd className="mt-0.5 break-words text-sm text-gray-900 dark:text-white">{value || '—'}</dd>
-    </div>
-  );
-}
-
 export default function Products() {
   const { t } = useLanguage();
+  const { currency: salonCurrency } = useCurrency();
   const [searchParams, setSearchParams] = useSearchParams();
   const rawSection = searchParams.get('section');
   const section = isProductSection(rawSection) ? rawSection : null;
@@ -100,7 +92,6 @@ export default function Products() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<StockFilter>('all');
-  const [detailProduct, setDetailProduct] = useState<Product | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -132,7 +123,6 @@ export default function Products() {
   useEffect(() => {
     setSearch('');
     setFilter('all');
-    setDetailProduct(null);
   }, [section]);
 
   const sectionProducts = section
@@ -166,9 +156,6 @@ export default function Products() {
       ? [...searched].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
       : searched;
 
-  const liveDetail =
-    detailProduct ? products.find((product) => product.id === detailProduct.id) ?? detailProduct : null;
-
   const openSection = (next: ProductSection) => {
     setSearchParams({ section: next });
     setSearch('');
@@ -182,7 +169,7 @@ export default function Products() {
   const openCreate = () => {
     if (!section) return;
     setEditing(null);
-    setForm({ ...emptyForm(), category: categoryForProductSection(section) });
+    setForm({ ...emptyForm(salonCurrency), category: categoryForProductSection(section) });
     setFormError('');
     setModalOpen(true);
   };
@@ -203,12 +190,11 @@ export default function Products() {
       price: numericDisplayValue(product.price),
       priceMin: product.priceMin == null ? '' : String(product.priceMin),
       priceMax: product.priceMax == null ? '' : String(product.priceMax),
-      currency: product.currency || 'AMD',
+      currency: salonCurrency,
       supplier: product.supplier,
       markedForPurchase: product.markedForPurchase,
     });
     setFormError('');
-    setDetailProduct(null);
     setModalOpen(true);
   };
 
@@ -228,6 +214,7 @@ export default function Products() {
         price: parseDecimalInput(form.price) ?? 0,
         priceMin: asAmount(form.priceMin),
         priceMax: asAmount(form.priceMax),
+        currency: salonCurrency,
       };
       if (editing) {
         await api.products.update(editing.id, payload);
@@ -255,7 +242,6 @@ export default function Products() {
     setActionBusy(id);
     try {
       await api.products.delete(id);
-      setDetailProduct((current) => (current?.id === id ? null : current));
       loadProducts();
     } catch (err) {
       console.error(err);
@@ -321,7 +307,7 @@ export default function Products() {
         setPhotoStage('recognition');
         const payload = { filename: file.name, mimeType: file.type || 'image/jpeg', contentBase64 };
         const parsed = await api.products.parsePhoto(payload);
-        setPreviewRows(parsed.rows);
+        setPreviewRows(parsed.rows.map((row) => ({ ...row, currency: salonCurrency })));
         setPhotoProcessingOpen(false);
         setPhotoStage(null);
         setImportOpen(true);
@@ -332,7 +318,7 @@ export default function Products() {
         const contentBase64 = await readFileAsBase64(file);
         const payload = { filename: file.name, mimeType: file.type || 'application/octet-stream', contentBase64 };
         const parsed = await api.products.parseImport(payload);
-        setPreviewRows(parsed.rows);
+        setPreviewRows(parsed.rows.map((row) => ({ ...row, currency: salonCurrency })));
         setImportOpen(true);
         if (parsed.rows.length === 0) {
           setImportError(t('products.noResults'));
@@ -586,36 +572,42 @@ export default function Products() {
         />
       ) : (
         <>
-          <div className="space-y-3 sm:hidden">
+          <div className="space-y-2 sm:hidden">
             {filtered.map((product) => (
               <button
                 key={product.id}
                 type="button"
-                onClick={() => setDetailProduct(product)}
-                className="card w-full min-w-0 max-w-full space-y-2 p-4 text-left"
-                aria-label={t('products.openDetailsAria')}
+                onClick={() => openEdit(product)}
+                className="card w-full min-w-0 max-w-full space-y-1.5 p-3 text-left"
+                aria-label={t('products.editAria')}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="truncate font-semibold text-gray-900 dark:text-white">
+                    <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
                       {product.name}
                     </p>
-                    <p className="truncate text-sm text-gray-500 dark:text-gray-400">
-                      {[product.brand, product.codeShade].filter(Boolean).join(' · ') || '—'}
+                    <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                      {[product.brand, product.line, product.codeShade].filter(Boolean).join(' · ') ||
+                        '—'}
                     </p>
                   </div>
-                  <span className={`badge shrink-0 text-xs ${statusBadgeClass(product.stockStatus)}`}>
+                  <span className={`badge shrink-0 px-1.5 py-0.5 text-[10px] ${statusBadgeClass(product.stockStatus)}`}>
                     {statusLabel(product.stockStatus, t)}
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-3">
-                  {quantityControls(product)}
-                  <div className="min-w-0 text-right text-sm">
-                    <p className="font-medium text-gray-900 dark:text-white">
-                      {formatProductExactPrice(product)}
+                <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 text-[11px] leading-tight text-gray-500 dark:text-gray-400">
+                  {product.volume ? <span className="min-w-0 break-words">{product.volume}</span> : null}
+                  {product.percentage != null ? <span>{product.percentage}%</span> : null}
+                  <span className="shrink-0">{salonCurrency}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  {quantityControls(product, true)}
+                  <div className="min-w-0 text-right">
+                    <p className="text-sm font-semibold tabular-nums text-gray-900 dark:text-white">
+                      {formatProductExactPrice(product, salonCurrency)}
                     </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {formatProductPriceRange(product)}
+                    <p className="text-[11px] leading-tight text-gray-500 dark:text-gray-400">
+                      {formatProductPriceRange(product, salonCurrency)}
                     </p>
                   </div>
                 </div>
@@ -654,7 +646,7 @@ export default function Products() {
                       <tr
                         key={product.id}
                         className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/30"
-                        onClick={() => setDetailProduct(product)}
+                        onClick={() => openEdit(product)}
                       >
                         <td className="px-4 py-3">
                           <div className="font-medium text-gray-900 dark:text-white">{product.name}</div>
@@ -668,28 +660,31 @@ export default function Products() {
                             <span className={`badge ${statusBadgeClass(product.stockStatus)}`}>
                               {statusLabel(product.stockStatus, t)}
                             </span>
-                            {product.markedForPurchase ? (
-                              <span className="badge bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-300">
-                                {t('products.markedForPurchase')}
-                              </span>
-                            ) : null}
+                            <button
+                              type="button"
+                              className={`badge ${
+                                product.markedForPurchase
+                                  ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-300'
+                                  : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                              }`}
+                              disabled={actionBusy === product.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handlePurchaseToggle(product);
+                              }}
+                            >
+                              {t('products.markedForPurchase')}
+                            </button>
                           </div>
                         </td>
                         <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
-                          {formatProductExactPrice(product)}
+                          {formatProductExactPrice(product, salonCurrency)}
                         </td>
                         <td className="px-4 py-3 text-gray-900 dark:text-white">
-                          {formatProductPriceRange(product)}
+                          {formatProductPriceRange(product, salonCurrency)}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              onClick={() => setDetailProduct(product)}
-                              className="btn-ghost p-1.5"
-                              aria-label={t('products.openDetailsAria')}
-                            >
-                              <Package className="h-4 w-4" />
-                            </button>
                             <button
                               onClick={() => openEdit(product)}
                               disabled={actionBusy === product.id}
@@ -717,79 +712,6 @@ export default function Products() {
           </div>
         </>
       )}
-
-      <Modal
-        open={Boolean(liveDetail)}
-        onClose={() => setDetailProduct(null)}
-        title={t('products.detailsTitle')}
-        size="lg"
-      >
-        {liveDetail ? (
-          <div className="min-w-0 space-y-4">
-            <div>
-              <h3 className="break-words text-lg font-semibold text-gray-900 dark:text-white">
-                {liveDetail.name}
-              </h3>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {[liveDetail.brand, liveDetail.line].filter(Boolean).join(' · ') || '—'}
-              </p>
-            </div>
-            <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <DetailRow label={t('products.fieldCategory')} value={liveDetail.category} />
-              <DetailRow label={t('products.fieldCodeShade')} value={liveDetail.codeShade} />
-              <DetailRow label={t('products.fieldVolume')} value={liveDetail.volume} />
-              <DetailRow
-                label={t('products.fieldPercentage')}
-                value={liveDetail.percentage != null ? `${liveDetail.percentage}%` : ''}
-              />
-              <DetailRow
-                label={t('products.fieldQuantity')}
-                value={`${liveDetail.quantity}${liveDetail.unit ? ` ${liveDetail.unit}` : ''}`}
-              />
-              <DetailRow
-                label={t('products.columnStatus')}
-                value={statusLabel(liveDetail.stockStatus, t)}
-              />
-              <DetailRow label={t('products.columnPrice')} value={formatProductExactPrice(liveDetail)} />
-              <DetailRow
-                label={t('products.fieldPriceRange')}
-                value={formatProductPriceRange(liveDetail)}
-              />
-              <DetailRow label={t('products.fieldCurrency')} value={liveDetail.currency || 'AMD'} />
-              <DetailRow label={t('products.fieldSupplier')} value={liveDetail.supplier} />
-            </dl>
-            <label
-              className="flex min-h-[44px] items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-                checked={liveDetail.markedForPurchase}
-                disabled={actionBusy === liveDetail.id}
-                onChange={() => handlePurchaseToggle(liveDetail)}
-              />
-              {t('products.markedForPurchase')}
-            </label>
-            <div className="flex flex-wrap justify-end gap-2 border-t pt-3 dark:border-gray-700">
-              <button type="button" className="btn-secondary" onClick={() => setDetailProduct(null)}>
-                {t('common.cancel')}
-              </button>
-              <button type="button" className="btn-secondary" onClick={() => openEdit(liveDetail)}>
-                <Pencil className="h-4 w-4" /> {t('common.edit')}
-              </button>
-              <button
-                type="button"
-                className="btn-ghost text-red-500"
-                onClick={() => handleDelete(liveDetail.id)}
-                disabled={actionBusy === liveDetail.id}
-              >
-                <Trash2 className="h-4 w-4" /> {t('common.delete')}
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </Modal>
 
       <Modal
         open={photoProcessingOpen}
@@ -1020,7 +942,7 @@ export default function Products() {
                       <td className="py-1 pr-2">
                         <select
                           className="input-field"
-                          value={row.currency || 'AMD'}
+                          value={row.currency || salonCurrency}
                           onChange={(e) =>
                             setPreviewRows((prev) =>
                               prev.map((item, i) =>
@@ -1029,10 +951,11 @@ export default function Products() {
                             )
                           }
                         >
-                          <option value="AMD">AMD</option>
-                          <option value="USD">USD</option>
-                          <option value="RUB">RUB</option>
-                          <option value="EUR">EUR</option>
+                          {SALON_CURRENCIES.map((code) => (
+                            <option key={code} value={code}>
+                              {code}
+                            </option>
+                          ))}
                         </select>
                       </td>
                       <td className="py-1">
@@ -1196,16 +1119,7 @@ export default function Products() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1.5 block text-sm font-medium">{t('products.fieldCurrency')}</label>
-              <select
-                className="input-field"
-                value={form.currency}
-                onChange={(e) => setForm({ ...form, currency: e.target.value })}
-              >
-                <option value="AMD">AMD</option>
-                <option value="USD">USD</option>
-                <option value="RUB">RUB</option>
-                <option value="EUR">EUR</option>
-              </select>
+              <input className="input-field" value={salonCurrency} readOnly />
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium">{t('products.fieldSupplier')}</label>

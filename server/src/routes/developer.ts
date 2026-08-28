@@ -891,7 +891,7 @@ router.post('/salons', async (req, res) => {
         slug,
         timezone: 'Europe/Moscow',
         country: 'RU',
-        currency: 'RUB',
+        currency: 'AMD',
         language: 'ru',
         active: true,
       })

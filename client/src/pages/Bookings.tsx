@@ -6,8 +6,9 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
 import QuickBookingModal from '@/components/bookings/QuickBookingModal';
 import { useLanguage, type LangCode, type TranslationKey } from '@/context/LanguageContext';
+import { useCurrency } from '@/context/CurrencyContext';
 import { api } from '@/lib/api';
-import { formatCurrency, getStatusColor } from '@/lib/utils';
+import { getStatusColor } from '@/lib/utils';
 import type { Appointment, Client, Service, Staff as StaffType } from '@/types';
 
 const LOCALE: Record<LangCode, string> = {
@@ -48,6 +49,7 @@ function filterLabel(filter: StatusFilter, t: (key: TranslationKey) => string) {
 
 export default function Bookings() {
   const { language, t } = useLanguage();
+  const { formatCurrency } = useCurrency();
   const locale = LOCALE[language];
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [clients, setClients] = useState<Client[]>([]);

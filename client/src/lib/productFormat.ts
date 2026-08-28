@@ -1,3 +1,5 @@
+import { formatCurrency, formatMoneyAmount, parseSalonCurrency } from './currency';
+
 export type ProductCurrency = 'AMD' | 'USD' | 'RUB' | 'EUR';
 
 /** Positive money only. Accepts number or string, including spaced thousands ("2 000"). */
@@ -13,26 +15,28 @@ export function asAmount(value: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-export function formatMoneyAmount(amount: number): string {
-  return Math.round(amount)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-}
+export { formatMoneyAmount };
 
-export function storedCurrency(value: unknown): string {
+export function storedCurrency(value: unknown, displayCurrency?: string | null): string {
+  if (displayCurrency != null && String(displayCurrency).trim() !== '') {
+    return parseSalonCurrency(displayCurrency);
+  }
   const text = value == null ? '' : String(value).trim();
-  return text || 'AMD';
+  return parseSalonCurrency(text || 'AMD');
 }
 
-export function formatProductPrice(product: {
-  price?: number | string | null;
-  priceMin?: number | string | null;
-  priceMax?: number | string | null;
-  price_min?: number | string | null;
-  price_max?: number | string | null;
-  currency?: string | null;
-}): string {
-  const currency = storedCurrency(product.currency);
+export function formatProductPrice(
+  product: {
+    price?: number | string | null;
+    priceMin?: number | string | null;
+    priceMax?: number | string | null;
+    price_min?: number | string | null;
+    price_max?: number | string | null;
+    currency?: string | null;
+  },
+  displayCurrency?: string | null
+): string {
+  const currency = storedCurrency(product.currency, displayCurrency);
   const min = asAmount(product.priceMin ?? product.price_min);
   const max = asAmount(product.priceMax ?? product.price_max);
   const exact = asAmount(product.price);
@@ -48,23 +52,29 @@ export function formatProductPrice(product: {
   return '—';
 }
 
-export function formatProductExactPrice(product: {
-  price?: number | string | null;
-  currency?: string | null;
-}): string {
+export function formatProductExactPrice(
+  product: {
+    price?: number | string | null;
+    currency?: string | null;
+  },
+  displayCurrency?: string | null
+): string {
   const exact = asAmount(product.price);
   if (exact == null) return '—';
-  return `${formatMoneyAmount(exact)} ${storedCurrency(product.currency)}`;
+  return formatCurrency(exact, storedCurrency(product.currency, displayCurrency));
 }
 
-export function formatProductPriceRange(product: {
-  priceMin?: number | string | null;
-  priceMax?: number | string | null;
-  price_min?: number | string | null;
-  price_max?: number | string | null;
-  currency?: string | null;
-}): string {
-  const currency = storedCurrency(product.currency);
+export function formatProductPriceRange(
+  product: {
+    priceMin?: number | string | null;
+    priceMax?: number | string | null;
+    price_min?: number | string | null;
+    price_max?: number | string | null;
+    currency?: string | null;
+  },
+  displayCurrency?: string | null
+): string {
+  const currency = storedCurrency(product.currency, displayCurrency);
   const min = asAmount(product.priceMin ?? product.price_min);
   const max = asAmount(product.priceMax ?? product.price_max);
   if (min != null && max != null) {

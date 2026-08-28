@@ -6,8 +6,9 @@ import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
 import QuickBookingModal from '@/components/bookings/QuickBookingModal';
 import { useLanguage, type TranslationKey } from '@/context/LanguageContext';
+import { useCurrency } from '@/context/CurrencyContext';
 import { api } from '@/lib/api';
-import { formatCurrency, getStatusColor } from '@/lib/utils';
+import { getStatusColor } from '@/lib/utils';
 import type { Appointment, DashboardStats, GoogleReviewCalendarItem } from '@/types';
 
 const fmt24 = (time: string) => time.slice(0, 5);
@@ -65,6 +66,7 @@ function sortTodayItems(a: TodayItem, b: TodayItem): number {
 
 export default function Dashboard() {
   const { t } = useLanguage();
+  const { formatCurrency } = useCurrency();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [todayItems, setTodayItems] = useState<TodayItem[]>([]);
   const [loading, setLoading] = useState(true);
