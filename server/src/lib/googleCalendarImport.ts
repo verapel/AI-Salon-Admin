@@ -143,9 +143,84 @@ export function parseGoogleSourceExternalEventId(raw: string | null | undefined)
   return { calendarId, eventId, recurrenceId };
 }
 
+export function stripGoogleICalUidLocalPart(raw: string | null | undefined): string | null {
+  const value = (raw || '').trim();
+  const m = /^([^@\s]+)@google\.com$/i.exec(value);
+  const local = m?.[1]?.trim() || '';
+  return local || null;
+}
+
+export function classifyGoogleStoredIdentifierType(
+  stored: string | null | undefined,
+): 'event.id' | 'iCalUID' | 'primary:event.id' | 'calendarId:event.id' | 'empty' {
+  const value = (stored || '').trim();
+  if (!value) return 'empty';
+  if (stripGoogleICalUidLocalPart(value)) return 'iCalUID';
+  const parsed = parseGoogleSourceExternalEventId(value);
+  if (!parsed) return 'empty';
+  if (stripGoogleICalUidLocalPart(parsed.eventId)) return 'iCalUID';
+  if (parsed.calendarId === 'primary') return 'primary:event.id';
+  if (parsed.calendarId) return 'calendarId:event.id';
+  return 'event.id';
+}
+
+export function googleEventIdentityTokens(ev: {
+  id?: string | null;
+  iCalUID?: string | null;
+}): string[] {
+  const tokens: string[] = [];
+  const add = (value: string | null | undefined) => {
+    const trimmed = (value || '').trim();
+    if (trimmed && !tokens.includes(trimmed)) tokens.push(trimmed);
+  };
+  add(ev.id);
+  add(ev.iCalUID);
+  add(stripGoogleICalUidLocalPart(ev.iCalUID));
+  const id = (ev.id || '').trim();
+  if (id && !id.includes('@')) add(`${id}@google.com`);
+  add(stripGoogleICalUidLocalPart(ev.id));
+  return tokens;
+}
+
+export function googleStoredUidMatchesEvent(
+  storedUid: string | null | undefined,
+  ev: { id?: string | null; iCalUID?: string | null },
+): boolean {
+  const value = (storedUid || '').trim();
+  if (!value) return false;
+  const tokens = googleEventIdentityTokens(ev);
+  if (tokens.includes(value)) return true;
+  const local = stripGoogleICalUidLocalPart(value);
+  return Boolean(local && tokens.includes(local));
+}
+
+export function googleCalendarIdsEquivalent(
+  storedCalendarId: string | null | undefined,
+  liveCalendarId: string | null | undefined,
+): boolean {
+  const stored = (storedCalendarId || '').trim();
+  const live = (liveCalendarId || '').trim();
+  if (!stored || !live) return true;
+  if (stored === live) return true;
+  return stored === 'primary' || live === 'primary';
+}
+
+export function googleCanonicalLinkCalendarId(
+  storedCalendarId: string | null | undefined,
+  selectedCalendarId: string | null | undefined,
+): string {
+  const stored = (storedCalendarId || '').trim();
+  const selected = (selectedCalendarId || '').trim();
+  if (!stored || stored === 'primary') return selected || stored;
+  return stored;
+}
+
 export function legacyStoredGoogleIdentityMatchesEvent(
   stored: string | null | undefined,
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>,
+  ev: Pick<
+    GoogleEventPreviewItem,
+    'id' | 'calendarId' | 'iCalUID' | 'recurringEventId' | 'originalStartTime'
+  >,
 ): boolean {
   const value = (stored || '').trim();
   if (!value) return false;
@@ -155,9 +230,13 @@ export function legacyStoredGoogleIdentityMatchesEvent(
   if (!parsed) return false;
   const rebuilt = buildGoogleSourceExternalEventId(parsed);
   if (keys.includes(rebuilt)) return true;
-  if (parsed.eventId !== ev.id.trim()) return false;
+  if (!googleStoredUidMatchesEvent(parsed.eventId, ev) && !googleStoredUidMatchesEvent(value, ev)) {
+    return false;
+  }
   const evCal = (ev.calendarId || '').trim();
-  if (parsed.calendarId && evCal && parsed.calendarId !== evCal) return false;
+  if (parsed.calendarId && evCal && !googleCalendarIdsEquivalent(parsed.calendarId, evCal)) {
+    return false;
+  }
   const evRec = buildGoogleOccurrenceRecurrenceId(ev);
   if (parsed.recurrenceId && parsed.recurrenceId !== evRec) return false;
   return true;
@@ -193,34 +272,59 @@ export function googleStoredOccurrenceKeys(params: {
   return rec ? [`${uid}:${rec}`] : [uid];
 }
 
-/**
- * Keys used when *looking up* a live Google event.
- * Prefer calendar-scoped identity; fall back to legacy bare keys so
- * unscoped single-calendar rows still match.
- */
-export function googleOccurrenceLookupKeys(ev: {
+type GoogleOccurrenceIdentity = {
   id: string;
   calendarId?: string | null;
+  iCalUID?: string | null;
   recurringEventId?: string | null;
   originalStartTime?: {
     dateTime?: string | null;
     date?: string | null;
   } | null;
-}): string[] {
+};
+
+function pushOccurrenceKeys(
+  keys: string[],
+  params: { calendarId?: string | null; eventId: string; recurrenceId: string },
+): void {
+  for (const key of googleStoredOccurrenceKeys(params)) {
+    if (!keys.includes(key)) keys.push(key);
+  }
+}
+
+/**
+ * Keys used when *looking up* a live Google event.
+ * Prefer calendar-scoped identity; fall back to legacy bare keys so
+ * unscoped single-calendar rows still match. Also tries iCalUID
+ * (`{event.id}@google.com`) because some legacy rows stored that.
+ */
+export function googleOccurrenceLookupKeys(ev: GoogleOccurrenceIdentity): string[] {
   const recurrenceId = buildGoogleOccurrenceRecurrenceId(ev);
-  const scoped = googleStoredOccurrenceKeys({
-    calendarId: ev.calendarId,
-    eventId: ev.id,
-    recurrenceId,
-  });
   const cal = (ev.calendarId || '').trim();
-  if (!cal) return scoped;
-  const legacy = googleStoredOccurrenceKeys({
-    calendarId: '',
-    eventId: ev.id,
-    recurrenceId,
-  });
-  return [...scoped, ...legacy.filter((key) => !scoped.includes(key))];
+  const keys: string[] = [];
+  for (const eventId of googleEventIdentityTokens(ev)) {
+    pushOccurrenceKeys(keys, { calendarId: cal, eventId, recurrenceId });
+    if (cal) {
+      pushOccurrenceKeys(keys, { calendarId: '', eventId, recurrenceId });
+    }
+  }
+  return keys;
+}
+
+/**
+ * Autosync/reconcile lookup: same as googleOccurrenceLookupKeys plus
+ * `primary` as an alias of the live/selected calendar id.
+ * Overlay/multi-calendar preview keeps calendars distinct.
+ */
+export function googleOccurrenceReconcileLookupKeys(ev: GoogleOccurrenceIdentity): string[] {
+  const keys = googleOccurrenceLookupKeys(ev);
+  const cal = (ev.calendarId || '').trim();
+  if (!cal || cal === 'primary') return keys;
+  const recurrenceId = buildGoogleOccurrenceRecurrenceId(ev);
+  for (const eventId of googleEventIdentityTokens(ev)) {
+    pushOccurrenceKeys(keys, { calendarId: 'primary', eventId, recurrenceId });
+  }
+  return keys;
 }
 
 /** In-memory remember-after-write: calendar-scoped only when calendarId is present. */

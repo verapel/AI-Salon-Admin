@@ -17,7 +17,13 @@ import {
   pullGoogleCalendarConnection,
   recentGoogleAutoPullUpdatedMin,
 } from './googleCalendarAutoImport.js';
-import { googleImportedAppointmentNotes } from './googleCalendarImport.js';
+import {
+  classifyGoogleStoredIdentifierType,
+  googleImportedAppointmentNotes,
+  googleOccurrenceLookupKeys,
+  googleOccurrenceReconcileLookupKeys,
+  legacyStoredGoogleIdentityMatchesEvent,
+} from './googleCalendarImport.js';
 import { importGoogleCalendarLast30Days } from './googleCalendarBackfill.js';
 import { listGoogleReviewCalendarItems } from './googleCalendarReviewOverlay.js';
 import {
@@ -68,6 +74,7 @@ function fix2Db(opts: {
   appointments?: Array<Record<string, unknown>>;
   clients?: Array<{ id: string; name: string; phone: string; notes?: string }>;
   issues?: any[];
+  selectedCalendarId?: string;
 } = {}) {
   const importedLinkRows = opts.imported ?? [];
   const appointments = opts.appointments ?? [];
@@ -301,7 +308,7 @@ function fix2Db(opts: {
                   credential_iv: 'y',
                   credential_auth_tag: 'z',
                   status: 'connected',
-                  selected_calendar_id: 'primary',
+                  selected_calendar_id: opts.selectedCalendarId || 'primary',
                   selected_calendar_name: 'Salon',
                   provider_config: {
                     [GOOGLE_AUTO_IMPORT_STAFF_CONFIG_KEY]: STAFF,
@@ -1654,6 +1661,225 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
     assert.match(auto, /deactivateUnlinkedLegacyGoogleOrphans/);
     assert.match(auto, /source_external_event_id/);
     assert.doesNotMatch(auto, /5 \* 60 \* 1000/);
+  });
+
+  it('legacy primary-scoped event.id row moves 11:00–13:00 → 12:00–13:00 on the same appointment', async () => {
+    const PROD_CAL = 'tatevik.miqaelyan@gmail.com';
+    const ev = previewEvent({
+      id: 'evt-legacy',
+      iCalUID: 'evt-legacy@google.com',
+      calendarId: PROD_CAL,
+      summary: 'Moved title',
+      created: '2026-07-01T10:00:00.000Z',
+      start: { dateTime: '2026-08-20T12:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+      end: { dateTime: '2026-08-20T13:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+      etag: 'moved',
+    });
+    const storedLookup = googleOccurrenceLookupKeys(ev);
+    assert.equal(storedLookup.includes('primary:evt-legacy'), false);
+    const reconcileKeys = googleOccurrenceReconcileLookupKeys(ev);
+    assert.equal(reconcileKeys.includes('primary:evt-legacy'), true);
+    assert.equal(reconcileKeys.includes(`${PROD_CAL}:evt-legacy`), true);
+    assert.equal(reconcileKeys.includes('evt-legacy@google.com'), true);
+    assert.equal(legacyStoredGoogleIdentityMatchesEvent('primary:evt-legacy', ev), true);
+    assert.equal(classifyGoogleStoredIdentifierType('primary:evt-legacy'), 'primary:event.id');
+    assert.equal(classifyGoogleStoredIdentifierType('evt-legacy@google.com'), 'iCalUID');
+
+    const db = fix2Db({
+      selectedCalendarId: PROD_CAL,
+      clients: [{ id: CLIENT, name: 'Anna', phone: '' }],
+      imported: [
+        {
+          appointment_id: 'appt-legacy',
+          external_uid: 'evt-legacy',
+          recurrence_id: '',
+          external_calendar_id: 'primary',
+          external_etag: 'old',
+        },
+      ],
+      appointments: [
+        {
+          id: 'appt-legacy',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '11:00',
+          end_time: '13:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('Old title'),
+          source: 'google',
+          source_external_event_id: 'primary:evt-legacy',
+        },
+        {
+          id: 'appt-telegram',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'tg-client',
+          date: '2026-08-20',
+          start_time: '18:00',
+          end_time: '19:00',
+          status: 'scheduled',
+          notes: 'telegram booking',
+          source: 'telegram',
+        },
+        {
+          id: 'appt-owner',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'other',
+          date: '2026-08-20',
+          start_time: '08:00',
+          end_time: '08:30',
+          status: 'scheduled',
+          notes: 'manual',
+          source: 'owner',
+        },
+      ],
+    });
+    let importCalls = 0;
+    const logs: unknown[][] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args);
+    };
+    try {
+      const result = await pullGoogleCalendarConnection({
+        db,
+        salonId: 'salon-1',
+        connectionId: 'conn-1',
+        matchCatalog: CATALOG,
+        salonTimeZone: 'UTC',
+        eventsOverride: [],
+        authoritativeOverride: {
+          events: [ev],
+          complete: true,
+          timeMin: '2026-07-20T00:00:00.000Z',
+          timeMax: '2026-11-20T00:00:00.000Z',
+        },
+        isStillEnabled: async () => true,
+        executeImport: async () => {
+          importCalls += 1;
+          return {
+            appointmentId: 'dup',
+            clientId: CLIENT,
+            clientCreated: false,
+            alreadyImported: false,
+          };
+        },
+      });
+      assert.equal(importCalls, 0);
+      assert.equal(result.imported, 0);
+      assert.equal(db.appointments.length, 3);
+      const legacy = db.appointments.find((row) => row.id === 'appt-legacy');
+      const telegram = db.appointments.find((row) => row.id === 'appt-telegram');
+      const owner = db.appointments.find((row) => row.id === 'appt-owner');
+      assert.equal(legacy?.id, 'appt-legacy');
+      assert.equal(legacy?.start_time, '12:00');
+      assert.equal(legacy?.end_time, '13:00');
+      assert.equal(legacy?.notes, googleImportedAppointmentNotes('Moved title'));
+      assert.equal(legacy?.status, 'scheduled');
+      assert.equal(legacy?.client_id, CLIENT);
+      assert.equal(legacy?.source, 'google');
+      assert.equal(telegram?.status, 'scheduled');
+      assert.equal(telegram?.start_time, '18:00');
+      assert.equal(owner?.status, 'scheduled');
+      assert.equal(owner?.notes, 'manual');
+      assert.equal(db.clients.length, 1);
+      assert.equal(
+        db.importedLinkRows.filter((row) => row.appointment_id === 'appt-legacy').length,
+        1,
+      );
+      const identityLog = logs.find(
+        (args) =>
+          args[0] === '[calendar/google-auto] google identity reconcile' &&
+          (args[1] as { appointmentId?: string })?.appointmentId === 'appt-legacy',
+      );
+      assert.ok(identityLog);
+      const payload = identityLog![1] as Record<string, unknown>;
+      assert.equal(payload.identifierType, 'primary:event.id');
+      assert.equal(payload.matchedEventId, 'evt-legacy');
+      assert.equal(payload.oldStart, '11:00');
+      assert.equal(payload.newStart, '12:00');
+      assert.equal(payload.result, 'updated');
+      assert.equal(payload.error, null);
+      assert.equal('access_token' in payload, false);
+      assert.equal('refresh_token' in payload, false);
+    } finally {
+      console.log = origLog;
+    }
+  });
+
+  it('legacy iCalUID source id adopts the same Google event without a duplicate', async () => {
+    const PROD_CAL = 'tatevik.miqaelyan@gmail.com';
+    const db = fix2Db({
+      selectedCalendarId: PROD_CAL,
+      clients: [{ id: CLIENT, name: 'Anna', phone: '' }],
+      imported: [],
+      appointments: [
+        {
+          id: 'appt-ical',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '11:00',
+          end_time: '13:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('Ical title'),
+          source: 'google',
+          source_external_event_id: 'evt-ical@google.com',
+        },
+      ],
+    });
+    let importCalls = 0;
+    await pullGoogleCalendarConnection({
+      db,
+      salonId: 'salon-1',
+      connectionId: 'conn-1',
+      matchCatalog: CATALOG,
+      salonTimeZone: 'UTC',
+      eventsOverride: [],
+      authoritativeOverride: {
+        events: [
+          previewEvent({
+            id: 'evt-ical',
+            iCalUID: 'evt-ical@google.com',
+            calendarId: PROD_CAL,
+            summary: 'Ical moved',
+            created: '2026-07-01T10:00:00.000Z',
+            start: { dateTime: '2026-08-20T12:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+            end: { dateTime: '2026-08-20T13:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+            etag: 'ical-moved',
+          }),
+        ],
+        complete: true,
+        timeMin: '2026-07-20T00:00:00.000Z',
+        timeMax: '2026-11-20T00:00:00.000Z',
+      },
+      isStillEnabled: async () => true,
+      executeImport: async () => {
+        importCalls += 1;
+        return {
+          appointmentId: 'dup',
+          clientId: CLIENT,
+          clientCreated: false,
+          alreadyImported: false,
+        };
+      },
+    });
+    assert.equal(importCalls, 0);
+    assert.equal(db.appointments.length, 1);
+    const row = db.appointments[0];
+    assert.equal(row?.id, 'appt-ical');
+    assert.equal(row?.start_time, '12:00');
+    assert.equal(row?.end_time, '13:00');
+    assert.equal(row?.client_id, CLIENT);
+    assert.ok(
+      db.importedLinkRows.some(
+        (link) => link.appointment_id === 'appt-ical' && link.external_uid === 'evt-ical',
+      ),
+    );
   });
 
   it('recent autosync updatedMin is last_sync overlap, not the enable watermark', () => {

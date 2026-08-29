@@ -8,8 +8,12 @@ import {
   buildGoogleOccurrenceKey,
   buildGoogleOccurrenceRecurrenceId,
   googleImportedAppointmentNotes,
+  classifyGoogleStoredIdentifierType,
+  googleCalendarIdsEquivalent,
   googleOccurrenceLookupKeys,
+  googleOccurrenceReconcileLookupKeys,
   googleStoredOccurrenceKeys,
+  googleStoredUidMatchesEvent,
   loadGoogleImportedOccurrenceKeys,
 } from './googleCalendarImport.js';
 import type { GoogleEventPreviewItem } from './googleCalendarOAuth.js';
@@ -61,14 +65,44 @@ function isGoogleSourcedAppointment(record: GoogleImportedOccurrenceRecord): boo
 
 const ACTIVE_STATUSES = new Set(['scheduled', 'confirmed']);
 
+function logGoogleIdentityReconcile(params: {
+  appointmentId: string;
+  identifierType: string;
+  matchedEventId: string;
+  oldStart: string | null | undefined;
+  oldEnd: string | null | undefined;
+  newStart: string | null;
+  newEnd: string | null;
+  result: string;
+  error: string | null;
+}): void {
+  console.log('[calendar/google-auto] google identity reconcile', {
+    identifierType: params.identifierType,
+    matchedEventId: params.matchedEventId,
+    appointmentId: params.appointmentId,
+    oldStart: params.oldStart || null,
+    oldEnd: params.oldEnd || null,
+    newStart: params.newStart,
+    newEnd: params.newEnd,
+    result: params.result,
+    error: params.error,
+  });
+}
+
 function occurrenceKeys(
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>,
+  ev: Pick<
+    GoogleEventPreviewItem,
+    'id' | 'calendarId' | 'iCalUID' | 'recurringEventId' | 'originalStartTime'
+  >,
 ): string[] {
-  return googleOccurrenceLookupKeys(ev);
+  return googleOccurrenceReconcileLookupKeys(ev);
 }
 
 function isImportedGoogleOccurrence(
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>,
+  ev: Pick<
+    GoogleEventPreviewItem,
+    'id' | 'calendarId' | 'iCalUID' | 'recurringEventId' | 'originalStartTime'
+  >,
   importedKeys: Set<string>,
 ): boolean {
   return occurrenceKeys(ev).some((k) => importedKeys.has(k));
@@ -143,17 +177,38 @@ export function normalizeImportedOccurrenceIndex(
       keys.add(key);
       byKey.set(key, record);
     }
+    if (cal === 'primary') {
+      for (const key of googleStoredOccurrenceKeys({
+        calendarId: '',
+        eventId: uid,
+        recurrenceId: rec,
+      })) {
+        keys.add(key);
+        byKey.set(key, record);
+      }
+    }
   }
   return { keys, byKey };
 }
 
 export function findImportedOccurrenceRecord(
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>,
+  ev: Pick<
+    GoogleEventPreviewItem,
+    'id' | 'calendarId' | 'iCalUID' | 'recurringEventId' | 'originalStartTime'
+  >,
   index: GoogleImportedOccurrenceIndex,
 ): GoogleImportedOccurrenceRecord | null {
   for (const key of occurrenceKeys(ev)) {
     const row = index.byKey.get(key);
     if (row) return row;
+  }
+  const seen = new Set<string>();
+  for (const row of index.byKey.values()) {
+    if (!row.appointmentId || seen.has(row.appointmentId)) continue;
+    seen.add(row.appointmentId);
+    if (!googleStoredUidMatchesEvent(row.eventId, ev)) continue;
+    if (!googleCalendarIdsEquivalent(row.calendarId, ev.calendarId)) continue;
+    return row;
   }
   return null;
 }
@@ -357,6 +412,21 @@ export async function reconcileGoogleSourcedAppointment(params: {
       .update({ status: 'cancelled' })
       .eq('id', params.record.appointmentId)
       .eq('salon_id', params.salonId);
+    logGoogleIdentityReconcile({
+      appointmentId: params.record.appointmentId,
+      identifierType: classifyGoogleStoredIdentifierType(
+        params.record.calendarId
+          ? `${params.record.calendarId}:${params.record.eventId || ''}`
+          : params.record.eventId,
+      ),
+      matchedEventId: params.ev.id,
+      oldStart: params.record.startTime,
+      oldEnd: params.record.endTime,
+      newStart: null,
+      newEnd: null,
+      result: error ? 'error' : 'cancelled',
+      error: error ? String((error as { message?: string }).message || error) : null,
+    });
     if (error) return { kind: 'missing' };
     params.record.status = 'cancelled';
     await touchImportedLink(params);
@@ -365,6 +435,11 @@ export async function reconcileGoogleSourcedAppointment(params: {
   const times = googleEventCalendarTimes(params.ev, params.salonTimeZone);
   if (!times) return { kind: 'missing' };
   const notes = googleImportedAppointmentNotes(params.ev.summary);
+  const identityType = classifyGoogleStoredIdentifierType(
+    params.record.calendarId
+      ? `${params.record.calendarId}:${params.record.eventId || ''}`
+      : params.record.eventId,
+  );
   const timesChanged =
     params.record.date !== times.date ||
     clock5(params.record.startTime) !== times.startTime ||
@@ -423,6 +498,17 @@ export async function reconcileGoogleSourcedAppointment(params: {
     })
     .eq('id', params.record.appointmentId)
     .eq('salon_id', params.salonId);
+  logGoogleIdentityReconcile({
+    appointmentId: params.record.appointmentId,
+    identifierType: identityType,
+    matchedEventId: params.ev.id,
+    oldStart: params.record.startTime,
+    oldEnd: params.record.endTime,
+    newStart: times.startTime,
+    newEnd: times.endTime,
+    result: error ? 'error' : 'updated',
+    error: error ? String((error as { message?: string }).message || error) : null,
+  });
   if (error) return { kind: 'missing' };
 
   params.record.date = times.date;

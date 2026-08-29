@@ -21,7 +21,10 @@ import {
 import {
   buildGoogleOccurrenceKey,
   buildGoogleOccurrenceRecurrenceId,
-  googleOccurrenceLookupKeys,
+  classifyGoogleStoredIdentifierType,
+  googleCanonicalLinkCalendarId,
+  googleEventIdentityTokens,
+  googleOccurrenceReconcileLookupKeys,
   googleStoredOccurrenceKeys,
   executeManualGoogleCalendarImport,
   fetchGoogleCalendarEventById,
@@ -280,10 +283,10 @@ export function collectLinkedGoogleEventRefs(
   for (const record of index.byKey.values()) {
     if (!googleImportedAppointmentIsVisible(record)) continue;
     const eventId = (record.eventId || '').trim();
-    const calendarId = (record.calendarId || selected).trim();
+    const calendarId = googleCanonicalLinkCalendarId(record.calendarId, selected) || selected;
     if (!eventId || !calendarId) continue;
-    if (selected && calendarId !== selected) continue;
-    const key = `${calendarId}:${eventId}`;
+    if (selected && googleCanonicalLinkCalendarId(calendarId, selected) !== selected) continue;
+    const key = `${googleCanonicalLinkCalendarId(calendarId, selected)}:${eventId}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ eventId, calendarId });
@@ -388,8 +391,9 @@ export function appointmentDateInAuthoritativeRange(
 export function authoritativeGoogleEventIds(events: GoogleEventPreviewItem[]): Set<string> {
   const ids = new Set<string>();
   for (const ev of events) {
-    const id = (ev.id || '').trim();
-    if (id) ids.add(id);
+    for (const token of googleEventIdentityTokens(ev)) {
+      ids.add(token);
+    }
   }
   return ids;
 }
@@ -631,7 +635,31 @@ export async function adoptLegacyGoogleAppointmentsFromAuthoritativeSet(params: 
       recurrence_id: recurrenceId,
       last_seen_at: nowIso,
     });
-    if (error) continue;
+    if (error) {
+      console.log('[calendar/google-auto] google identity reconcile', {
+        identifierType: classifyGoogleStoredIdentifierType(row.sourceExternalEventId),
+        matchedEventId: ev.id,
+        appointmentId: row.appointmentId,
+        oldStart: row.startTime,
+        oldEnd: row.endTime,
+        newStart: null,
+        newEnd: null,
+        result: 'error',
+        error: String((error as { message?: string }).message || error),
+      });
+      continue;
+    }
+    console.log('[calendar/google-auto] google identity reconcile', {
+      identifierType: classifyGoogleStoredIdentifierType(row.sourceExternalEventId),
+      matchedEventId: ev.id,
+      appointmentId: row.appointmentId,
+      oldStart: row.startTime,
+      oldEnd: row.endTime,
+      newStart: null,
+      newEnd: null,
+      result: 'adopted',
+      error: null,
+    });
     linkedEventIds.add(ev.id);
     indexAdoptedGoogleOccurrence(
       params.importedIndex,
@@ -761,13 +789,16 @@ export function readAutoImportPageTokenFromConfig(providerConfig: unknown): stri
 
 export function googleEventOccurrenceKeys(ev: Pick<
   GoogleEventPreviewItem,
-  'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'
+  'id' | 'calendarId' | 'iCalUID' | 'recurringEventId' | 'originalStartTime'
 >): string[] {
-  return googleOccurrenceLookupKeys(ev);
+  return googleOccurrenceReconcileLookupKeys(ev);
 }
 
 export function isImportedGoogleOccurrence(
-  ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>,
+  ev: Pick<
+    GoogleEventPreviewItem,
+    'id' | 'calendarId' | 'iCalUID' | 'recurringEventId' | 'originalStartTime'
+  >,
   importedKeys: Set<string>,
 ): boolean {
   return googleEventOccurrenceKeys(ev).some((k) => importedKeys.has(k));
