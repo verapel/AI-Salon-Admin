@@ -906,6 +906,97 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
     assert.doesNotMatch(updateFn, /updated_at/);
   });
 
+  it('autosync refreshes stale linked Google rows even when incremental list omits them', async () => {
+    const oldNotes = googleImportedAppointmentNotes('Old title');
+    const db = fix2Db({
+      imported: [
+        {
+          appointment_id: 'appt-google',
+          external_uid: 'evt-ap',
+          recurrence_id: '',
+          external_calendar_id: 'primary',
+          external_etag: 'old',
+        },
+      ],
+      appointments: [
+        {
+          id: 'appt-google',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '11:00',
+          end_time: '13:00',
+          status: 'scheduled',
+          notes: oldNotes,
+          source: 'google',
+        },
+        {
+          id: 'appt-owner',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'other',
+          date: '2026-08-20',
+          start_time: '09:00',
+          end_time: '10:00',
+          status: 'scheduled',
+          notes: 'manual',
+          source: 'owner',
+        },
+      ],
+    });
+    let importCalls = 0;
+    const result = await pullGoogleCalendarConnection({
+      db,
+      salonId: 'salon-1',
+      connectionId: 'conn-1',
+      matchCatalog: CATALOG,
+      salonTimeZone: 'UTC',
+      eventsOverride: [],
+      linkedEventsOverride: [
+        previewEvent({
+          id: 'evt-ap',
+          summary: 'New title',
+          start: { dateTime: '2026-08-20T12:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+          end: { dateTime: '2026-08-20T13:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+          etag: 'moved',
+          updated: '2026-08-16T19:00:00.000Z',
+        }),
+      ],
+      isStillEnabled: async () => true,
+      executeImport: async () => {
+        importCalls += 1;
+        return {
+          appointmentId: 'dup',
+          clientId: CLIENT,
+          clientCreated: false,
+          alreadyImported: false,
+        };
+      },
+    });
+    assert.equal(importCalls, 0);
+    assert.equal(result.updated, 1);
+    assert.equal(result.imported, 0);
+    assert.equal(db.appointments.length, 2);
+    const google = db.appointments.find((row) => row.id === 'appt-google');
+    const owner = db.appointments.find((row) => row.id === 'appt-owner');
+    assert.ok(google);
+    assert.equal(google.id, 'appt-google');
+    assert.equal(google.start_time, '12:00');
+    assert.equal(google.end_time, '13:00');
+    assert.notEqual(google.start_time, '11:00');
+    assert.equal(google.notes, googleImportedAppointmentNotes('New title'));
+    assert.equal(owner?.id, 'appt-owner');
+    assert.equal(owner?.start_time, '09:00');
+    assert.equal(owner?.end_time, '10:00');
+    assert.equal(owner?.notes, 'manual');
+    const auto = read('server/src/lib/googleCalendarAutoImport.ts');
+    assert.match(auto, /fetchLinkedImportedGoogleEvents/);
+    assert.match(auto, /fetchGoogleCalendarEventById/);
+    assert.match(auto, /linkedEventsOverride/);
+    assert.doesNotMatch(auto, /5 \* 60 \* 1000/);
+  });
+
   it('recent autosync updatedMin is last_sync overlap, not the enable watermark', () => {
     const now = new Date('2026-08-16T19:00:00.000Z');
     const recent = recentGoogleAutoPullUpdatedMin({

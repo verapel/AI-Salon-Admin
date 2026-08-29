@@ -29,6 +29,8 @@ import type { CalendarEventMatchingPreview } from './calendarEventMatcher.js';
 
 export type GoogleImportedOccurrenceRecord = {
   appointmentId: string;
+  eventId?: string | null;
+  calendarId?: string | null;
   etag: string | null;
   lastModified: string | null;
   date: string | null;
@@ -113,6 +115,8 @@ export function normalizeImportedOccurrenceIndex(
     const appt = appointmentId ? apptById.get(appointmentId) : undefined;
     const record: GoogleImportedOccurrenceRecord = {
       appointmentId,
+      eventId: uid,
+      calendarId: cal || null,
       etag: typeof row.external_etag === 'string' ? row.external_etag : null,
       lastModified:
         typeof row.external_last_modified === 'string' ? row.external_last_modified : null,

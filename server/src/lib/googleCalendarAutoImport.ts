@@ -23,6 +23,7 @@ import {
   buildGoogleOccurrenceRecurrenceId,
   googleOccurrenceLookupKeys,
   executeManualGoogleCalendarImport,
+  fetchGoogleCalendarEventById,
   suggestNewClientNameFromTitle,
   type ManualGoogleImportResult,
 } from './googleCalendarImport.js';
@@ -33,6 +34,7 @@ import {
   GOOGLE_EVENTS_PREVIEW_LOOKAHEAD_DAYS,
   listGoogleCalendarEventsForAutoPull,
   loadGoogleCalendarAppConfig,
+  mapGoogleEventPreviewEntry,
   refreshGoogleAccessToken,
   type GoogleEventPreviewItem,
   type GoogleFetch,
@@ -255,6 +257,66 @@ export function mergeGooglePreviewEvents(
     if (!key || seen.has(key)) continue;
     seen.add(key);
     out.push(ev);
+  }
+  return out;
+}
+
+/** Active imported rows on the selected calendar, by stable Google event id. */
+export function collectLinkedGoogleEventRefs(
+  index: GoogleImportedOccurrenceIndex,
+  selectedCalendarId: string,
+): Array<{ eventId: string; calendarId: string }> {
+  const selected = selectedCalendarId.trim();
+  const seen = new Set<string>();
+  const out: Array<{ eventId: string; calendarId: string }> = [];
+  for (const record of index.byKey.values()) {
+    if (!googleImportedAppointmentIsVisible(record)) continue;
+    const eventId = (record.eventId || '').trim();
+    const calendarId = (record.calendarId || selected).trim();
+    if (!eventId || !calendarId) continue;
+    if (selected && calendarId !== selected) continue;
+    const key = `${calendarId}:${eventId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ eventId, calendarId });
+  }
+  return out;
+}
+
+/**
+ * Current Google state for already-linked appointments.
+ * Does not use updatedMin / page tokens — those miss edits after last_sync advances.
+ */
+export async function fetchLinkedImportedGoogleEvents(params: {
+  accessToken: string;
+  selectedCalendarId: string;
+  calendarName?: string | null;
+  importedIndex: GoogleImportedOccurrenceIndex;
+  fetchImpl?: GoogleFetch;
+}): Promise<GoogleEventPreviewItem[]> {
+  const refs = collectLinkedGoogleEventRefs(
+    params.importedIndex,
+    params.selectedCalendarId,
+  ).slice(0, GOOGLE_CALENDAR_PULL_MAX_SCAN_EVENTS);
+  const out: GoogleEventPreviewItem[] = [];
+  for (const ref of refs) {
+    try {
+      const raw = await fetchGoogleCalendarEventById({
+        accessToken: params.accessToken,
+        calendarId: ref.calendarId,
+        eventId: ref.eventId,
+        fetchImpl: params.fetchImpl,
+      });
+      if (!raw) continue;
+      const mapped = mapGoogleEventPreviewEntry(
+        raw,
+        ref.calendarId,
+        params.calendarName ?? null,
+      );
+      if (mapped) out.push(mapped);
+    } catch {
+      // Per-event read is best-effort so one 5xx cannot skip the rest.
+    }
   }
   return out;
 }
@@ -799,6 +861,8 @@ export async function pullGoogleCalendarConnection(params: {
   executeImport?: typeof executeManualGoogleCalendarImport;
   /** Test seam: skip Google list. */
   eventsOverride?: GoogleEventPreviewItem[];
+  /** Test seam: current Google state for already-linked events (bypasses GET-by-id). */
+  linkedEventsOverride?: GoogleEventPreviewItem[];
   /** Test seam: disable mid-batch. */
   isStillEnabled?: () => Promise<boolean>;
   /** Test seam: avoid salon timezone network lookup. */
@@ -945,7 +1009,10 @@ export async function pullGoogleCalendarConnection(params: {
 
     let listedEvents: GoogleEventPreviewItem[];
     if (params.eventsOverride) {
-      listedEvents = params.eventsOverride;
+      listedEvents = mergeGooglePreviewEvents(
+        params.linkedEventsOverride ?? [],
+        params.eventsOverride,
+      );
     } else {
       const config = loadGoogleCalendarAppConfig();
       let refreshToken: string;
@@ -1012,7 +1079,19 @@ export async function pullGoogleCalendarConnection(params: {
         pageToken: readAutoImportPageTokenFromConfig(conn.provider_config),
         keepEvent: keepDiscoverable,
       });
-      listedEvents = mergeGooglePreviewEvents(recentListed.events, listed.events);
+      const linkedCurrent =
+        params.linkedEventsOverride ??
+        (await fetchLinkedImportedGoogleEvents({
+          accessToken,
+          selectedCalendarId: calendarId,
+          calendarName: conn.selected_calendar_name ?? null,
+          importedIndex,
+          fetchImpl: params.fetchImpl,
+        }));
+      listedEvents = mergeGooglePreviewEvents(
+        linkedCurrent,
+        mergeGooglePreviewEvents(recentListed.events, listed.events),
+      );
       if (recentListed.events.length > 0) {
         console.log('[calendar/google-auto] recent Google updates listed', {
           salonId: params.salonId,
