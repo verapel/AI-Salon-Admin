@@ -69,6 +69,8 @@ import {
   loadGoogleImportedOccurrenceIndex,
   persistCanonicalGoogleBusyAppointment,
   pickCanonicalGoogleBusyServiceId,
+  ensureUnresolvedGoogleBusyServiceId,
+  retainGoogleBusyClientId,
   reconcileGoogleReviewOverlay,
   reconcileGoogleSourcedAppointment,
   type GoogleImportedOccurrenceIndex,
@@ -1365,7 +1367,11 @@ export async function pullGoogleCalendarConnection(params: {
       return summary;
     }
 
-    let importedIndex: GoogleImportedOccurrenceIndex = { keys: new Set(), byKey: new Map() };
+    let importedIndex: GoogleImportedOccurrenceIndex = {
+      keys: new Set(),
+      byKey: new Map(),
+      sharedGoogleClientIds: new Set(),
+    };
     try {
       importedIndex = await loadGoogleImportedOccurrenceIndex({
         db: params.db,
@@ -1630,14 +1636,26 @@ export async function pullGoogleCalendarConnection(params: {
       if (!isGoogleEventEligibleForSalonCalendarDisplay(ev)) {
         return 'excluded';
       }
-      const coverageClientId = parsed
-        ? await ensureAutoCoverageClient(
-            ev,
-            parsed.clientNameCandidate,
-            parsed.phone.normalized || '',
-          )
-        : null;
-      const serviceId = pickCanonicalGoogleBusyServiceId(matching, catalog.services);
+      const matchedClientId =
+        matching?.client.status === 'matched' && matching.client.clientId
+          ? matching.client.clientId
+          : null;
+      const coverageClientId = matchedClientId
+        ? matchedClientId
+        : parsed
+          ? await ensureAutoCoverageClient(
+              ev,
+              parsed.clientNameCandidate,
+              parsed.phone.normalized || '',
+              true,
+            )
+          : null;
+      const serviceId =
+        pickCanonicalGoogleBusyServiceId(matching, catalog.services) ||
+        (await ensureUnresolvedGoogleBusyServiceId({
+          db: params.db,
+          salonId: params.salonId,
+        }));
       if (coverageClientId && serviceId) {
         const persisted = await persistCanonicalGoogleBusyAppointment({
           db: params.db,
@@ -1685,6 +1703,7 @@ export async function pullGoogleCalendarConnection(params: {
       ev: GoogleEventPreviewItem,
       parsedClientName: string | null,
       phoneDigits: string,
+      eventScoped = false,
     ): Promise<string | null> => {
       if (!isGoogleEventEligibleForSalonCalendarDisplay(ev)) return null;
       const rememberedClientId = await loadRememberedGoogleCoverageClientId({
@@ -1705,6 +1724,7 @@ export async function pullGoogleCalendarConnection(params: {
         }),
         phoneDigits,
         rememberedClientId,
+        eventScoped,
       });
       return resolved?.clientId ?? null;
     };
@@ -1785,6 +1805,34 @@ export async function pullGoogleCalendarConnection(params: {
             }
             continue;
           }
+          const matchedClientId =
+            matching?.client.status === 'matched' && matching.client.clientId
+              ? matching.client.clientId
+              : null;
+          const desiredClientId =
+            retainGoogleBusyClientId({
+              eventId: ev.id,
+              currentAppointmentId: record.appointmentId,
+              currentClientId: record.clientId,
+              matchedClientId,
+              currentServiceId: record.serviceId,
+              matchedServiceId: pickCanonicalGoogleBusyServiceId(matching, catalog.services),
+              catalogServiceIds: catalog.services.map((row) => row.id),
+              index: importedIndex,
+              catalogClientIds: catalog.clients.map((row) => row.id),
+            }) ||
+            (await ensureAutoCoverageClient(
+              ev,
+              parsed.clientNameCandidate,
+              parsed.phone.normalized || '',
+              true,
+            ));
+          const desiredServiceId =
+            pickCanonicalGoogleBusyServiceId(matching, catalog.services) ||
+            (await ensureUnresolvedGoogleBusyServiceId({
+              db: params.db,
+              salonId: params.salonId,
+            }));
           const moved = await reconcileGoogleSourcedAppointment({
             db: params.db,
             salonId: params.salonId,
@@ -1795,6 +1843,8 @@ export async function pullGoogleCalendarConnection(params: {
             staffId,
             staffName,
             matching,
+            desiredClientId,
+            desiredServiceId,
           });
           const extras = await deactivateDuplicateGoogleSourcedAppointments({
             db: params.db,

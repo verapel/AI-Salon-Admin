@@ -56,10 +56,13 @@ import {
   findOverlayRecord,
   googleImportedAppointmentIsVisible,
   googleImportedOccurrenceUnchanged,
+  googleImportedRowNeedsBusyMetadataRetarget,
   googleOverlayOccurrenceUnchanged,
   loadGoogleImportedOccurrenceIndex,
   persistCanonicalGoogleBusyAppointment,
   pickCanonicalGoogleBusyServiceId,
+  ensureUnresolvedGoogleBusyServiceId,
+  retainGoogleBusyClientId,
   reconcileGoogleReviewOverlay,
   reconcileGoogleSourcedAppointment,
   type GoogleImportedOccurrenceIndex,
@@ -437,8 +440,35 @@ async function persistEligibleOverlay(params: {
   reviewIndex: GoogleReviewCoverageIndex;
   existing: boolean;
 }): Promise<GoogleSyncTerminal> {
-  const serviceId = pickCanonicalGoogleBusyServiceId(params.matching, params.catalog.services);
-  if (params.clientId && serviceId && isGoogleEventEligibleForSalonCalendarDisplay(params.ev)) {
+  const matchedClientId =
+    params.matching?.client.status === 'matched' && params.matching.client.clientId
+      ? params.matching.client.clientId
+      : null;
+  const scoped = matchedClientId
+    ? null
+    : params.existing && params.clientId
+      ? { clientId: params.clientId }
+      : await resolveOrCreateGoogleCoverageClient({
+          db: params.db,
+          salonId: params.salonId,
+          session: [],
+          catalog: params.catalog,
+          ev: params.ev,
+          displayName: pickGoogleCoverageDisplayName({
+            title: params.ev.summary,
+          }),
+          phoneDigits: '',
+          rememberedClientId: params.existing ? params.clientId ?? null : null,
+          eventScoped: true,
+        });
+  const clientId = matchedClientId || scoped?.clientId || null;
+  const serviceId =
+    pickCanonicalGoogleBusyServiceId(params.matching, params.catalog.services) ||
+    (await ensureUnresolvedGoogleBusyServiceId({
+      db: params.db,
+      salonId: params.salonId,
+    }));
+  if (clientId && serviceId && isGoogleEventEligibleForSalonCalendarDisplay(params.ev)) {
     const persisted = await persistCanonicalGoogleBusyAppointment({
       db: params.db,
       salonId: params.salonId,
@@ -447,7 +477,7 @@ async function persistEligibleOverlay(params: {
       staffId: params.staffId,
       staffName: params.staffName,
       salonTimeZone: params.salonTimeZone,
-      clientId: params.clientId,
+      clientId,
       serviceId,
       importedIndex: params.importedIndex,
       selectedCalendarId: params.selectedCalendarId,
@@ -477,11 +507,11 @@ async function persistEligibleOverlay(params: {
     salonTimeZone: params.salonTimeZone,
     matching: params.matching,
     importedKeys: params.importedKeys,
-    clientId: params.clientId,
+    clientId,
     ignoreImportedLink: true,
   });
   if (persistKind === 'overlay') {
-    rememberGoogleReviewCoverage(params.ev, params.reviewIndex, params.clientId);
+    rememberGoogleReviewCoverage(params.ev, params.reviewIndex, clientId);
     return params.existing ? 'updatedReviewOverlay' : 'newReviewOverlay';
   }
   if (persistKind === 'failed') return 'failed';
@@ -503,6 +533,7 @@ async function ensureCoverageClient(params: {
   catalog: CalendarMatchCatalog;
   summary: GoogleBackfillResult;
   rememberedClientId?: string | null;
+  eventScoped?: boolean;
 }): Promise<string | null> {
   if (!isGoogleEventEligibleForSalonCalendarDisplay(params.ev)) return null;
   const rememberedClientId =
@@ -525,6 +556,7 @@ async function ensureCoverageClient(params: {
     }),
     phoneDigits: params.phoneDigits,
     rememberedClientId,
+    eventScoped: params.eventScoped,
   });
   if (!resolved) return null;
   if (resolved.created) params.summary.clientsCreated += 1;
@@ -719,10 +751,44 @@ export async function importGoogleCalendarLast30Days(params: {
         });
 
         if (importedVisible) {
-          if (googleImportedOccurrenceUnchanged(ev, importedRecord, salonTimeZone)) {
+          if (
+            googleImportedOccurrenceUnchanged(ev, importedRecord, salonTimeZone) &&
+            !googleImportedRowNeedsBusyMetadataRetarget(importedRecord, importedIndex)
+          ) {
             finish('unchangedAppointment');
             continue;
           }
+          const desiredClientId =
+            retainGoogleBusyClientId({
+              eventId: ev.id,
+              currentAppointmentId: importedRecord?.appointmentId,
+              currentClientId: importedRecord?.clientId,
+              matchedClientId:
+                matching.client.status === 'matched' ? matching.client.clientId : null,
+              currentServiceId: importedRecord?.serviceId,
+              matchedServiceId: pickCanonicalGoogleBusyServiceId(matching, catalog.services),
+              catalogServiceIds: catalog.services.map((row) => row.id),
+              index: importedIndex,
+              catalogClientIds: catalog.clients.map((row) => row.id),
+            }) ||
+            (await ensureCoverageClient({
+              db: params.db,
+              salonId,
+              calendarConnectionId: conn.id,
+              ev,
+              parsedClientName: parsed.clientNameCandidate,
+              phoneDigits: parsed.phone.normalized || '',
+              session: clientSession,
+              catalog,
+              summary,
+              eventScoped: true,
+            }));
+          const desiredServiceId =
+            pickCanonicalGoogleBusyServiceId(matching, catalog.services) ||
+            (await ensureUnresolvedGoogleBusyServiceId({
+              db: params.db,
+              salonId,
+            }));
           const moved = await reconcileGoogleSourcedAppointment({
             db: params.db,
             salonId,
@@ -733,6 +799,8 @@ export async function importGoogleCalendarLast30Days(params: {
             staffId: staff.id,
             staffName: staff.name,
             matching,
+            desiredClientId,
+            desiredServiceId,
           });
           if (moved.kind === 'updated') {
             finish('updatedAppointment');

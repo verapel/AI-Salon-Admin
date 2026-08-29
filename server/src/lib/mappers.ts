@@ -193,14 +193,25 @@ type AppointmentJoinRow = {
   services: { name: string; price: number; duration: number } | null;
 };
 
+function googleBusyDisplayTitle(notes: string | null | undefined): string | null {
+  if (!notes) return null;
+  const lines = notes.split('\n');
+  if (!/^Google Calendar import/i.test(lines[0] || '')) return null;
+  const title = lines.slice(1).join('\n').trim();
+  return title || null;
+}
+
 export function mapEnrichedAppointment(row: AppointmentJoinRow) {
   const base = mapAppointment(row);
+  const unresolvedGoogle = row.services?.name === 'Google • Требует проверки';
   return {
     ...base,
     clientName: row.clients?.name ?? 'Unknown',
     clientBirthday: row.clients?.birthday ?? null,
     staffName: row.staff?.name ?? 'Unknown',
-    serviceName: row.services?.name ?? 'Unknown',
+    serviceName: unresolvedGoogle
+      ? googleBusyDisplayTitle(row.notes) || row.services?.name || 'Unknown'
+      : (row.services?.name ?? 'Unknown'),
     servicePrice: Number(row.services?.price ?? 0),
     serviceDuration: row.services?.duration ?? 0,
   };

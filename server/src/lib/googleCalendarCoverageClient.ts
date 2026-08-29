@@ -94,12 +94,22 @@ export function googleProvisionalIdentityKey(params: {
   phoneDigits: string;
   displayName: string;
   eventId: string;
+  eventScoped?: boolean;
 }): string {
   if (params.phoneDigits) return `${GOOGLE_PROVISIONAL_KEY_PREFIX}phone:${params.phoneDigits}`;
-  if (looksLikeGooglePersonName(params.displayName)) {
+  if (!params.eventScoped && looksLikeGooglePersonName(params.displayName)) {
     return `${GOOGLE_PROVISIONAL_KEY_PREFIX}name:${normalizeMatchName(params.displayName)}`;
   }
   return `${GOOGLE_PROVISIONAL_KEY_PREFIX}event:${params.eventId}`;
+}
+
+export function coverageClientBelongsToGoogleEvent(
+  notes: string | null | undefined,
+  eventId: string,
+): boolean {
+  const id = (eventId || '').trim();
+  if (!id) return false;
+  return notesContainIdentityKey(notes, `${GOOGLE_PROVISIONAL_KEY_PREFIX}event:${id}`);
 }
 
 export function notesContainIdentityKey(notes: string | null | undefined, key: string): boolean {
@@ -113,6 +123,7 @@ export function decideGoogleCoverageClient(params: {
   displayName: string;
   eventId: string;
   rememberedClientId?: string | null;
+  eventScoped?: boolean;
 }): GoogleCoverageClientDecision {
   const phoneDigits = params.phoneDigits.replace(/\D/g, '');
   const displayName = pickGoogleCoverageDisplayName({ title: params.displayName });
@@ -120,10 +131,12 @@ export function decideGoogleCoverageClient(params: {
     phoneDigits,
     displayName,
     eventId: params.eventId,
+    eventScoped: params.eventScoped,
   });
 
   if (params.rememberedClientId) {
     const remembered = params.clients.find((row) => row.id === params.rememberedClientId);
+    // Loader is already scoped to this Google event id; reuse is not cross-event.
     if (remembered) {
       return { action: 'reuse', clientId: remembered.id, reason: 'remembered' };
     }
@@ -139,7 +152,12 @@ export function decideGoogleCoverageClient(params: {
   const nameMatches = params.clients.filter(
     (row) => normalizeMatchName(row.name) === normalizeMatchName(displayName),
   );
-  if (nameMatches.length === 1 && nameMatches[0] && looksLikeGooglePersonName(displayName)) {
+  if (
+    !params.eventScoped &&
+    nameMatches.length === 1 &&
+    nameMatches[0] &&
+    looksLikeGooglePersonName(displayName)
+  ) {
     return { action: 'reuse', clientId: nameMatches[0].id, reason: 'name' };
   }
 
@@ -248,6 +266,7 @@ export async function resolveOrCreateGoogleCoverageClient(params: {
   displayName: string;
   phoneDigits: string;
   rememberedClientId?: string | null;
+  eventScoped?: boolean;
 }): Promise<{ clientId: string; created: boolean } | null> {
   seedSessionFromCatalog(params.session, params.catalog);
   const decision = decideGoogleCoverageClient({
@@ -256,6 +275,7 @@ export async function resolveOrCreateGoogleCoverageClient(params: {
     displayName: params.displayName,
     eventId: params.ev.id,
     rememberedClientId: params.rememberedClientId,
+    eventScoped: params.eventScoped,
   });
   if (decision.action === 'reuse') {
     return { clientId: decision.clientId, created: false };

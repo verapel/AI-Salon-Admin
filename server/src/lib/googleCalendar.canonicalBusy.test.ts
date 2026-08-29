@@ -17,6 +17,7 @@ import {
 } from './googleCalendarAutoImport.js';
 import { listGoogleReviewCalendarItems } from './googleCalendarReviewOverlay.js';
 import { googleEventCalendarTimes } from './googleCalendarReviewOverlay.js';
+import { GOOGLE_UNRESOLVED_BUSY_SERVICE_NAME } from './googleCalendarReconcile.js';
 import { filterSlotsByBusyAppointments, FALLBACK_SLOT_STARTS } from './scheduleSlots.js';
 import type { GoogleEventPreviewItem } from './googleCalendarOAuth.js';
 
@@ -74,11 +75,13 @@ function busyDb(opts: {
   appointments?: Array<Record<string, unknown>>;
   clients?: Array<{ id: string; name: string; phone: string; notes?: string }>;
   issues?: any[];
+  services?: Array<Record<string, unknown>>;
 } = {}) {
   const importedLinkRows = opts.imported ?? [];
   const appointments = opts.appointments ?? [];
   const clients = opts.clients ?? [];
   const issues = opts.issues ?? [];
+  const services = opts.services ?? [];
   let issueSeq = issues.length + 1;
   let clientSeq = clients.length + 1;
   return {
@@ -86,7 +89,39 @@ function busyDb(opts: {
     issues,
     importedLinkRows,
     appointments,
+    services,
     from(table: string) {
+      if (table === 'services') {
+        return {
+          select() {
+            const filters: Record<string, string> = {};
+            const chain: any = {
+              eq(col: string, val: string) {
+                filters[col] = val;
+                return chain;
+              },
+              then: async (resolve: any) =>
+                resolve({
+                  data: services.filter((row) =>
+                    Object.entries(filters).every(([k, v]) => String(row[k] ?? '') === String(v)),
+                  ),
+                  error: null,
+                }),
+            };
+            return chain;
+          },
+          insert(row: any) {
+            const created = { id: row.id || `svc-${services.length + 1}`, ...row };
+            services.push(created);
+            return {
+              select() {
+                return { single: async () => ({ data: { id: created.id }, error: null }) };
+              },
+              then: async (resolve: any) => resolve({ data: created, error: null }),
+            };
+          },
+        };
+      }
       if (table === 'clients') {
         return {
           select() {
@@ -661,6 +696,169 @@ describe('canonical Google busy + event timezone', () => {
     assert.ok(db.clients.some((cl) => cl.id === clientId));
     const slots = filterSlotsByBusyAppointments(FALLBACK_SLOT_STARTS, 60, []);
     assert.ok(slots.includes('16:00'));
+  });
+
+  it('unmatched events with different metadata do not inherit the same client/service', async () => {
+    const haircut = 'service-haircut';
+    const evA = yerevanEvent('evt-alpha', '2026-09-10', '10:00', '11:00', 'Alpha unknown block');
+    const evB = yerevanEvent('evt-beta', '2026-09-10', '12:00', '13:30', 'Beta other block');
+    const db = busyDb({
+      clients: [{ id: CLIENT, name: 'Agunik Yeganian', phone: '+380632022810', notes: '' }],
+      services: [
+        { id: haircut, name: 'Haircut & Style', salon_id: 'salon-1' },
+        { id: SERVICE, name: 'Окрашивание', salon_id: 'salon-1' },
+      ],
+    });
+    await pullGoogleCalendarConnection({
+      db,
+      salonId: 'salon-1',
+      connectionId: 'conn-1',
+      matchCatalog: {
+        clients: [{ id: CLIENT, name: 'Agunik Yeganian', phone: '+380632022810' }],
+        services: [
+          { id: haircut, name: 'Haircut & Style' },
+          { id: SERVICE, name: 'Окрашивание' },
+        ],
+      },
+      salonTimeZone: 'Europe/Moscow',
+      eventsOverride: [evA, evB],
+      isStillEnabled: async () => true,
+      executeImport: async () => {
+        throw new Error('recognition failed — must persist busy without executeImport');
+      },
+    });
+    const googleRows = db.appointments.filter(
+      (row) => row.source === 'google' && row.status !== 'cancelled',
+    );
+    assert.equal(googleRows.length, 2);
+    const a = googleRows.find((row) => String(row.notes || '').includes('Alpha unknown block'));
+    const b = googleRows.find((row) => String(row.notes || '').includes('Beta other block'));
+    assert.ok(a && b);
+    assert.notEqual(a.client_id, b.client_id);
+    assert.notEqual(a.client_id, CLIENT);
+    assert.notEqual(b.client_id, CLIENT);
+    assert.notEqual(a.service_id, haircut);
+    assert.notEqual(b.service_id, haircut);
+    assert.notEqual(a.service_id, SERVICE);
+    assert.notEqual(b.service_id, SERVICE);
+    assert.equal(String(a.start_time).slice(0, 5), '10:00');
+    assert.equal(String(b.start_time).slice(0, 5), '12:00');
+    assert.ok(db.clients.some((cl) => cl.id === CLIENT));
+  });
+
+  it('existing inherited source=google rows self-correct by event identity', async () => {
+    const haircut = 'service-haircut';
+    const evA = yerevanEvent('evt-alpha', '2026-09-11', '09:00', '10:00', 'Alpha leftover');
+    const evB = yerevanEvent('evt-beta', '2026-09-11', '14:00', '15:00', 'Beta leftover');
+    const db = busyDb({
+      imported: [
+        {
+          appointment_id: 'bad-a',
+          external_uid: 'evt-alpha',
+          recurrence_id: '',
+          external_calendar_id: PROD_CAL,
+        },
+        {
+          appointment_id: 'bad-b',
+          external_uid: 'evt-beta',
+          recurrence_id: '',
+          external_calendar_id: PROD_CAL,
+        },
+      ],
+      appointments: [
+        {
+          id: 'bad-a',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          service_id: haircut,
+          date: '2026-09-11',
+          start_time: '09:00',
+          end_time: '10:00',
+          status: 'scheduled',
+          notes: 'Google Calendar import\nStale shared',
+          source: 'google',
+        },
+        {
+          id: 'bad-b',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          service_id: haircut,
+          date: '2026-09-11',
+          start_time: '14:00',
+          end_time: '15:00',
+          status: 'scheduled',
+          notes: 'Google Calendar import\nStale shared',
+          source: 'google',
+        },
+        {
+          id: 'appt-telegram',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'tg-client',
+          service_id: haircut,
+          date: '2026-09-11',
+          start_time: '18:00',
+          end_time: '19:00',
+          status: 'scheduled',
+          notes: 'telegram booking',
+          source: 'telegram',
+        },
+      ],
+      clients: [
+        { id: CLIENT, name: 'Agunik Yeganian', phone: '+380632022810', notes: '' },
+        { id: 'tg-client', name: 'TG', phone: '', notes: '' },
+      ],
+      services: [
+        { id: haircut, name: 'Haircut & Style', salon_id: 'salon-1' },
+        { id: SERVICE, name: 'Окрашивание', salon_id: 'salon-1' },
+      ],
+    });
+    await pullGoogleCalendarConnection({
+      db,
+      salonId: 'salon-1',
+      connectionId: 'conn-1',
+      matchCatalog: {
+        clients: [{ id: CLIENT, name: 'Agunik Yeganian', phone: '+380632022810' }],
+        services: [
+          { id: haircut, name: 'Haircut & Style' },
+          { id: SERVICE, name: 'Окрашивание' },
+        ],
+      },
+      salonTimeZone: 'Europe/Moscow',
+      eventsOverride: [evA, evB],
+      authoritativeOverride: {
+        events: [evA, evB],
+        complete: true,
+        timeMin: '2026-07-30T00:00:00.000Z',
+        timeMax: '2026-11-27T00:00:00.000Z',
+      },
+      isStillEnabled: async () => true,
+      executeImport: async () => {
+        throw new Error('must retarget existing google rows');
+      },
+    });
+    const a = db.appointments.find((row) => row.id === 'bad-a');
+    const b = db.appointments.find((row) => row.id === 'bad-b');
+    const telegram = db.appointments.find((row) => row.id === 'appt-telegram');
+    assert.equal(a?.id, 'bad-a');
+    assert.equal(b?.id, 'bad-b');
+    assert.notEqual(a?.client_id, b?.client_id);
+    assert.notEqual(a?.client_id, CLIENT);
+    assert.notEqual(b?.client_id, CLIENT);
+    assert.notEqual(a?.service_id, haircut);
+    assert.notEqual(b?.service_id, haircut);
+    assert.ok(String(a?.notes || '').includes('Alpha leftover'));
+    assert.ok(String(b?.notes || '').includes('Beta leftover'));
+    assert.equal(telegram?.client_id, 'tg-client');
+    assert.equal(telegram?.service_id, haircut);
+    assert.equal(telegram?.source, 'telegram');
+    assert.ok(db.clients.some((cl) => cl.id === CLIENT));
+    assert.ok(db.clients.some((cl) => cl.id === 'tg-client'));
+    assert.ok(
+      db.services.some((svc) => svc.name === GOOGLE_UNRESOLVED_BUSY_SERVICE_NAME && svc.active === false),
+    );
   });
 
   it('Calendar still merges appointments + review overlay; Bookings is appointments-only', () => {

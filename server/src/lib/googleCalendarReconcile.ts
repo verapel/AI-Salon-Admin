@@ -46,6 +46,7 @@ export type GoogleImportedOccurrenceRecord = {
   endTime: string | null;
   staffId: string | null;
   clientId: string | null;
+  serviceId?: string | null;
   status: string | null;
   notes: string | null;
 };
@@ -53,6 +54,8 @@ export type GoogleImportedOccurrenceRecord = {
 export type GoogleImportedOccurrenceIndex = {
   keys: Set<string>;
   byKey: Map<string, GoogleImportedOccurrenceRecord>;
+  /** Client ids shared by 2+ visible Google rows at index load. Not mutated mid-tick. */
+  sharedGoogleClientIds?: Set<string>;
 };
 
 export type GoogleAppointmentReconcileResult =
@@ -115,6 +118,27 @@ function clock5(value: string | null | undefined): string {
   return (value || '').trim().slice(0, 5);
 }
 
+function googleBusyMetadataPatch(
+  record: Pick<GoogleImportedOccurrenceRecord, 'clientId' | 'serviceId'>,
+  desired: { clientId?: string | null; serviceId?: string | null },
+): { client_id?: string; service_id?: string } | null {
+  const patch: { client_id?: string; service_id?: string } = {};
+  const clientId = (desired.clientId || '').trim();
+  const serviceId = (desired.serviceId || '').trim();
+  if (clientId && clientId !== (record.clientId || '')) patch.client_id = clientId;
+  if (serviceId && serviceId !== (record.serviceId || '')) patch.service_id = serviceId;
+  return patch.client_id || patch.service_id ? patch : null;
+}
+
+function applyGoogleBusyMetadataToRecord(
+  record: GoogleImportedOccurrenceRecord,
+  patch: { client_id?: string; service_id?: string } | null,
+): void {
+  if (!patch) return;
+  if (patch.client_id) record.clientId = patch.client_id;
+  if (patch.service_id) record.serviceId = patch.service_id;
+}
+
 function date10(value: unknown): string {
   if (typeof value === 'string') return value.trim().slice(0, 10);
   if (value instanceof Date && Number.isFinite(value.getTime())) {
@@ -167,6 +191,7 @@ export function normalizeImportedOccurrenceIndex(
       endTime: clock5(typeof appt?.end_time === 'string' ? appt.end_time : '') || null,
       staffId: typeof appt?.staff_id === 'string' ? appt.staff_id : null,
       clientId: typeof appt?.client_id === 'string' ? appt.client_id : null,
+      serviceId: typeof appt?.service_id === 'string' ? appt.service_id : null,
       status: typeof appt?.status === 'string' ? appt.status : null,
       source: typeof appt?.source === 'string' ? appt.source : null,
       notes: typeof appt?.notes === 'string' ? appt.notes : null,
@@ -191,7 +216,7 @@ export function normalizeImportedOccurrenceIndex(
       }
     }
   }
-  return { keys, byKey };
+  return { keys, byKey, sharedGoogleClientIds: collectSharedGoogleBusyClientIds(byKey.values()) };
 }
 
 export function findImportedOccurrenceRecord(
@@ -301,11 +326,9 @@ export function googleOccurrenceNeedsAutoReconcile(params: {
     return overlay;
   }
   if (imported) {
-    return !googleImportedOccurrenceUnchanged(
-      ev,
-      findImportedOccurrenceRecord(ev, params.imported),
-      params.salonTimeZone,
-    );
+    const record = findImportedOccurrenceRecord(ev, params.imported);
+    if (googleImportedRowNeedsBusyMetadataRetarget(record, params.imported)) return true;
+    return !googleImportedOccurrenceUnchanged(ev, record, params.salonTimeZone);
   }
   return !googleOverlayOccurrenceUnchanged(
     ev,
@@ -328,20 +351,155 @@ export function rememberImportedOccurrence(
   }
 }
 
+/** Inactive salon service used only when THIS Google event did not match a catalog service. */
+export const GOOGLE_UNRESOLVED_BUSY_SERVICE_NAME = 'Google • Требует проверки';
+
+function collectSharedGoogleBusyClientIds(
+  records: Iterable<GoogleImportedOccurrenceRecord>,
+): Set<string> {
+  const clientToAppointments = new Map<string, Set<string>>();
+  const seen = new Set<string>();
+  for (const record of records) {
+    if (!record.appointmentId || seen.has(record.appointmentId)) continue;
+    seen.add(record.appointmentId);
+    if (!isGoogleSourcedAppointment(record)) continue;
+    if (!googleImportedAppointmentIsVisible(record)) continue;
+    const clientId = (record.clientId || '').trim();
+    if (!clientId) continue;
+    const bucket = clientToAppointments.get(clientId) ?? new Set<string>();
+    bucket.add(record.appointmentId);
+    clientToAppointments.set(clientId, bucket);
+  }
+  const shared = new Set<string>();
+  for (const [clientId, appts] of clientToAppointments) {
+    if (appts.size > 1) shared.add(clientId);
+  }
+  return shared;
+}
+
+export function googleBusyClientIsSharedAcrossEvents(
+  clientId: string,
+  currentAppointmentId: string,
+  index: GoogleImportedOccurrenceIndex,
+): boolean {
+  const wanted = clientId.trim();
+  const selfAppt = currentAppointmentId.trim();
+  if (!wanted || !selfAppt) return false;
+  if (index.sharedGoogleClientIds) return index.sharedGoogleClientIds.has(wanted);
+  const seen = new Set<string>();
+  for (const record of index.byKey.values()) {
+    if (!record.appointmentId || seen.has(record.appointmentId)) continue;
+    seen.add(record.appointmentId);
+    if (record.appointmentId === selfAppt) continue;
+    if (!isGoogleSourcedAppointment(record)) continue;
+    if (!googleImportedAppointmentIsVisible(record)) continue;
+    if ((record.clientId || '') === wanted) return true;
+  }
+  return false;
+}
+
+/** Shared inherited client/service must reconcile even when title/time already match. */
+export function googleImportedRowNeedsBusyMetadataRetarget(
+  record: GoogleImportedOccurrenceRecord | null | undefined,
+  index: GoogleImportedOccurrenceIndex,
+): boolean {
+  if (!googleImportedAppointmentIsVisible(record)) return false;
+  const client = (record!.clientId || '').trim();
+  if (!client) return false;
+  return googleBusyClientIsSharedAcrossEvents(client, record!.appointmentId, index);
+}
+
+/** Keep an existing per-event client; retarget only inherited/shared clients. */
+export function retainGoogleBusyClientId(params: {
+  eventId: string;
+  currentAppointmentId?: string | null;
+  currentClientId: string | null | undefined;
+  matchedClientId: string | null | undefined;
+  currentServiceId?: string | null;
+  matchedServiceId?: string | null;
+  catalogServiceIds?: Iterable<string>;
+  index: GoogleImportedOccurrenceIndex;
+  catalogClientIds?: Iterable<string>;
+}): string | null {
+  const matched = (params.matchedClientId || '').trim();
+  if (matched) return matched;
+  const current = (params.currentClientId || '').trim();
+  if (!current) return null;
+  const catalogServiceIds = new Set(
+    [...(params.catalogServiceIds ?? [])].map((id) => id.trim()).filter(Boolean),
+  );
+  const currentService = (params.currentServiceId || '').trim();
+  const inheritedCatalogService =
+    !(params.matchedServiceId || '').trim() &&
+    Boolean(currentService) &&
+    catalogServiceIds.has(currentService);
+  // Only detach a client when this unmatched event also inherited a real
+  // catalog service (the 05f4fa6 first-service fallback) and that client is
+  // shared with another Google row.
+  if (
+    inheritedCatalogService &&
+    googleBusyClientIsSharedAcrossEvents(
+      current,
+      params.currentAppointmentId || '',
+      params.index,
+    )
+  ) {
+    return null;
+  }
+  void params.catalogClientIds;
+  return current;
+}
+
 export function pickCanonicalGoogleBusyServiceId(
   matching: CalendarEventMatchingPreview | undefined,
-  catalogServices: Array<{ id?: string | null }>,
+  _catalogServices?: Array<{ id?: string | null }>,
 ): string | null {
+  void _catalogServices;
   const matched =
     matching?.service?.status === 'matched' && typeof matching.service.serviceId === 'string'
       ? matching.service.serviceId.trim()
       : '';
-  if (matched) return matched;
-  for (const row of catalogServices) {
-    const id = typeof row?.id === 'string' ? row.id.trim() : '';
-    if (id) return id;
+  return matched || null;
+}
+
+export async function ensureUnresolvedGoogleBusyServiceId(params: {
+  db: any;
+  salonId: string;
+}): Promise<string | null> {
+  try {
+    const listed = await params.db
+      .from('services')
+      .select('id, name, salon_id')
+      .eq('salon_id', params.salonId)
+      .eq('name', GOOGLE_UNRESOLVED_BUSY_SERVICE_NAME);
+    const rows = Array.isArray(listed?.data) ? listed.data : [];
+    const existing = rows.find((row: { id?: string }) => typeof row?.id === 'string' && row.id);
+    if (existing?.id) return existing.id as string;
+
+    const insertRow = {
+      id: randomUUID(),
+      salon_id: params.salonId,
+      name: GOOGLE_UNRESOLVED_BUSY_SERVICE_NAME,
+      description: 'Unresolved Google Calendar busy block. Not a bookable salon service.',
+      duration: 60,
+      price: 0,
+      category: 'General',
+      active: false,
+    };
+    const insertQuery = params.db.from('services').insert(insertRow);
+    let inserted: { data?: { id?: string } | null; error?: unknown } | null = null;
+    if (insertQuery && typeof insertQuery.select === 'function') {
+      inserted = await insertQuery.select('id').single();
+    } else if (insertQuery && typeof insertQuery.then === 'function') {
+      inserted = await insertQuery;
+    }
+    if (inserted?.error) return null;
+    const id =
+      (typeof inserted?.data?.id === 'string' && inserted.data.id) || insertRow.id;
+    return id || null;
+  } catch {
+    return randomUUID();
   }
-  return null;
 }
 
 export async function persistCanonicalGoogleBusyAppointment(params: {
@@ -373,6 +531,8 @@ export async function persistCanonicalGoogleBusyAppointment(params: {
       staffId: params.staffId,
       staffName: params.staffName || 'Tatev',
       matching: params.matching,
+      desiredClientId: params.clientId,
+      desiredServiceId: params.serviceId,
     });
     return { kind: moved.kind, appointmentId: existing.appointmentId };
   }
@@ -446,6 +606,7 @@ export async function persistCanonicalGoogleBusyAppointment(params: {
     endTime: times.endTime,
     staffId: params.staffId,
     clientId: params.clientId,
+    serviceId: params.serviceId,
     status: 'scheduled',
     notes,
     source: 'google',
@@ -484,7 +645,7 @@ export async function loadGoogleImportedOccurrenceIndex(params: {
       salonId: params.salonId,
       calendarConnectionId: params.calendarConnectionId,
     });
-    return { keys, byKey: new Map() };
+    return { keys, byKey: new Map(), sharedGoogleClientIds: new Set() };
   }
   const links = Array.isArray(data) ? data : [];
   const appointmentIds = [
@@ -500,7 +661,7 @@ export async function loadGoogleImportedOccurrenceIndex(params: {
   if (appointmentIds.length > 0) {
     const loaded = await params.db
       .from('appointments')
-      .select('id, date, start_time, end_time, staff_id, client_id, status, notes, source')
+      .select('id, date, start_time, end_time, staff_id, client_id, service_id, status, notes, source')
       .eq('salon_id', params.salonId);
     const rows = Array.isArray(loaded?.data) ? loaded.data : [];
     const wanted = new Set(appointmentIds);
@@ -682,6 +843,8 @@ export async function reconcileGoogleSourcedAppointment(params: {
   staffId: string;
   staffName: string;
   matching?: CalendarEventMatchingPreview;
+  desiredClientId?: string | null;
+  desiredServiceId?: string | null;
   syncReminder?: typeof syncAppointmentReminder;
 }): Promise<GoogleAppointmentReconcileResult> {
   if (!params.record.appointmentId) return { kind: 'missing' };
@@ -726,18 +889,26 @@ export async function reconcileGoogleSourcedAppointment(params: {
     clock5(params.record.startTime) !== times.startTime ||
     clock5(params.record.endTime) !== times.endTime;
   const notesChanged = params.record.notes !== notes;
+  const metadataPatch = googleBusyMetadataPatch(params.record, {
+    clientId: params.desiredClientId,
+    serviceId: params.desiredServiceId,
+  });
   if (!timesChanged) {
-    if (!notesChanged) {
+    if (!notesChanged && !metadataPatch) {
       await touchImportedLink(params);
       return { kind: 'unchanged' };
     }
     const { error } = await params.db
       .from('appointments')
-      .update({ notes })
+      .update({
+        ...(notesChanged ? { notes } : {}),
+        ...(metadataPatch || {}),
+      })
       .eq('id', params.record.appointmentId)
       .eq('salon_id', params.salonId);
     if (error) return { kind: 'missing' };
-    params.record.notes = notes;
+    if (notesChanged) params.record.notes = notes;
+    applyGoogleBusyMetadataToRecord(params.record, metadataPatch);
     await touchImportedLink(params);
     return { kind: 'updated' };
   }
@@ -776,9 +947,10 @@ export async function reconcileGoogleSourcedAppointment(params: {
       start_time: times.startTime,
       end_time: times.endTime,
       notes,
+      ...(metadataPatch || {}),
     })
-    .eq('id', params.record.appointmentId)
-    .eq('salon_id', params.salonId);
+      .eq('id', params.record.appointmentId)
+      .eq('salon_id', params.salonId);
   logGoogleIdentityReconcile({
     appointmentId: params.record.appointmentId,
     identifierType: identityType,
@@ -796,6 +968,7 @@ export async function reconcileGoogleSourcedAppointment(params: {
   params.record.startTime = times.startTime;
   params.record.endTime = times.endTime;
   params.record.notes = notes;
+  applyGoogleBusyMetadataToRecord(params.record, metadataPatch);
   await touchImportedLink(params);
 
   const syncReminder = params.syncReminder ?? syncAppointmentReminder;
