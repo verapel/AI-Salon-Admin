@@ -1882,6 +1882,214 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
     );
   });
 
+  it('Aug 30 legacy cluster: sibling Google rows move and same-event duplicates hide', async () => {
+    const PROD_CAL = 'tatevik.miqaelyan@gmail.com';
+    const db = fix2Db({
+      selectedCalendarId: PROD_CAL,
+      clients: [
+        { id: 'client-a', name: 'A', phone: '' },
+        { id: 'client-b', name: 'B', phone: '' },
+        { id: 'client-c', name: 'C', phone: '' },
+        { id: 'client-dup', name: 'Dup', phone: '' },
+      ],
+      imported: [
+        {
+          appointment_id: 'appt-a',
+          external_uid: 'evt-a',
+          recurrence_id: '',
+          external_calendar_id: 'primary',
+        },
+        {
+          appointment_id: 'appt-a-dup',
+          external_uid: 'evt-a',
+          recurrence_id: '',
+          external_calendar_id: PROD_CAL,
+        },
+        {
+          appointment_id: 'appt-b',
+          external_uid: 'evt-b',
+          recurrence_id: '',
+          external_calendar_id: 'primary',
+        },
+        {
+          appointment_id: 'appt-c',
+          external_uid: 'evt-c',
+          recurrence_id: '',
+          external_calendar_id: 'primary',
+        },
+      ],
+      appointments: [
+        {
+          id: 'appt-a',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'client-a',
+          date: '2026-08-30',
+          start_time: '11:00',
+          end_time: '12:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('A old'),
+          source: 'google',
+          source_external_event_id: 'primary:evt-a',
+        },
+        {
+          id: 'appt-a-dup',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'client-dup',
+          date: '2026-08-30',
+          start_time: '11:00',
+          end_time: '12:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('A dup'),
+          source: 'google',
+          source_external_event_id: `${PROD_CAL}:evt-a`,
+        },
+        {
+          id: 'appt-b',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'client-b',
+          date: '2026-08-30',
+          start_time: '11:00',
+          end_time: '13:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('B old'),
+          source: 'google',
+          source_external_event_id: 'primary:evt-b',
+        },
+        {
+          id: 'appt-c',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'client-c',
+          date: '2026-08-30',
+          start_time: '11:00',
+          end_time: '13:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('C old'),
+          source: 'google',
+          source_external_event_id: 'primary:evt-c',
+        },
+        {
+          id: 'appt-telegram',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'tg-client',
+          date: '2026-08-30',
+          start_time: '18:00',
+          end_time: '19:00',
+          status: 'scheduled',
+          notes: 'telegram booking',
+          source: 'telegram',
+        },
+        {
+          id: 'appt-owner',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'other',
+          date: '2026-08-30',
+          start_time: '08:00',
+          end_time: '08:30',
+          status: 'scheduled',
+          notes: 'manual',
+          source: 'owner',
+        },
+      ],
+    });
+    let importCalls = 0;
+    const result = await pullGoogleCalendarConnection({
+      db,
+      salonId: 'salon-1',
+      connectionId: 'conn-1',
+      matchCatalog: CATALOG,
+      salonTimeZone: 'UTC',
+      eventsOverride: [],
+      authoritativeOverride: {
+        events: [
+          previewEvent({
+            id: 'evt-a',
+            iCalUID: 'evt-a@google.com',
+            calendarId: PROD_CAL,
+            summary: 'A now',
+            created: '2026-07-01T10:00:00.000Z',
+            start: { dateTime: '2026-08-30T12:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+            end: { dateTime: '2026-08-30T13:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+            etag: 'a-new',
+          }),
+          previewEvent({
+            id: 'evt-b',
+            iCalUID: 'evt-b@google.com',
+            calendarId: PROD_CAL,
+            summary: 'B now',
+            created: '2026-07-01T10:00:00.000Z',
+            start: { dateTime: '2026-08-30T12:30:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+            end: { dateTime: '2026-08-30T13:30:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+            etag: 'b-new',
+          }),
+          previewEvent({
+            id: 'evt-c',
+            iCalUID: 'evt-c@google.com',
+            calendarId: PROD_CAL,
+            summary: 'C now',
+            created: '2026-07-01T10:00:00.000Z',
+            start: { dateTime: '2026-08-30T14:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+            end: { dateTime: '2026-08-30T15:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+            etag: 'c-new',
+          }),
+        ],
+        complete: true,
+        timeMin: '2026-07-30T00:00:00.000Z',
+        timeMax: '2026-11-27T00:00:00.000Z',
+      },
+      isStillEnabled: async () => true,
+      executeImport: async () => {
+        importCalls += 1;
+        return {
+          appointmentId: 'dup',
+          clientId: CLIENT,
+          clientCreated: false,
+          alreadyImported: false,
+        };
+      },
+    });
+    assert.equal(importCalls, 0);
+    assert.equal(result.imported, 0);
+    const visibleGoogle = db.appointments.filter(
+      (row) => row.source === 'google' && row.status !== 'cancelled',
+    );
+    const a = db.appointments.find((row) => row.id === 'appt-a');
+    const aDup = db.appointments.find((row) => row.id === 'appt-a-dup');
+    const b = db.appointments.find((row) => row.id === 'appt-b');
+    const c = db.appointments.find((row) => row.id === 'appt-c');
+    const telegram = db.appointments.find((row) => row.id === 'appt-telegram');
+    const owner = db.appointments.find((row) => row.id === 'appt-owner');
+    assert.equal(visibleGoogle.length, 3);
+    assert.equal(a?.start_time, '12:00');
+    assert.equal(a?.end_time, '13:00');
+    assert.equal(a?.status, 'scheduled');
+    assert.equal(a?.client_id, 'client-a');
+    assert.equal(aDup?.status, 'cancelled');
+    assert.equal(aDup?.source, 'google');
+    assert.equal(aDup?.client_id, 'client-dup');
+    assert.equal(b?.start_time, '12:30');
+    assert.equal(b?.end_time, '13:30');
+    assert.equal(b?.id, 'appt-b');
+    assert.equal(c?.start_time, '14:00');
+    assert.equal(c?.end_time, '15:00');
+    assert.equal(c?.id, 'appt-c');
+    assert.equal(telegram?.status, 'scheduled');
+    assert.equal(telegram?.start_time, '18:00');
+    assert.equal(owner?.status, 'scheduled');
+    assert.equal(owner?.notes, 'manual');
+    assert.equal(db.clients.length, 4);
+    assert.ok(db.clients.some((cl) => cl.id === 'client-dup'));
+    assert.equal(
+      db.appointments.filter((row) => row.source === 'telegram' || row.source === 'owner').length,
+      2,
+    );
+  });
+
   it('recent autosync updatedMin is last_sync overlap, not the enable watermark', () => {
     const now = new Date('2026-08-16T19:00:00.000Z');
     const recent = recentGoogleAutoPullUpdatedMin({

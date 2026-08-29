@@ -10,6 +10,7 @@ import {
   googleImportedAppointmentNotes,
   classifyGoogleStoredIdentifierType,
   googleCalendarIdsEquivalent,
+  googleCanonicalLinkCalendarId,
   googleOccurrenceLookupKeys,
   googleOccurrenceReconcileLookupKeys,
   googleStoredOccurrenceKeys,
@@ -198,9 +199,12 @@ export function findImportedOccurrenceRecord(
   >,
   index: GoogleImportedOccurrenceIndex,
 ): GoogleImportedOccurrenceRecord | null {
+  let hidden: GoogleImportedOccurrenceRecord | null = null;
   for (const key of occurrenceKeys(ev)) {
     const row = index.byKey.get(key);
-    if (row) return row;
+    if (!row) continue;
+    if (googleImportedAppointmentIsVisible(row)) return row;
+    hidden = hidden ?? row;
   }
   const seen = new Set<string>();
   for (const row of index.byKey.values()) {
@@ -208,9 +212,10 @@ export function findImportedOccurrenceRecord(
     seen.add(row.appointmentId);
     if (!googleStoredUidMatchesEvent(row.eventId, ev)) continue;
     if (!googleCalendarIdsEquivalent(row.calendarId, ev.calendarId)) continue;
-    return row;
+    if (googleImportedAppointmentIsVisible(row)) return row;
+    hidden = hidden ?? row;
   }
-  return null;
+  return hidden;
 }
 
 export function googleImportedAppointmentIsVisible(
@@ -376,19 +381,153 @@ async function staffHasConflict(params: {
   if (startMin == null || endMin == null || endMin <= startMin) return true;
   const loaded = await params.db
     .from('appointments')
-    .select('id, start_time, end_time, status')
+    .select('id, start_time, end_time, status, source')
     .eq('salon_id', params.salonId)
     .eq('staff_id', params.staffId)
     .eq('date', params.date);
   const rows = Array.isArray(loaded?.data) ? loaded.data : [];
-  return rows.some((row: { id?: string; start_time?: string; end_time?: string; status?: string }) => {
+  return rows.some((row: {
+    id?: string;
+    start_time?: string;
+    end_time?: string;
+    status?: string;
+    source?: string;
+  }) => {
     if (row.id === params.excludeAppointmentId) return false;
+    // Other source=google rows are Google-owned and reconciled separately.
+    // Treating them as blockers deadlocks a same-day cluster (Aug 30).
+    if (String(row.source || '').trim().toLowerCase() === 'google') return false;
     if (!ACTIVE_STATUSES.has(String(row.status || ''))) return false;
     const otherStart = minutesFromClock(row.start_time || '');
     const otherEnd = minutesFromClock(row.end_time || '');
     if (otherStart == null || otherEnd == null) return false;
     return intervalsOverlap(startMin, endMin, otherStart, otherEnd);
   });
+}
+
+export function collectGoogleSourcedDuplicatesForEvent(
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'iCalUID' | 'calendarId'>,
+  index: GoogleImportedOccurrenceIndex,
+  keepAppointmentId: string,
+): GoogleImportedOccurrenceRecord[] {
+  const keep = keepAppointmentId.trim();
+  const seen = new Set<string>();
+  const out: GoogleImportedOccurrenceRecord[] = [];
+  for (const record of index.byKey.values()) {
+    if (!record.appointmentId || seen.has(record.appointmentId)) continue;
+    if (record.appointmentId === keep) continue;
+    if (!isGoogleSourcedAppointment(record)) continue;
+    if (!googleImportedAppointmentIsVisible(record)) continue;
+    if (!googleStoredUidMatchesEvent(record.eventId, ev)) continue;
+    if (!googleCalendarIdsEquivalent(record.calendarId, ev.calendarId)) continue;
+    seen.add(record.appointmentId);
+    out.push(record);
+  }
+  return out;
+}
+
+function googleDuplicateGroupKey(
+  record: GoogleImportedOccurrenceRecord,
+  selectedCalendarId?: string | null,
+): string {
+  const raw = (record.eventId || '').trim();
+  const local = raw.replace(/@google\.com$/i, '');
+  const cal = googleCanonicalLinkCalendarId(record.calendarId, selectedCalendarId);
+  return `${cal}::${local}`;
+}
+
+export async function deactivateIndexGoogleSourcedDuplicates(params: {
+  db: any;
+  salonId: string;
+  index: GoogleImportedOccurrenceIndex;
+  selectedCalendarId?: string | null;
+}): Promise<number> {
+  const groups = new Map<string, GoogleImportedOccurrenceRecord[]>();
+  const seen = new Set<string>();
+  for (const record of params.index.byKey.values()) {
+    if (!record.appointmentId || seen.has(record.appointmentId)) continue;
+    if (!isGoogleSourcedAppointment(record)) continue;
+    if (!googleImportedAppointmentIsVisible(record)) continue;
+    if (!(record.eventId || '').trim()) continue;
+    seen.add(record.appointmentId);
+    const key = googleDuplicateGroupKey(record, params.selectedCalendarId);
+    const group = groups.get(key) ?? [];
+    group.push(record);
+    groups.set(key, group);
+  }
+  let deactivated = 0;
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const kept = [...group].sort((a, b) => a.appointmentId.localeCompare(b.appointmentId))[0]!;
+    for (const record of group) {
+      if (record.appointmentId === kept.appointmentId) continue;
+      const { error } = await params.db
+        .from('appointments')
+        .update({ status: 'cancelled' })
+        .eq('id', record.appointmentId)
+        .eq('salon_id', params.salonId)
+        .eq('source', 'google');
+      if (error) continue;
+      record.status = 'cancelled';
+      deactivated += 1;
+      console.log('[calendar/google-auto] google identity reconcile', {
+        identifierType: classifyGoogleStoredIdentifierType(
+          record.calendarId ? `${record.calendarId}:${record.eventId || ''}` : record.eventId,
+        ),
+        matchedEventId: kept.eventId,
+        appointmentId: record.appointmentId,
+        keptAppointmentId: kept.appointmentId,
+        oldStart: record.startTime,
+        oldEnd: record.endTime,
+        newStart: null,
+        newEnd: null,
+        result: 'duplicate_cancelled',
+        error: null,
+      });
+    }
+  }
+  return deactivated;
+}
+
+export async function deactivateDuplicateGoogleSourcedAppointments(params: {
+  db: any;
+  salonId: string;
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'iCalUID' | 'calendarId'>;
+  index: GoogleImportedOccurrenceIndex;
+  keepAppointmentId: string;
+}): Promise<number> {
+  const extras = collectGoogleSourcedDuplicatesForEvent(
+    params.ev,
+    params.index,
+    params.keepAppointmentId,
+  );
+  let deactivated = 0;
+  for (const record of extras) {
+    const { error } = await params.db
+      .from('appointments')
+      .update({ status: 'cancelled' })
+      .eq('id', record.appointmentId)
+      .eq('salon_id', params.salonId)
+      .eq('source', 'google');
+    if (error) continue;
+    record.status = 'cancelled';
+    deactivated += 1;
+    console.log('[calendar/google-auto] google identity reconcile', {
+      identifierType: classifyGoogleStoredIdentifierType(
+        record.calendarId ? `${record.calendarId}:${record.eventId || ''}` : record.eventId,
+      ),
+      matchedEventId: params.ev.id,
+      appointmentId: record.appointmentId,
+      keptAppointmentId: params.keepAppointmentId,
+      oldStart: record.startTime,
+      oldEnd: record.endTime,
+      newStart: null,
+      newEnd: null,
+      result: 'duplicate_cancelled',
+      error: null,
+    });
+  }
+  return deactivated;
 }
 
 export async function reconcileGoogleSourcedAppointment(params: {

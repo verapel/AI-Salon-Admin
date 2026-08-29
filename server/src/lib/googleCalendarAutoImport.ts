@@ -61,6 +61,8 @@ import {
   resolveGoogleCalendarReviewIssue,
 } from './googleCalendarReviewOverlay.js';
 import {
+  deactivateDuplicateGoogleSourcedAppointments,
+  deactivateIndexGoogleSourcedDuplicates,
   findImportedOccurrenceRecord,
   googleImportedAppointmentIsVisible,
   googleOccurrenceNeedsAutoReconcile,
@@ -619,8 +621,9 @@ export async function adoptLegacyGoogleAppointmentsFromAuthoritativeSet(params: 
   let adopted = 0;
   const nowIso = new Date().toISOString();
   for (const [eventId, rows] of claimed) {
-    if (rows.length !== 1) continue;
-    const row = rows[0]!;
+    const sorted = [...rows].sort((a, b) => a.appointmentId.localeCompare(b.appointmentId));
+    const row = sorted[0];
+    if (!row) continue;
     const ev = params.authoritativeEvents.find((item) => item.id === eventId);
     if (!ev) continue;
     const calendarId = (ev.calendarId || params.selectedCalendarId).trim();
@@ -1567,6 +1570,16 @@ export async function pullGoogleCalendarConnection(params: {
       } catch {
         // Adoption is best-effort; linked modern rows still reconcile.
       }
+      try {
+        summary.updated += await deactivateIndexGoogleSourcedDuplicates({
+          db: params.db,
+          salonId: params.salonId,
+          index: importedIndex,
+          selectedCalendarId: calendarId,
+        });
+      } catch {
+        // Duplicate collapse is complete-set only and must not fail the tick.
+      }
     }
 
     const events = listedEvents.filter((ev) => {
@@ -1722,6 +1735,14 @@ export async function pullGoogleCalendarConnection(params: {
             staffName,
             matching,
           });
+          const extras = await deactivateDuplicateGoogleSourcedAppointments({
+            db: params.db,
+            salonId: params.salonId,
+            ev,
+            index: importedIndex,
+            keepAppointmentId: record.appointmentId,
+          });
+          summary.updated += extras;
           if (moved.kind === 'conflict') {
             summary.conflicts += 1;
             bumpSkip('appointment_conflict');
