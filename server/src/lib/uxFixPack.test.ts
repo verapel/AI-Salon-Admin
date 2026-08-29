@@ -169,6 +169,8 @@ describe('UX fix pack', () => {
     assert.match(page, /getGoogleReviewEvents/);
     const desktop = page.slice(page.indexOf('DESKTOP: week grid'));
     assert.match(desktop, /sticky top-0 z-30 isolate/);
+    assert.match(desktop, /col-span-full/);
+    assert.match(desktop, /grid-cols-subgrid/);
     assert.doesNotMatch(desktop, /sticky top-0 z-10/);
     assert.equal(
       desktop.split('${WEEK_GRID_CLASS}').length - 1,

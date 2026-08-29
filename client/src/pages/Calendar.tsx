@@ -802,32 +802,34 @@ export default function Calendar() {
         <div className="card overflow-hidden p-0">
           <div className="max-h-[min(70vh,720px)] overflow-auto">
             <div className={`${WEEK_GRID_CLASS}`}>
-              <div className="sticky top-0 z-30 isolate border-b border-r bg-white p-3 text-xs font-medium text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
-                {t('calendar.timeColumn')}
-              </div>
-              {weekDays.map((day) => (
-                <div
-                  key={day.toISOString()}
-                  className={`sticky top-0 z-30 isolate min-w-0 border-b border-r p-3 text-center last:border-r-0 dark:border-gray-700 ${
-                    isToday(day)
-                      ? 'bg-brand-50 dark:bg-brand-950/30'
-                      : 'bg-white dark:bg-gray-900'
-                  }`}
-                >
-                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                    {day.toLocaleDateString(locale, { weekday: 'short' })}
-                  </p>
-                  <p
-                    className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-lg font-bold ${
+              <div className="col-span-full sticky top-0 z-30 isolate grid grid-cols-subgrid overflow-hidden border-b bg-white dark:border-gray-700 dark:bg-gray-900">
+                <div className="border-r p-3 text-xs font-medium text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  {t('calendar.timeColumn')}
+                </div>
+                {weekDays.map((day) => (
+                  <div
+                    key={day.toISOString()}
+                    className={`min-w-0 border-r p-3 text-center last:border-r-0 dark:border-gray-700 ${
                       isToday(day)
-                        ? 'bg-brand-600 text-white'
-                        : 'text-gray-900 dark:text-white'
+                        ? 'bg-brand-50 dark:bg-brand-950'
+                        : ''
                     }`}
                   >
-                    {day.getDate()}
-                  </p>
-                </div>
-              ))}
+                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                      {day.toLocaleDateString(locale, { weekday: 'short' })}
+                    </p>
+                    <p
+                      className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-lg font-bold ${
+                        isToday(day)
+                          ? 'bg-brand-600 text-white'
+                          : 'text-gray-900 dark:text-white'
+                      }`}
+                    >
+                      {day.getDate()}
+                    </p>
+                  </div>
+                ))}
+              </div>
               <div className="relative z-0 overflow-hidden border-r dark:border-gray-700">
                 <TimeGutter hours={weekHours} hourHeight={DESKTOP_HOUR_HEIGHT_PX} />
               </div>
