@@ -22,8 +22,11 @@ import {
   buildGoogleOccurrenceKey,
   buildGoogleOccurrenceRecurrenceId,
   googleOccurrenceLookupKeys,
+  googleStoredOccurrenceKeys,
   executeManualGoogleCalendarImport,
   fetchGoogleCalendarEventById,
+  legacyStoredGoogleIdentityMatchesEvent,
+  parseGoogleSourceExternalEventId,
   suggestNewClientNameFromTitle,
   type ManualGoogleImportResult,
 } from './googleCalendarImport.js';
@@ -472,6 +475,218 @@ export async function listAuthoritativeGoogleEventsForReconcile(params: {
     timeMin: params.timeMin,
     timeMax: params.timeMax,
   };
+}
+
+type LegacyGoogleAppointmentRow = {
+  appointmentId: string;
+  sourceExternalEventId: string | null;
+  date: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  staffId: string | null;
+  clientId: string | null;
+  status: string | null;
+  notes: string | null;
+  source: string | null;
+};
+
+export async function loadUnlinkedGoogleSourcedAppointments(params: {
+  db: any;
+  salonId: string;
+  linkedAppointmentIds: Set<string>;
+}): Promise<LegacyGoogleAppointmentRow[]> {
+  const loaded = await params.db
+    .from('appointments')
+    .select(
+      'id, date, start_time, end_time, staff_id, client_id, status, notes, source, source_external_event_id',
+    )
+    .eq('salon_id', params.salonId)
+    .eq('source', 'google');
+  const rows = Array.isArray(loaded?.data) ? loaded.data : [];
+  const out: LegacyGoogleAppointmentRow[] = [];
+  for (const row of rows) {
+    const appointmentId = typeof row?.id === 'string' ? row.id : '';
+    if (!appointmentId || params.linkedAppointmentIds.has(appointmentId)) continue;
+    if (String(row?.source || '') !== 'google') continue;
+    const status = typeof row?.status === 'string' ? row.status : 'scheduled';
+    const date = typeof row?.date === 'string' ? row.date : null;
+    const startTime = typeof row?.start_time === 'string' ? row.start_time : null;
+    const endTime = typeof row?.end_time === 'string' ? row.end_time : null;
+    if (
+      !googleImportedAppointmentIsVisible({
+        appointmentId,
+        etag: null,
+        lastModified: null,
+        date,
+        startTime,
+        endTime,
+        staffId: typeof row?.staff_id === 'string' ? row.staff_id : null,
+        clientId: typeof row?.client_id === 'string' ? row.client_id : null,
+        status,
+        notes: typeof row?.notes === 'string' ? row.notes : null,
+        source: 'google',
+      })
+    ) {
+      continue;
+    }
+    out.push({
+      appointmentId,
+      sourceExternalEventId:
+        typeof row?.source_external_event_id === 'string'
+          ? row.source_external_event_id
+          : null,
+      date,
+      startTime,
+      endTime,
+      staffId: typeof row?.staff_id === 'string' ? row.staff_id : null,
+      clientId: typeof row?.client_id === 'string' ? row.client_id : null,
+      status,
+      notes: typeof row?.notes === 'string' ? row.notes : null,
+      source: 'google',
+    });
+  }
+  return out;
+}
+
+function linkedAppointmentIdsFromIndex(index: GoogleImportedOccurrenceIndex): Set<string> {
+  const ids = new Set<string>();
+  for (const record of index.byKey.values()) {
+    if (record.appointmentId) ids.add(record.appointmentId);
+  }
+  return ids;
+}
+
+function indexAdoptedGoogleOccurrence(
+  index: GoogleImportedOccurrenceIndex,
+  record: GoogleImportedOccurrenceRecord,
+  calendarId: string,
+  eventId: string,
+  recurrenceId: string,
+): void {
+  for (const key of googleStoredOccurrenceKeys({ calendarId, eventId, recurrenceId })) {
+    index.keys.add(key);
+    index.byKey.set(key, record);
+  }
+}
+
+/**
+ * Attach unlinked source=google rows that already store a deterministic
+ * source_external_event_id matching exactly one authoritative Google event.
+ * No title/time matching.
+ */
+export async function adoptLegacyGoogleAppointmentsFromAuthoritativeSet(params: {
+  db: any;
+  salonId: string;
+  calendarConnectionId: string;
+  selectedCalendarId: string;
+  importedIndex: GoogleImportedOccurrenceIndex;
+  authoritativeEvents: GoogleEventPreviewItem[];
+}): Promise<number> {
+  const linkedIds = linkedAppointmentIdsFromIndex(params.importedIndex);
+  const unlinked = await loadUnlinkedGoogleSourcedAppointments({
+    db: params.db,
+    salonId: params.salonId,
+    linkedAppointmentIds: linkedIds,
+  });
+  if (unlinked.length === 0) return 0;
+
+  const linkedEventIds = new Set<string>();
+  for (const record of params.importedIndex.byKey.values()) {
+    const eventId = (record.eventId || '').trim();
+    if (eventId) linkedEventIds.add(eventId);
+  }
+
+  const candidates = unlinked.filter((row) => parseGoogleSourceExternalEventId(row.sourceExternalEventId));
+  const claimed = new Map<string, LegacyGoogleAppointmentRow[]>();
+  for (const row of candidates) {
+    const matches = params.authoritativeEvents.filter(
+      (ev) =>
+        !linkedEventIds.has(ev.id) &&
+        !isGoogleEventCancelledOrDeleted(ev) &&
+        legacyStoredGoogleIdentityMatchesEvent(row.sourceExternalEventId, ev),
+    );
+    if (matches.length !== 1) continue;
+    const ev = matches[0]!;
+    const group = claimed.get(ev.id) ?? [];
+    group.push(row);
+    claimed.set(ev.id, group);
+  }
+
+  let adopted = 0;
+  const nowIso = new Date().toISOString();
+  for (const [eventId, rows] of claimed) {
+    if (rows.length !== 1) continue;
+    const row = rows[0]!;
+    const ev = params.authoritativeEvents.find((item) => item.id === eventId);
+    if (!ev) continue;
+    const calendarId = (ev.calendarId || params.selectedCalendarId).trim();
+    const recurrenceId = buildGoogleOccurrenceRecurrenceId(ev);
+    const { error } = await params.db.from('appointment_external_links').insert({
+      salon_id: params.salonId,
+      appointment_id: row.appointmentId,
+      calendar_connection_id: params.calendarConnectionId,
+      provider: GOOGLE_CALENDAR_PROVIDER,
+      external_calendar_id: calendarId,
+      external_uid: ev.id,
+      recurrence_id: recurrenceId,
+      last_seen_at: nowIso,
+    });
+    if (error) continue;
+    linkedEventIds.add(ev.id);
+    indexAdoptedGoogleOccurrence(
+      params.importedIndex,
+      {
+        appointmentId: row.appointmentId,
+        eventId: ev.id,
+        calendarId,
+        source: 'google',
+        etag: ev.etag,
+        lastModified: ev.updated,
+        date: row.date,
+        startTime: row.startTime,
+        endTime: row.endTime,
+        staffId: row.staffId,
+        clientId: row.clientId,
+        status: row.status,
+        notes: row.notes,
+      },
+      calendarId,
+      ev.id,
+      recurrenceId,
+    );
+    adopted += 1;
+  }
+  return adopted;
+}
+
+export async function deactivateUnlinkedLegacyGoogleOrphans(params: {
+  db: any;
+  salonId: string;
+  importedIndex: GoogleImportedOccurrenceIndex;
+  timeMin: string;
+  timeMax?: string;
+}): Promise<number> {
+  const unlinked = await loadUnlinkedGoogleSourcedAppointments({
+    db: params.db,
+    salonId: params.salonId,
+    linkedAppointmentIds: linkedAppointmentIdsFromIndex(params.importedIndex),
+  });
+  let deactivated = 0;
+  for (const row of unlinked) {
+    if (row.source !== 'google') continue;
+    if (!appointmentDateInAuthoritativeRange(row.date, params.timeMin, params.timeMax)) {
+      continue;
+    }
+    const { error } = await params.db
+      .from('appointments')
+      .update({ status: 'cancelled' })
+      .eq('id', row.appointmentId)
+      .eq('salon_id', params.salonId)
+      .eq('source', 'google');
+    if (error) continue;
+    deactivated += 1;
+  }
+  return deactivated;
 }
 
 export function readAutoImportSinceFromConfig(providerConfig: unknown): string | null {
@@ -1308,6 +1523,21 @@ export async function pullGoogleCalendarConnection(params: {
       }
     }
 
+    if (authoritativeSet?.complete) {
+      try {
+        await adoptLegacyGoogleAppointmentsFromAuthoritativeSet({
+          db: params.db,
+          salonId: params.salonId,
+          calendarConnectionId: params.connectionId,
+          selectedCalendarId: calendarId,
+          importedIndex,
+          authoritativeEvents: authoritativeSet.events,
+        });
+      } catch {
+        // Adoption is best-effort; linked modern rows still reconcile.
+      }
+    }
+
     const events = listedEvents.filter((ev) => {
       const createdNew =
         classifyAutoImportCreatedAt({
@@ -1767,6 +1997,18 @@ export async function pullGoogleCalendarConnection(params: {
         if (deactivated.kind === 'cancelled' || deactivated.kind === 'updated') {
           summary.updated += 1;
         }
+      }
+      try {
+        const orphans = await deactivateUnlinkedLegacyGoogleOrphans({
+          db: params.db,
+          salonId: params.salonId,
+          importedIndex,
+          timeMin: authoritativeSet.timeMin,
+          timeMax: authoritativeSet.timeMax,
+        });
+        summary.updated += orphans;
+      } catch {
+        // Orphan cleanup is complete-set only and must not fail the tick.
       }
     }
   } catch (err) {

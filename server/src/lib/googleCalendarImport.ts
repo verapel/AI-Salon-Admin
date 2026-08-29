@@ -119,6 +119,50 @@ export function buildGoogleSourceExternalEventId(params: {
   return rec ? `${cal}:${id}:${rec}` : `${cal}:${id}`;
 }
 
+/**
+ * Deterministic parse of appointments.source_external_event_id.
+ * Official form is calendarId:eventId or calendarId:eventId:recurrenceId.
+ * Bare eventId is accepted. Title/time are never used.
+ */
+export function parseGoogleSourceExternalEventId(raw: string | null | undefined): {
+  calendarId: string;
+  eventId: string;
+  recurrenceId: string;
+} | null {
+  const value = (raw || '').trim();
+  if (!value) return null;
+  const parts = value.split(':');
+  if (parts.length === 1) {
+    const eventId = parts[0]!.trim();
+    return eventId ? { calendarId: '', eventId, recurrenceId: '' } : null;
+  }
+  const calendarId = parts[0]!.trim();
+  const eventId = parts[1]!.trim();
+  if (!eventId) return null;
+  const recurrenceId = parts.length > 2 ? parts.slice(2).join(':').trim() : '';
+  return { calendarId, eventId, recurrenceId };
+}
+
+export function legacyStoredGoogleIdentityMatchesEvent(
+  stored: string | null | undefined,
+  ev: Pick<GoogleEventPreviewItem, 'id' | 'calendarId' | 'recurringEventId' | 'originalStartTime'>,
+): boolean {
+  const value = (stored || '').trim();
+  if (!value) return false;
+  const keys = googleOccurrenceLookupKeys(ev);
+  if (keys.includes(value)) return true;
+  const parsed = parseGoogleSourceExternalEventId(value);
+  if (!parsed) return false;
+  const rebuilt = buildGoogleSourceExternalEventId(parsed);
+  if (keys.includes(rebuilt)) return true;
+  if (parsed.eventId !== ev.id.trim()) return false;
+  const evCal = (ev.calendarId || '').trim();
+  if (parsed.calendarId && evCal && parsed.calendarId !== evCal) return false;
+  const evRec = buildGoogleOccurrenceRecurrenceId(ev);
+  if (parsed.recurrenceId && parsed.recurrenceId !== evRec) return false;
+  return true;
+}
+
 export function buildGoogleOccurrenceKey(params: {
   calendarId: string;
   eventId: string;

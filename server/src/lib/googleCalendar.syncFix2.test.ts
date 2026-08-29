@@ -190,6 +190,16 @@ function fix2Db(opts: {
             };
             return chain;
           },
+          insert(row: any) {
+            importedLinkRows.push({
+              appointment_id: row.appointment_id,
+              external_uid: row.external_uid,
+              recurrence_id: row.recurrence_id || '',
+              external_calendar_id: row.external_calendar_id || '',
+              ...row,
+            });
+            return { error: null };
+          },
         };
       }
       if (table === 'appointments') {
@@ -1487,6 +1497,163 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
     assert.equal(g4?.status, 'scheduled');
     assert.equal(g4?.start_time, '16:00');
     assert.equal(db.clients.length, 1);
+  });
+
+  it('legacy unlinked source=google rows adopt by stored event id or deactivate when absent', async () => {
+    const db = fix2Db({
+      clients: [
+        { id: CLIENT, name: 'Anna', phone: '' },
+        { id: 'client-orphan', name: 'Orphan Client', phone: '' },
+      ],
+      imported: [
+        {
+          appointment_id: 'appt-modern',
+          external_uid: 'evt-modern',
+          recurrence_id: '',
+          external_calendar_id: 'primary',
+          external_etag: 'mod',
+        },
+      ],
+      appointments: [
+        {
+          id: 'appt-legacy',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '11:00',
+          end_time: '13:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('Legacy title'),
+          source: 'google',
+          source_external_event_id: 'primary:evt-legacy',
+        },
+        {
+          id: 'appt-orphan',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'client-orphan',
+          date: '2026-08-20',
+          start_time: '16:00',
+          end_time: '17:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('Gone'),
+          source: 'google',
+          source_external_event_id: null,
+        },
+        {
+          id: 'appt-modern',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '09:00',
+          end_time: '09:30',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('Modern'),
+          source: 'google',
+          source_external_event_id: 'primary:evt-modern',
+        },
+        {
+          id: 'appt-telegram',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'tg-client',
+          date: '2026-08-20',
+          start_time: '18:00',
+          end_time: '19:00',
+          status: 'scheduled',
+          notes: 'telegram booking',
+          source: 'telegram',
+        },
+        {
+          id: 'appt-owner',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'other',
+          date: '2026-08-20',
+          start_time: '08:00',
+          end_time: '08:30',
+          status: 'scheduled',
+          notes: 'manual',
+          source: 'owner',
+        },
+      ],
+    });
+    let importCalls = 0;
+    const result = await pullGoogleCalendarConnection({
+      db,
+      salonId: 'salon-1',
+      connectionId: 'conn-1',
+      matchCatalog: CATALOG,
+      salonTimeZone: 'UTC',
+      eventsOverride: [],
+      authoritativeOverride: {
+        events: [
+          previewEvent({
+            id: 'evt-legacy',
+            summary: 'Adopted title',
+            start: { dateTime: '2026-08-20T12:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+            end: { dateTime: '2026-08-20T13:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+            etag: 'adopted',
+          }),
+          previewEvent({
+            id: 'evt-modern',
+            summary: 'Modern',
+            start: { dateTime: '2026-08-20T09:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+            end: { dateTime: '2026-08-20T09:30:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+            etag: 'mod',
+          }),
+        ],
+        complete: true,
+        timeMin: '2026-07-20T00:00:00.000Z',
+        timeMax: '2026-11-20T00:00:00.000Z',
+      },
+      isStillEnabled: async () => true,
+      executeImport: async () => {
+        importCalls += 1;
+        return {
+          appointmentId: 'dup',
+          clientId: CLIENT,
+          clientCreated: false,
+          alreadyImported: false,
+        };
+      },
+    });
+    assert.equal(importCalls, 0);
+    assert.equal(result.imported, 0);
+    assert.equal(db.appointments.length, 5);
+    const legacy = db.appointments.find((row) => row.id === 'appt-legacy');
+    const orphan = db.appointments.find((row) => row.id === 'appt-orphan');
+    const modern = db.appointments.find((row) => row.id === 'appt-modern');
+    const telegram = db.appointments.find((row) => row.id === 'appt-telegram');
+    const owner = db.appointments.find((row) => row.id === 'appt-owner');
+    assert.equal(legacy?.start_time, '12:00');
+    assert.equal(legacy?.end_time, '13:00');
+    assert.equal(legacy?.notes, googleImportedAppointmentNotes('Adopted title'));
+    assert.equal(legacy?.status, 'scheduled');
+    assert.equal(legacy?.id, 'appt-legacy');
+    assert.ok(
+      db.importedLinkRows.some(
+        (row) => row.appointment_id === 'appt-legacy' && row.external_uid === 'evt-legacy',
+      ),
+    );
+    assert.equal(orphan?.status, 'cancelled');
+    assert.equal(orphan?.source, 'google');
+    assert.equal(modern?.start_time, '09:00');
+    assert.equal(modern?.end_time, '09:30');
+    assert.equal(modern?.status, 'scheduled');
+    assert.equal(telegram?.status, 'scheduled');
+    assert.equal(telegram?.start_time, '18:00');
+    assert.equal(owner?.status, 'scheduled');
+    assert.equal(owner?.notes, 'manual');
+    assert.equal(db.clients.length, 2);
+    assert.ok(db.clients.some((c) => c.id === 'client-orphan'));
+    const auto = read('server/src/lib/googleCalendarAutoImport.ts');
+    assert.match(auto, /adoptLegacyGoogleAppointmentsFromAuthoritativeSet/);
+    assert.match(auto, /deactivateUnlinkedLegacyGoogleOrphans/);
+    assert.match(auto, /source_external_event_id/);
+    assert.doesNotMatch(auto, /5 \* 60 \* 1000/);
   });
 
   it('recent autosync updatedMin is last_sync overlap, not the enable watermark', () => {
