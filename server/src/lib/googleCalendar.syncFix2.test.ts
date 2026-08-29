@@ -12,6 +12,7 @@ import type { CalendarMatchCatalog } from './calendarEventMatcher.js';
 import {
   GOOGLE_AUTO_IMPORT_SINCE_CONFIG_KEY,
   GOOGLE_AUTO_IMPORT_STAFF_CONFIG_KEY,
+  collectMissingLinkedGoogleAppointments,
   mergeGooglePreviewEvents,
   pullGoogleCalendarConnection,
   recentGoogleAutoPullUpdatedMin,
@@ -1246,6 +1247,246 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
     assert.match(reconcile, /status: 'cancelled'/);
     assert.match(reconcile, /isGoogleSourcedAppointment/);
     assert.doesNotMatch(auto, /5 \* 60 \* 1000/);
+  });
+
+  it('authoritative Google set deactivates only the missing linked source=google row', async () => {
+    const db = fix2Db({
+      clients: [
+        { id: CLIENT, name: 'Anna', phone: '' },
+        { id: 'client-missing', name: 'Gone Event Client', phone: '' },
+      ],
+      imported: [
+        { appointment_id: 'appt-g1', external_uid: 'evt-g1', recurrence_id: '', external_calendar_id: 'primary' },
+        { appointment_id: 'appt-g2', external_uid: 'evt-g2', recurrence_id: '', external_calendar_id: 'primary' },
+        { appointment_id: 'appt-g3', external_uid: 'evt-g3', recurrence_id: '', external_calendar_id: 'primary' },
+        { appointment_id: 'appt-g4', external_uid: 'evt-g4', recurrence_id: '', external_calendar_id: 'primary' },
+      ],
+      appointments: [
+        {
+          id: 'appt-g1',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '11:00',
+          end_time: '13:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('Old one'),
+          source: 'google',
+        },
+        {
+          id: 'appt-g2',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '10:00',
+          end_time: '11:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('Old two'),
+          source: 'google',
+        },
+        {
+          id: 'appt-g3',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '09:00',
+          end_time: '10:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('Old three'),
+          source: 'google',
+        },
+        {
+          id: 'appt-g4',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'client-missing',
+          date: '2026-08-20',
+          start_time: '16:00',
+          end_time: '17:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('Deleted in Google'),
+          source: 'google',
+        },
+        {
+          id: 'appt-telegram',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'tg-client',
+          date: '2026-08-20',
+          start_time: '18:00',
+          end_time: '19:00',
+          status: 'scheduled',
+          notes: 'telegram booking',
+          source: 'telegram',
+        },
+        {
+          id: 'appt-owner',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'other',
+          date: '2026-08-20',
+          start_time: '08:00',
+          end_time: '08:30',
+          status: 'scheduled',
+          notes: 'manual',
+          source: 'owner',
+        },
+      ],
+    });
+    const currentGoogle = [
+      previewEvent({
+        id: 'evt-g1',
+        summary: 'One',
+        start: { dateTime: '2026-08-20T12:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+        end: { dateTime: '2026-08-20T13:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+        etag: 'g1',
+      }),
+      previewEvent({
+        id: 'evt-g2',
+        summary: 'Two',
+        start: { dateTime: '2026-08-20T13:30:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+        end: { dateTime: '2026-08-20T14:30:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+        etag: 'g2',
+      }),
+      previewEvent({
+        id: 'evt-g3',
+        summary: 'Three',
+        start: { dateTime: '2026-08-20T15:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+        end: { dateTime: '2026-08-20T16:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+        etag: 'g3',
+      }),
+    ];
+    let importCalls = 0;
+    const result = await pullGoogleCalendarConnection({
+      db,
+      salonId: 'salon-1',
+      connectionId: 'conn-1',
+      matchCatalog: CATALOG,
+      salonTimeZone: 'UTC',
+      eventsOverride: [],
+      authoritativeOverride: {
+        events: currentGoogle,
+        complete: true,
+        timeMin: '2026-07-20T00:00:00.000Z',
+        timeMax: '2026-11-20T00:00:00.000Z',
+      },
+      isStillEnabled: async () => true,
+      executeImport: async () => {
+        importCalls += 1;
+        return {
+          appointmentId: 'dup',
+          clientId: CLIENT,
+          clientCreated: false,
+          alreadyImported: false,
+        };
+      },
+    });
+    assert.equal(importCalls, 0);
+    assert.equal(result.imported, 0);
+    assert.equal(db.appointments.length, 6);
+    const g1 = db.appointments.find((row) => row.id === 'appt-g1');
+    const g2 = db.appointments.find((row) => row.id === 'appt-g2');
+    const g3 = db.appointments.find((row) => row.id === 'appt-g3');
+    const g4 = db.appointments.find((row) => row.id === 'appt-g4');
+    const telegram = db.appointments.find((row) => row.id === 'appt-telegram');
+    const owner = db.appointments.find((row) => row.id === 'appt-owner');
+    assert.equal(g1?.start_time, '12:00');
+    assert.equal(g1?.end_time, '13:00');
+    assert.equal(g1?.notes, googleImportedAppointmentNotes('One'));
+    assert.equal(g1?.status, 'scheduled');
+    assert.equal(g2?.start_time, '13:30');
+    assert.equal(g2?.end_time, '14:30');
+    assert.equal(g2?.notes, googleImportedAppointmentNotes('Two'));
+    assert.equal(g3?.start_time, '15:00');
+    assert.equal(g3?.end_time, '16:00');
+    assert.equal(g3?.notes, googleImportedAppointmentNotes('Three'));
+    assert.equal(g4?.status, 'cancelled');
+    assert.equal(g4?.source, 'google');
+    assert.equal(telegram?.status, 'scheduled');
+    assert.equal(telegram?.start_time, '18:00');
+    assert.equal(telegram?.source, 'telegram');
+    assert.equal(owner?.status, 'scheduled');
+    assert.equal(owner?.start_time, '08:00');
+    assert.equal(owner?.source, 'owner');
+    assert.equal(db.clients.length, 2);
+    assert.ok(db.clients.some((c) => c.id === 'client-missing'));
+    const incomplete = collectMissingLinkedGoogleAppointments({
+      importedIndex: {
+        keys: new Set(['primary:evt-g4']),
+        byKey: new Map(),
+      },
+      presentEventIds: new Set(['evt-g1']),
+      timeMin: '2026-07-20T00:00:00.000Z',
+    });
+    assert.equal(incomplete.length, 0);
+    const auto = read('server/src/lib/googleCalendarAutoImport.ts');
+    assert.match(auto, /listAuthoritativeGoogleEventsForReconcile/);
+    assert.match(auto, /authoritativeOverride/);
+    assert.match(auto, /showDeleted: true/);
+    assert.match(auto, /authoritativeSet\?\.complete/);
+    assert.doesNotMatch(auto, /5 \* 60 \* 1000/);
+  });
+
+  it('incomplete incremental Google list does not delete a missing linked appointment', async () => {
+    const db = fix2Db({
+      clients: [{ id: 'client-missing', name: 'Keep me', phone: '' }],
+      imported: [
+        { appointment_id: 'appt-g1', external_uid: 'evt-g1', recurrence_id: '', external_calendar_id: 'primary' },
+        { appointment_id: 'appt-g4', external_uid: 'evt-g4', recurrence_id: '', external_calendar_id: 'primary' },
+      ],
+      appointments: [
+        {
+          id: 'appt-g1',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '11:00',
+          end_time: '13:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('One'),
+          source: 'google',
+        },
+        {
+          id: 'appt-g4',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'client-missing',
+          date: '2026-08-20',
+          start_time: '16:00',
+          end_time: '17:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('Still there'),
+          source: 'google',
+        },
+      ],
+    });
+    await pullGoogleCalendarConnection({
+      db,
+      salonId: 'salon-1',
+      connectionId: 'conn-1',
+      matchCatalog: CATALOG,
+      salonTimeZone: 'UTC',
+      eventsOverride: [
+        previewEvent({
+          id: 'evt-g1',
+          summary: 'One',
+          start: { dateTime: '2026-08-20T12:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+          end: { dateTime: '2026-08-20T13:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+        }),
+      ],
+      isStillEnabled: async () => true,
+      executeImport: async () => {
+        throw new Error('must not import');
+      },
+    });
+    const g4 = db.appointments.find((row) => row.id === 'appt-g4');
+    assert.equal(g4?.status, 'scheduled');
+    assert.equal(g4?.start_time, '16:00');
+    assert.equal(db.clients.length, 1);
   });
 
   it('recent autosync updatedMin is last_sync overlap, not the enable watermark', () => {

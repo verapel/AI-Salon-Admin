@@ -32,7 +32,11 @@ import {
   GOOGLE_CALENDAR_PROVIDER,
   GoogleCalendarOAuthError,
   GOOGLE_EVENTS_PREVIEW_LOOKAHEAD_DAYS,
+  GOOGLE_EVENTS_PREVIEW_LOOKBACK_DAYS,
+  GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
+  GOOGLE_EVENTS_SALON_PREVIEW_MAX_PAGES,
   listGoogleCalendarEventsForAutoPull,
+  listGoogleCalendarEventsPreview,
   loadGoogleCalendarAppConfig,
   mapGoogleEventPreviewEntry,
   refreshGoogleAccessToken,
@@ -58,6 +62,7 @@ import {
   reconcileGoogleReviewOverlay,
   reconcileGoogleSourcedAppointment,
   type GoogleImportedOccurrenceIndex,
+  type GoogleImportedOccurrenceRecord,
 } from './googleCalendarReconcile.js';
 import {
   loadGoogleCoverageClientSession,
@@ -339,6 +344,134 @@ export async function fetchLinkedImportedGoogleEvents(params: {
     }
   }
   return out;
+}
+
+export type AuthoritativeGoogleReconcileSet = {
+  events: GoogleEventPreviewItem[];
+  complete: boolean;
+  timeMin: string;
+  timeMax?: string;
+};
+
+/** Bounded window for missing-link deletion. Outside it, absence is not authoritative. */
+export function buildGoogleAuthoritativeReconcileWindow(now: Date = new Date()): {
+  timeMin: string;
+  timeMax: string;
+} {
+  const start = new Date(now.getTime());
+  start.setUTCHours(0, 0, 0, 0);
+  start.setUTCDate(start.getUTCDate() - GOOGLE_EVENTS_PREVIEW_LOOKBACK_DAYS);
+  const end = new Date(now.getTime());
+  end.setUTCDate(end.getUTCDate() + GOOGLE_EVENTS_PREVIEW_LOOKAHEAD_DAYS);
+  return { timeMin: start.toISOString(), timeMax: end.toISOString() };
+}
+
+export function appointmentDateInAuthoritativeRange(
+  date: string | null | undefined,
+  timeMin: string,
+  timeMax?: string,
+): boolean {
+  const day = (date || '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  const minDay = timeMin.trim().slice(0, 10);
+  if (minDay && day < minDay) return false;
+  if (timeMax) {
+    const maxDay = timeMax.trim().slice(0, 10);
+    if (maxDay && day > maxDay) return false;
+  }
+  return true;
+}
+
+export function authoritativeGoogleEventIds(events: GoogleEventPreviewItem[]): Set<string> {
+  const ids = new Set<string>();
+  for (const ev of events) {
+    const id = (ev.id || '').trim();
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+/**
+ * Linked source=google rows whose event id is absent from a COMPLETE authoritative set
+ * and whose appointment date falls inside that set's range.
+ */
+export function collectMissingLinkedGoogleAppointments(params: {
+  importedIndex: GoogleImportedOccurrenceIndex;
+  presentEventIds: Set<string>;
+  timeMin: string;
+  timeMax?: string;
+}): GoogleImportedOccurrenceRecord[] {
+  const seen = new Set<string>();
+  const missing: GoogleImportedOccurrenceRecord[] = [];
+  for (const record of params.importedIndex.byKey.values()) {
+    if (!googleImportedAppointmentIsVisible(record)) continue;
+    if ((record.source || 'google').trim().toLowerCase() !== 'google') continue;
+    const appointmentId = record.appointmentId.trim();
+    const eventId = (record.eventId || '').trim();
+    if (!appointmentId || !eventId || seen.has(appointmentId)) continue;
+    seen.add(appointmentId);
+    if (params.presentEventIds.has(eventId)) continue;
+    if (
+      !appointmentDateInAuthoritativeRange(record.date, params.timeMin, params.timeMax)
+    ) {
+      continue;
+    }
+    missing.push(record);
+  }
+  return missing;
+}
+
+function cancelledStubForLinkedRecord(
+  record: GoogleImportedOccurrenceRecord,
+  calendarName: string | null,
+): GoogleEventPreviewItem {
+  return {
+    id: (record.eventId || '').trim(),
+    iCalUID: null,
+    summary: null,
+    description: null,
+    location: null,
+    status: 'cancelled',
+    start: { dateTime: null, date: null, timeZone: null, allDay: false },
+    end: { dateTime: null, date: null, timeZone: null, allDay: false },
+    recurringEventId: null,
+    originalStartTime: null,
+    created: null,
+    updated: null,
+    etag: null,
+    htmlLink: null,
+    calendarId: (record.calendarId || '').trim(),
+    calendarName,
+  };
+}
+
+export async function listAuthoritativeGoogleEventsForReconcile(params: {
+  accessToken: string;
+  calendarId: string;
+  calendarName?: string | null;
+  timeMin: string;
+  timeMax?: string;
+  fetchImpl?: GoogleFetch;
+}): Promise<AuthoritativeGoogleReconcileSet> {
+  const listed = await listGoogleCalendarEventsPreview({
+    accessToken: params.accessToken,
+    calendarId: params.calendarId,
+    calendarName: params.calendarName,
+    timeMin: params.timeMin,
+    timeMax: params.timeMax,
+    fetchImpl: params.fetchImpl,
+    maxPages: GOOGLE_EVENTS_SALON_PREVIEW_MAX_PAGES,
+    maxEvents: GOOGLE_EVENTS_SALON_PREVIEW_MAX_EVENTS,
+    orderBy: 'startTime',
+    showDeleted: true,
+    includeEveryGoogleItem: true,
+  });
+  return {
+    events: listed.events,
+    complete: !listed.truncated,
+    timeMin: params.timeMin,
+    timeMax: params.timeMax,
+  };
 }
 
 export function readAutoImportSinceFromConfig(providerConfig: unknown): string | null {
@@ -883,6 +1016,11 @@ export async function pullGoogleCalendarConnection(params: {
   eventsOverride?: GoogleEventPreviewItem[];
   /** Test seam: current Google state for already-linked events (bypasses GET-by-id). */
   linkedEventsOverride?: GoogleEventPreviewItem[];
+  /**
+   * Test seam: complete authoritative Google snapshot for missing-link deletion.
+   * Incremental eventsOverride alone must never mark missing ids as deleted.
+   */
+  authoritativeOverride?: AuthoritativeGoogleReconcileSet;
   /** Test seam: disable mid-batch. */
   isStillEnabled?: () => Promise<boolean>;
   /** Test seam: avoid salon timezone network lookup. */
@@ -1028,10 +1166,21 @@ export async function pullGoogleCalendarConnection(params: {
     };
 
     let listedEvents: GoogleEventPreviewItem[];
-    if (params.eventsOverride) {
+    let authoritativeSet: AuthoritativeGoogleReconcileSet | null = params.authoritativeOverride
+      ? {
+          events: params.authoritativeOverride.events,
+          complete: params.authoritativeOverride.complete === true,
+          timeMin: params.authoritativeOverride.timeMin,
+          timeMax: params.authoritativeOverride.timeMax,
+        }
+      : null;
+    if (params.eventsOverride || params.authoritativeOverride) {
       listedEvents = mergeGooglePreviewEvents(
-        params.linkedEventsOverride ?? [],
-        params.eventsOverride,
+        authoritativeSet?.events ?? [],
+        mergeGooglePreviewEvents(
+          params.linkedEventsOverride ?? [],
+          params.eventsOverride ?? [],
+        ),
       );
     } else {
       const config = loadGoogleCalendarAppConfig();
@@ -1099,6 +1248,24 @@ export async function pullGoogleCalendarConnection(params: {
         pageToken: readAutoImportPageTokenFromConfig(conn.provider_config),
         keepEvent: keepDiscoverable,
       });
+      const range = buildGoogleAuthoritativeReconcileWindow(params.now ?? new Date());
+      try {
+        authoritativeSet = await listAuthoritativeGoogleEventsForReconcile({
+          accessToken,
+          calendarId,
+          calendarName: conn.selected_calendar_name ?? null,
+          timeMin: range.timeMin,
+          timeMax: range.timeMax,
+          fetchImpl: params.fetchImpl,
+        });
+      } catch {
+        authoritativeSet = {
+          events: [],
+          complete: false,
+          timeMin: range.timeMin,
+          timeMax: range.timeMax,
+        };
+      }
       const linkedCurrent =
         params.linkedEventsOverride ??
         (await fetchLinkedImportedGoogleEvents({
@@ -1109,8 +1276,11 @@ export async function pullGoogleCalendarConnection(params: {
           fetchImpl: params.fetchImpl,
         }));
       listedEvents = mergeGooglePreviewEvents(
-        linkedCurrent,
-        mergeGooglePreviewEvents(recentListed.events, listed.events),
+        authoritativeSet.events,
+        mergeGooglePreviewEvents(
+          linkedCurrent,
+          mergeGooglePreviewEvents(recentListed.events, listed.events),
+        ),
       );
       if (recentListed.events.length > 0) {
         console.log('[calendar/google-auto] recent Google updates listed', {
@@ -1569,6 +1739,33 @@ export async function pullGoogleCalendarConnection(params: {
             importedKeys,
             clientId: coverageClientId,
           });
+        }
+      }
+    }
+
+    if (authoritativeSet?.complete) {
+      const missing = collectMissingLinkedGoogleAppointments({
+        importedIndex,
+        presentEventIds: authoritativeGoogleEventIds(authoritativeSet.events),
+        timeMin: authoritativeSet.timeMin,
+        timeMax: authoritativeSet.timeMax,
+      });
+      for (const record of missing) {
+        const deactivated = await reconcileGoogleSourcedAppointment({
+          db: params.db,
+          salonId: params.salonId,
+          calendarConnectionId: params.connectionId,
+          ev: cancelledStubForLinkedRecord(
+            record,
+            conn.selected_calendar_name ?? null,
+          ),
+          record,
+          salonTimeZone,
+          staffId,
+          staffName,
+        });
+        if (deactivated.kind === 'cancelled' || deactivated.kind === 'updated') {
+          summary.updated += 1;
         }
       }
     }
