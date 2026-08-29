@@ -164,6 +164,8 @@ describe('UX fix pack', () => {
     assert.match(page, /DayTimeline/);
     assert.match(page, /nowLineOffset/);
     assert.match(page, /WEEK_GRID_CLASS/);
+    assert.match(page, /WEEK_DAY_HEADER_HEIGHT_PX/);
+    assert.match(page, /TIMED_EVENTS_LAYER_OFFSET_PX/);
     assert.match(page, /navigateWeek/);
     assert.match(page, /kind === 'google_review'/);
     assert.match(page, /getGoogleReviewEvents/);

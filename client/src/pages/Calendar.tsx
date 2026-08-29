@@ -7,7 +7,10 @@ import { api } from '@/lib/api';
 import { getStatusColor } from '@/lib/utils';
 import {
   DESKTOP_HOUR_HEIGHT_PX,
+  MOBILE_DAY_HEADER_HEIGHT_PX,
   MOBILE_HOUR_HEIGHT_PX,
+  TIMED_EVENTS_LAYER_OFFSET_PX,
+  WEEK_DAY_HEADER_HEIGHT_PX,
   isNowWithinHours,
   layoutDayEvents,
   nowLineOffset,
@@ -279,7 +282,7 @@ function DayTimeline({
   const nowVisible = showNow && isNowWithinHours(hourStart, hourEnd, now);
 
   return (
-    <div className="relative min-w-0" style={{ height: totalHeight }}>
+    <div className="relative z-0 min-w-0 overflow-hidden" style={{ height: totalHeight }}>
       {hours.map((hour, index) => (
         <div
           key={hour}
@@ -297,7 +300,7 @@ function DayTimeline({
           width: `calc(${100 / laid.columnCount}% - 2px)`,
         };
         return (
-          <div key={laid.item.id} className="absolute z-10 min-w-0" style={style}>
+          <div key={laid.item.id} className="absolute z-[1] min-w-0" style={style}>
             <CalendarEventCard
               block={laid.item}
               compact={compact || laid.height < 36}
@@ -309,7 +312,7 @@ function DayTimeline({
       })}
       {nowVisible ? (
         <div
-          className="pointer-events-none absolute inset-x-0 z-20 flex items-center"
+          className="pointer-events-none absolute inset-x-0 z-[2] flex items-center"
           style={{ top: nowTop }}
         >
           <span className="h-2 w-2 shrink-0 -translate-x-1 rounded-full bg-red-500" />
@@ -322,7 +325,7 @@ function DayTimeline({
 
 function TimeGutter({ hours, hourHeight }: { hours: number[]; hourHeight: number }) {
   return (
-    <div className="relative shrink-0" style={{ height: hours.length * hourHeight }}>
+    <div className="relative z-0 shrink-0" style={{ height: hours.length * hourHeight }}>
       {hours.map((hour, index) => (
         <div
           key={hour}
@@ -636,11 +639,15 @@ export default function Calendar() {
                 </div>
               ) : (
                 <div className="card overflow-hidden p-0">
-                  <div className="flex min-w-0">
+                  <div
+                    className="relative z-0 flex min-w-0"
+                    data-calendar-timed-events
+                    style={{ paddingTop: TIMED_EVENTS_LAYER_OFFSET_PX }}
+                  >
                     <div className="w-12 shrink-0 border-r dark:border-gray-800">
                       <TimeGutter hours={todayHours} hourHeight={MOBILE_HOUR_HEIGHT_PX} />
                     </div>
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 overflow-hidden">
                       <DayTimeline
                         hours={todayHours}
                         blocks={todayAppointments}
@@ -686,24 +693,49 @@ export default function Calendar() {
               const dayHours = hoursForVisibleDays(dayBlocks, [day]);
               return (
                 <div key={toLocalDateStr(day)} className="w-full min-w-0">
-                  <p
-                    className={`mb-2 truncate text-sm font-semibold ${
-                      isToday(day)
-                        ? 'text-brand-600 dark:text-brand-400'
-                        : 'text-gray-900 dark:text-white'
-                    }`}
-                  >
-                    {formatMobileDate(day)}
-                  </p>
                   {dayBlocks.length === 0 ? (
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{emptyDayMessage}</p>
+                    <>
+                      <p
+                        className={`mb-2 truncate text-sm font-semibold ${
+                          isToday(day)
+                            ? 'text-brand-600 dark:text-brand-400'
+                            : 'text-gray-900 dark:text-white'
+                        }`}
+                      >
+                        {formatMobileDate(day)}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{emptyDayMessage}</p>
+                    </>
                   ) : (
                     <div className="card overflow-hidden p-0">
-                      <div className="flex min-w-0">
+                      <div
+                        data-calendar-day-header
+                        className={`flex items-center border-b px-3 dark:border-gray-700 ${
+                          isToday(day)
+                            ? 'bg-brand-50 dark:bg-brand-950/30'
+                            : 'bg-white dark:bg-gray-900'
+                        }`}
+                        style={{ height: MOBILE_DAY_HEADER_HEIGHT_PX }}
+                      >
+                        <p
+                          className={`truncate text-sm font-semibold ${
+                            isToday(day)
+                              ? 'text-brand-600 dark:text-brand-400'
+                              : 'text-gray-900 dark:text-white'
+                          }`}
+                        >
+                          {formatMobileDate(day)}
+                        </p>
+                      </div>
+                      <div
+                        className="relative z-0 flex min-w-0"
+                        data-calendar-timed-events
+                        style={{ paddingTop: TIMED_EVENTS_LAYER_OFFSET_PX }}
+                      >
                         <div className="w-12 shrink-0 border-r dark:border-gray-800">
                           <TimeGutter hours={dayHours} hourHeight={MOBILE_HOUR_HEIGHT_PX} />
                         </div>
-                        <div className="min-w-0 flex-1">
+                        <div className="min-w-0 flex-1 overflow-hidden">
                           <DayTimeline
                             hours={dayHours}
                             blocks={dayBlocks}
@@ -802,15 +834,17 @@ export default function Calendar() {
         <div className="card overflow-hidden p-0">
           <div className="max-h-[min(70vh,720px)] overflow-y-auto overflow-x-clip">
             <div
-              className={`sticky top-0 z-10 border-b bg-white dark:border-gray-700 dark:bg-gray-900 ${WEEK_GRID_CLASS}`}
+              data-calendar-day-header
+              className={`sticky top-0 z-30 isolate border-b bg-white dark:border-gray-700 dark:bg-gray-900 ${WEEK_GRID_CLASS}`}
+              style={{ height: WEEK_DAY_HEADER_HEIGHT_PX }}
             >
-              <div className="border-r p-3 text-xs font-medium text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              <div className="flex h-full items-center justify-center border-r p-2 text-xs font-medium text-gray-500 dark:border-gray-700 dark:text-gray-400">
                 {t('calendar.timeColumn')}
               </div>
               {weekDays.map((day) => (
                 <div
                   key={day.toISOString()}
-                  className={`min-w-0 border-r p-3 text-center last:border-r-0 dark:border-gray-700 ${
+                  className={`flex h-full min-w-0 flex-col items-center justify-center border-r px-1 py-1 text-center last:border-r-0 dark:border-gray-700 ${
                     isToday(day) ? 'bg-brand-50 dark:bg-brand-950/30' : ''
                   }`}
                 >
@@ -830,7 +864,11 @@ export default function Calendar() {
               ))}
             </div>
 
-            <div className={`${WEEK_GRID_CLASS}`}>
+            <div
+              data-calendar-timed-events
+              className={`relative z-0 ${WEEK_GRID_CLASS}`}
+              style={{ paddingTop: TIMED_EVENTS_LAYER_OFFSET_PX }}
+            >
               <div className="border-r dark:border-gray-700">
                 <TimeGutter hours={weekHours} hourHeight={DESKTOP_HOUR_HEIGHT_PX} />
               </div>
@@ -839,7 +877,7 @@ export default function Calendar() {
                 return (
                   <div
                     key={day.toISOString()}
-                    className={`min-w-0 border-r last:border-r-0 dark:border-gray-700 ${
+                    className={`min-w-0 overflow-hidden border-r last:border-r-0 dark:border-gray-700 ${
                       isToday(day) ? 'bg-brand-50/40 dark:bg-brand-950/20' : ''
                     }`}
                   >
