@@ -3,6 +3,15 @@
 export const DESKTOP_HOUR_HEIGHT_PX = 56;
 export const MOBILE_HOUR_HEIGHT_PX = 48;
 export const MIN_EVENT_MINUTES = 15;
+/** Reserved sticky height for weekday + date number. Timed events start below this. */
+export const WEEK_DAY_HEADER_HEIGHT_PX = 72;
+export const MOBILE_DAY_HEADER_HEIGHT_PX = 44;
+/**
+ * Padding on the timed-events layer so the first hour label (centered on the
+ * 08:00 line via -translate-y-1/2) cannot paint into the date header.
+ * Event `top`/`height` stay relative to the hour grid inside this layer.
+ */
+export const TIMED_EVENTS_LAYER_OFFSET_PX = 10;
 
 export function parseTimeToMinutes(time: string): number {
   const parts = String(time || '0:0').split(':');
