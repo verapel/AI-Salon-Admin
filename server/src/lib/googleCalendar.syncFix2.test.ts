@@ -997,6 +997,257 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
     assert.doesNotMatch(auto, /5 \* 60 \* 1000/);
   });
 
+  it('Google move and title change update the same source=google row; telegram stays', async () => {
+    const db = fix2Db({
+      clients: [{ id: CLIENT, name: 'Anna', phone: '' }],
+      imported: [
+        {
+          appointment_id: 'appt-google',
+          external_uid: 'evt-ap',
+          recurrence_id: '',
+          external_calendar_id: 'primary',
+          external_etag: 'old',
+        },
+      ],
+      appointments: [
+        {
+          id: 'appt-google',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '11:00',
+          end_time: '13:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('Old title'),
+          source: 'google',
+        },
+        {
+          id: 'appt-telegram',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '14:00',
+          end_time: '15:00',
+          status: 'scheduled',
+          notes: 'telegram booking',
+          source: 'telegram',
+        },
+      ],
+    });
+    let importCalls = 0;
+    const result = await pullGoogleCalendarConnection({
+      db,
+      salonId: 'salon-1',
+      connectionId: 'conn-1',
+      matchCatalog: CATALOG,
+      salonTimeZone: 'UTC',
+      eventsOverride: [],
+      linkedEventsOverride: [
+        previewEvent({
+          id: 'evt-ap',
+          summary: 'Renamed title',
+          start: { dateTime: '2026-08-20T12:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+          end: { dateTime: '2026-08-20T13:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+          etag: 'moved',
+        }),
+      ],
+      isStillEnabled: async () => true,
+      executeImport: async () => {
+        importCalls += 1;
+        return {
+          appointmentId: 'dup',
+          clientId: CLIENT,
+          clientCreated: false,
+          alreadyImported: false,
+        };
+      },
+    });
+    assert.equal(importCalls, 0);
+    assert.equal(result.updated, 1);
+    assert.equal(result.imported, 0);
+    assert.equal(db.appointments.length, 2);
+    const google = db.appointments.find((row) => row.id === 'appt-google');
+    const telegram = db.appointments.find((row) => row.id === 'appt-telegram');
+    assert.ok(google);
+    assert.equal(google.start_time, '12:00');
+    assert.equal(google.end_time, '13:00');
+    assert.equal(google.notes, googleImportedAppointmentNotes('Renamed title'));
+    assert.equal(google.source, 'google');
+    assert.equal(telegram?.start_time, '14:00');
+    assert.equal(telegram?.end_time, '15:00');
+    assert.equal(telegram?.notes, 'telegram booking');
+    assert.equal(telegram?.source, 'telegram');
+    assert.equal(db.clients.length, 1);
+  });
+
+  it('Google title-only edit updates the same source=google row; telegram stays', async () => {
+    const db = fix2Db({
+      clients: [{ id: CLIENT, name: 'Anna', phone: '' }],
+      imported: [
+        {
+          appointment_id: 'appt-google',
+          external_uid: 'evt-ap',
+          recurrence_id: '',
+          external_calendar_id: 'primary',
+          external_etag: 'old',
+        },
+      ],
+      appointments: [
+        {
+          id: 'appt-google',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '12:00',
+          end_time: '13:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('Old title'),
+          source: 'google',
+        },
+        {
+          id: 'appt-telegram',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'tg-client',
+          date: '2026-08-20',
+          start_time: '14:00',
+          end_time: '15:00',
+          status: 'scheduled',
+          notes: 'telegram booking',
+          source: 'telegram',
+        },
+      ],
+    });
+    let importCalls = 0;
+    const result = await pullGoogleCalendarConnection({
+      db,
+      salonId: 'salon-1',
+      connectionId: 'conn-1',
+      matchCatalog: CATALOG,
+      salonTimeZone: 'UTC',
+      eventsOverride: [],
+      linkedEventsOverride: [
+        previewEvent({
+          id: 'evt-ap',
+          summary: 'Only title changed',
+          start: { dateTime: '2026-08-20T12:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+          end: { dateTime: '2026-08-20T13:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+          etag: 'renamed',
+        }),
+      ],
+      isStillEnabled: async () => true,
+      executeImport: async () => {
+        importCalls += 1;
+        return {
+          appointmentId: 'dup',
+          clientId: CLIENT,
+          clientCreated: false,
+          alreadyImported: false,
+        };
+      },
+    });
+    assert.equal(importCalls, 0);
+    assert.equal(result.updated, 1);
+    assert.equal(db.appointments.length, 2);
+    const google = db.appointments.find((row) => row.id === 'appt-google');
+    const telegram = db.appointments.find((row) => row.id === 'appt-telegram');
+    assert.equal(google?.start_time, '12:00');
+    assert.equal(google?.end_time, '13:00');
+    assert.equal(google?.notes, googleImportedAppointmentNotes('Only title changed'));
+    assert.equal(telegram?.start_time, '14:00');
+    assert.equal(telegram?.notes, 'telegram booking');
+  });
+
+  it('Google delete deactivates only the source=google appointment; client and telegram stay', async () => {
+    const db = fix2Db({
+      clients: [{ id: CLIENT, name: 'Anna', phone: '' }],
+      imported: [
+        {
+          appointment_id: 'appt-google',
+          external_uid: 'evt-ap',
+          recurrence_id: '',
+          external_calendar_id: 'primary',
+          external_etag: 'old',
+        },
+      ],
+      appointments: [
+        {
+          id: 'appt-google',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '11:00',
+          end_time: '13:00',
+          status: 'scheduled',
+          notes: googleImportedAppointmentNotes('Old title'),
+          source: 'google',
+        },
+        {
+          id: 'appt-telegram',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'tg-client',
+          date: '2026-08-20',
+          start_time: '14:00',
+          end_time: '15:00',
+          status: 'scheduled',
+          notes: 'telegram booking',
+          source: 'telegram',
+        },
+      ],
+    });
+    let importCalls = 0;
+    const result = await pullGoogleCalendarConnection({
+      db,
+      salonId: 'salon-1',
+      connectionId: 'conn-1',
+      matchCatalog: CATALOG,
+      salonTimeZone: 'UTC',
+      eventsOverride: [],
+      linkedEventsOverride: [
+        previewEvent({
+          id: 'evt-ap',
+          status: 'cancelled',
+          etag: 'gone',
+        }),
+      ],
+      isStillEnabled: async () => true,
+      executeImport: async () => {
+        importCalls += 1;
+        return {
+          appointmentId: 'dup',
+          clientId: CLIENT,
+          clientCreated: false,
+          alreadyImported: false,
+        };
+      },
+    });
+    assert.equal(importCalls, 0);
+    assert.equal(result.updated, 1);
+    assert.equal(result.imported, 0);
+    assert.equal(db.appointments.length, 2);
+    const google = db.appointments.find((row) => row.id === 'appt-google');
+    const telegram = db.appointments.find((row) => row.id === 'appt-telegram');
+    assert.ok(google);
+    assert.equal(google.status, 'cancelled');
+    assert.equal(google.source, 'google');
+    assert.equal(telegram?.status, 'scheduled');
+    assert.equal(telegram?.start_time, '14:00');
+    assert.equal(telegram?.end_time, '15:00');
+    assert.equal(telegram?.source, 'telegram');
+    assert.equal(db.clients.length, 1);
+    assert.equal(db.clients[0]?.id, CLIENT);
+    const auto = read('server/src/lib/googleCalendarAutoImport.ts');
+    const reconcile = read('server/src/lib/googleCalendarReconcile.ts');
+    assert.match(reconcile, /status: 'cancelled'/);
+    assert.match(reconcile, /isGoogleSourcedAppointment/);
+    assert.doesNotMatch(auto, /5 \* 60 \* 1000/);
+  });
+
   it('recent autosync updatedMin is last_sync overlap, not the enable watermark', () => {
     const now = new Date('2026-08-16T19:00:00.000Z');
     const recent = recentGoogleAutoPullUpdatedMin({

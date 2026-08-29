@@ -31,6 +31,7 @@ export type GoogleImportedOccurrenceRecord = {
   appointmentId: string;
   eventId?: string | null;
   calendarId?: string | null;
+  source?: string | null;
   etag: string | null;
   lastModified: string | null;
   date: string | null;
@@ -51,8 +52,12 @@ export type GoogleAppointmentReconcileResult =
   | { kind: 'unchanged' }
   | { kind: 'updated' }
   | { kind: 'conflict' }
-  | { kind: 'cancelled_preserved' }
+  | { kind: 'cancelled' }
   | { kind: 'missing' };
+
+function isGoogleSourcedAppointment(record: GoogleImportedOccurrenceRecord): boolean {
+  return (record.source || 'google').trim().toLowerCase() === 'google';
+}
 
 const ACTIVE_STATUSES = new Set(['scheduled', 'confirmed']);
 
@@ -126,6 +131,7 @@ export function normalizeImportedOccurrenceIndex(
       staffId: typeof appt?.staff_id === 'string' ? appt.staff_id : null,
       clientId: typeof appt?.client_id === 'string' ? appt.client_id : null,
       status: typeof appt?.status === 'string' ? appt.status : null,
+      source: typeof appt?.source === 'string' ? appt.source : null,
       notes: typeof appt?.notes === 'string' ? appt.notes : null,
     };
     const variants = googleStoredOccurrenceKeys({
@@ -224,7 +230,14 @@ export function googleOccurrenceNeedsAutoReconcile(params: {
   const imported = isImportedGoogleOccurrence(ev, params.imported.keys);
   const overlay = isGoogleReviewOverlayRepresented(ev, params.overlays.overlayKeys);
   if (!imported && !overlay) return false;
-  if (isGoogleEventCancelledOrDeleted(ev)) return overlay;
+  if (isGoogleEventCancelledOrDeleted(ev)) {
+    if (imported) {
+      return googleImportedAppointmentIsVisible(
+        findImportedOccurrenceRecord(ev, params.imported),
+      );
+    }
+    return overlay;
+  }
   if (imported) {
     return !googleImportedOccurrenceUnchanged(
       ev,
@@ -285,7 +298,7 @@ export async function loadGoogleImportedOccurrenceIndex(params: {
   if (appointmentIds.length > 0) {
     const loaded = await params.db
       .from('appointments')
-      .select('id, date, start_time, end_time, staff_id, client_id, status, notes')
+      .select('id, date, start_time, end_time, staff_id, client_id, status, notes, source')
       .eq('salon_id', params.salonId);
     const rows = Array.isArray(loaded?.data) ? loaded.data : [];
     const wanted = new Set(appointmentIds);
@@ -336,8 +349,18 @@ export async function reconcileGoogleSourcedAppointment(params: {
   syncReminder?: typeof syncAppointmentReminder;
 }): Promise<GoogleAppointmentReconcileResult> {
   if (!params.record.appointmentId) return { kind: 'missing' };
+  if (!isGoogleSourcedAppointment(params.record)) return { kind: 'unchanged' };
   if (isGoogleEventCancelledOrDeleted(params.ev)) {
-    return { kind: 'cancelled_preserved' };
+    if (!googleImportedAppointmentIsVisible(params.record)) return { kind: 'unchanged' };
+    const { error } = await params.db
+      .from('appointments')
+      .update({ status: 'cancelled' })
+      .eq('id', params.record.appointmentId)
+      .eq('salon_id', params.salonId);
+    if (error) return { kind: 'missing' };
+    params.record.status = 'cancelled';
+    await touchImportedLink(params);
+    return { kind: 'cancelled' };
   }
   const times = googleEventCalendarTimes(params.ev, params.salonTimeZone);
   if (!times) return { kind: 'missing' };

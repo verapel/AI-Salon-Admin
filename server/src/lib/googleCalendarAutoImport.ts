@@ -307,7 +307,27 @@ export async function fetchLinkedImportedGoogleEvents(params: {
         eventId: ref.eventId,
         fetchImpl: params.fetchImpl,
       });
-      if (!raw) continue;
+      if (!raw) {
+        out.push({
+          id: ref.eventId,
+          iCalUID: null,
+          summary: null,
+          description: null,
+          location: null,
+          status: 'cancelled',
+          start: { dateTime: null, date: null, timeZone: null, allDay: false },
+          end: { dateTime: null, date: null, timeZone: null, allDay: false },
+          recurringEventId: null,
+          originalStartTime: null,
+          created: null,
+          updated: null,
+          etag: null,
+          htmlLink: null,
+          calendarId: ref.calendarId,
+          calendarName: params.calendarName ?? null,
+        });
+        continue;
+      }
       const mapped = mapGoogleEventPreviewEntry(
         raw,
         ref.calendarId,
@@ -1208,7 +1228,25 @@ export async function pullGoogleCalendarConnection(params: {
         if (isImportedGoogleOccurrence(ev, importedKeys)) {
           const record = findImportedOccurrenceRecord(ev, importedIndex);
           if (isGoogleEventCancelledOrDeleted(ev)) {
-            bumpSkip('already_imported');
+            if (record?.appointmentId) {
+              const deactivated = await reconcileGoogleSourcedAppointment({
+                db: params.db,
+                salonId: params.salonId,
+                calendarConnectionId: params.connectionId,
+                ev,
+                record,
+                salonTimeZone,
+                staffId,
+                staffName,
+              });
+              if (deactivated.kind === 'cancelled' || deactivated.kind === 'updated') {
+                summary.updated += 1;
+              } else {
+                bumpSkip('already_imported');
+              }
+            } else {
+              bumpSkip('already_imported');
+            }
             continue;
           }
           if (!record || !googleImportedAppointmentIsVisible(record)) {
@@ -1278,7 +1316,7 @@ export async function pullGoogleCalendarConnection(params: {
                 reason: 'appointment_conflict',
               });
             }
-          } else if (moved.kind === 'updated') {
+          } else if (moved.kind === 'updated' || moved.kind === 'cancelled') {
             summary.updated += 1;
           } else if (moved.kind === 'missing') {
             bumpSkip('imported_appointment_missing');
