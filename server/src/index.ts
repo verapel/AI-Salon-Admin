@@ -66,6 +66,8 @@ import {
   BIRTHDAY_SKIPPED_MESSAGE,
   getBirthdaySkipKeyboard,
   parseBirthdayDate,
+  buildNewBookingInternalNotification,
+  resolveAssignedMasterNotifyChatId,
 } from './lib/telegramBooking.js';
 import {
   computeAvailableSlots,
@@ -921,11 +923,24 @@ async function generateAIResponse(
         botToken
       );
 
-      // 7. Уведомление мастеру/администратору
-      await notifySalonAdmin(
-        ctx,
-        `🔔 Новая запись!\n\n💇 Услуга: ${serviceRow.name}\n📅 День: ${date}\n🕒 Время: ${appointmentTime}\n👤 Клиент: ${name}\n📞 Телефон: ${phone}`
-      );
+      // 7. Internal notify: assigned master only (never client chat, never admin fallback)
+      const masterNotifyChatId = resolveAssignedMasterNotifyChatId({
+        staffTelegramChatId: staffRow.telegram_chat_id,
+        clientChatId: chatId,
+      });
+      if (masterNotifyChatId != null) {
+        await sendTelegramMessage(
+          masterNotifyChatId,
+          buildNewBookingInternalNotification({
+            serviceName: serviceRow.name,
+            date,
+            time: appointmentTime,
+            clientName: name,
+            phone,
+          }),
+          botToken
+        );
+      }
 
       bookingState.delete(stateKey);
       chatHistory.delete(stateKey);

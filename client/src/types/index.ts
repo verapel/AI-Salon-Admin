@@ -87,6 +87,8 @@ export interface Staff {
   isPrimary?: boolean;
   /** Assigned service IDs from staff_services (empty if none). */
   serviceIds?: string[];
+  /** Optional Telegram chat id for master booking notifications. */
+  telegramChatId?: number | null;
 }
 
 /** Origin of an appointment. API falls back to 'owner' when DB value is null. */

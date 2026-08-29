@@ -125,6 +125,7 @@ export function mapStaff(
     avatar: string;
     active: boolean;
     is_primary?: boolean | null;
+    telegram_chat_id?: number | null;
   },
   serviceIds: string[] = []
 ): Staff {
@@ -139,6 +140,7 @@ export function mapStaff(
     active: row.active,
     isPrimary: Boolean(row.is_primary),
     serviceIds,
+    telegramChatId: row.telegram_chat_id ?? null,
   };
 }
 

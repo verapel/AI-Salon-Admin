@@ -331,6 +331,7 @@ export interface Database {
           is_primary: boolean;
           created_at: string;
           salon_id: string | null;
+          telegram_chat_id: number | null;
         };
         Insert: {
           id?: string;
@@ -344,6 +345,7 @@ export interface Database {
           is_primary?: boolean;
           created_at?: string;
           salon_id?: string | null;
+          telegram_chat_id?: number | null;
         };
         Update: {
           id?: string;
@@ -357,6 +359,7 @@ export interface Database {
           is_primary?: boolean;
           created_at?: string;
           salon_id?: string | null;
+          telegram_chat_id?: number | null;
         };
         Relationships: [];
       };

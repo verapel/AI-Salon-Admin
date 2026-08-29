@@ -2,7 +2,51 @@ import { supabase } from './supabase.js';
 import { computeEndTime } from './mappers.js';
 
 type ServiceRow = { id: string; name: string; duration: number; category: string };
-export type StaffRow = { id: string; name: string; specialties: string[] };
+export type StaffRow = {
+  id: string;
+  name: string;
+  specialties: string[];
+  telegram_chat_id?: number | null;
+};
+
+/** Parse staff.telegram_chat_id. Empty/invalid → null (skip notify; never a fallback). */
+export function parseStaffTelegramChatId(
+  value: number | string | null | undefined
+): number | null {
+  if (value == null) return null;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || !Number.isInteger(value)) return null;
+    return value;
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  if (!/^-?\d+$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  if (!Number.isSafeInteger(n)) return null;
+  return n;
+}
+
+export function buildNewBookingInternalNotification(params: {
+  serviceName: string;
+  date: string;
+  time: string;
+  clientName: string;
+  phone: string;
+}): string {
+  return `🔔 Новая запись!\n\n💇 Услуга: ${params.serviceName}\n📅 День: ${params.date}\n🕒 Время: ${params.time}\n👤 Клиент: ${params.clientName}\n📞 Телефон: ${params.phone}`;
+}
+
+/**
+ * Destination for the internal new-booking message: assigned master's chat only.
+ * Never falls back to the client's chat ID or another staff member.
+ */
+export function resolveAssignedMasterNotifyChatId(params: {
+  staffTelegramChatId: number | string | null | undefined;
+  clientChatId: number;
+}): number | null {
+  void params.clientChatId;
+  return parseStaffTelegramChatId(params.staffTelegramChatId);
+}
 
 export const STAFF_UNAVAILABLE_MESSAGE =
   'Для этой услуги пока не назначен мастер. Администратор свяжется с вами.';
@@ -180,7 +224,7 @@ export async function findStaffForServiceSpecialization(
 export async function getActiveStaffById(salonId: string, staffId: string): Promise<StaffRow | null> {
   const { data, error } = await supabase
     .from('staff')
-    .select('id, name, specialties')
+    .select('id, name, specialties, telegram_chat_id')
     .eq('id', staffId)
     .eq('salon_id', salonId)
     .eq('active', true)
@@ -191,10 +235,12 @@ export async function getActiveStaffById(salonId: string, staffId: string): Prom
     return null;
   }
 
+  const row = data as StaffRow & { telegram_chat_id?: number | null };
   return {
-    id: data.id,
-    name: data.name,
-    specialties: data.specialties ?? [],
+    id: row.id,
+    name: row.name,
+    specialties: row.specialties ?? [],
+    telegram_chat_id: row.telegram_chat_id ?? null,
   };
 }
 
