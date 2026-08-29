@@ -109,6 +109,32 @@ function intervalsOverlap(
   return aStart < bEnd && aEnd > bStart;
 }
 
+export type BusyAppointmentRow = {
+  start_time: string;
+  end_time: string;
+};
+
+/**
+ * Drop candidate starts that overlap any stored appointment interval.
+ * Used by Telegram (and shared messengers) so source=google / owner / telegram
+ * rows already on the AI Salon Admin calendar all occupy time.
+ */
+export function filterSlotsByBusyAppointments(
+  candidates: readonly string[],
+  durationMinutes: number,
+  appointments: readonly BusyAppointmentRow[]
+): string[] {
+  const busy = appointments.map((row) => ({
+    start: timeToMinutes(row.start_time),
+    end: timeToMinutes(row.end_time),
+  }));
+  return candidates.filter((start) => {
+    const cStart = timeToMinutes(start);
+    const cEnd = cStart + durationMinutes;
+    return !busy.some((b) => intervalsOverlap(cStart, cEnd, b.start, b.end));
+  });
+}
+
 function intersectWindows(a: TimeWindow | null, b: TimeWindow | null): TimeWindow | null {
   if (!a || !b) return null;
   const open = Math.max(timeToMinutes(a.open), timeToMinutes(b.open));
@@ -373,12 +399,14 @@ export async function computeAvailableSlots(
     candidates = generateStarts(working, durationMinutes);
   }
 
+  // Salon-calendar busy set: every active appointment on this date.
+  // Do not filter by staff_id or source — Google imports visible in Admin
+  // must occupy Telegram slots the same way owner/telegram rows do.
   const baseQ = (supabase as any)
     .from('appointments')
     .select('id, start_time, end_time')
     .eq('salon_id', salonId)
     .eq('date', date)
-    .eq('staff_id', staffId)
     .in('status', ACTIVE_SLOT_STATUSES);
 
   const { data: booked, error: bookedError } = await (
@@ -390,18 +418,11 @@ export async function computeAvailableSlots(
     return [];
   }
 
-  const busy: Array<{ start: number; end: number }> = (booked ?? []).map(
-    (row: { start_time: string; end_time: string }) => ({
-      start: timeToMinutes(row.start_time),
-      end: timeToMinutes(row.end_time),
-    })
+  const free = filterSlotsByBusyAppointments(
+    candidates,
+    durationMinutes,
+    (booked ?? []) as BusyAppointmentRow[]
   );
-
-  const free = candidates.filter((start) => {
-    const cStart = timeToMinutes(start);
-    const cEnd = cStart + durationMinutes;
-    return !busy.some((b) => intervalsOverlap(cStart, cEnd, b.start, b.end));
-  });
 
   return filterPastSlotsForToday(free, date, timeZone);
 }
