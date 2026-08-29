@@ -221,10 +221,28 @@ export async function findStaffForServiceSpecialization(
   return staffList.filter((member) => staffMatchesServiceSpecialization(member, trimmed));
 }
 
+/** Optional notify destination. Missing column / empty value must never fail booking. */
+async function loadStaffTelegramChatId(salonId: string, staffId: string): Promise<number | null> {
+  try {
+    const { data, error } = await supabase
+      .from('staff')
+      .select('telegram_chat_id')
+      .eq('id', staffId)
+      .eq('salon_id', salonId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return parseStaffTelegramChatId(
+      (data as { telegram_chat_id?: number | string | null }).telegram_chat_id
+    );
+  } catch {
+    return null;
+  }
+}
+
 export async function getActiveStaffById(salonId: string, staffId: string): Promise<StaffRow | null> {
   const { data, error } = await supabase
     .from('staff')
-    .select('id, name, specialties, telegram_chat_id')
+    .select('id, name, specialties')
     .eq('id', staffId)
     .eq('salon_id', salonId)
     .eq('active', true)
@@ -235,12 +253,11 @@ export async function getActiveStaffById(salonId: string, staffId: string): Prom
     return null;
   }
 
-  const row = data as StaffRow & { telegram_chat_id?: number | null };
   return {
-    id: row.id,
-    name: row.name,
-    specialties: row.specialties ?? [],
-    telegram_chat_id: row.telegram_chat_id ?? null,
+    id: data.id,
+    name: data.name,
+    specialties: data.specialties ?? [],
+    telegram_chat_id: await loadStaffTelegramChatId(salonId, staffId),
   };
 }
 

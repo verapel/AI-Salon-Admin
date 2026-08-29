@@ -280,12 +280,22 @@ describe('Telegram booking path contracts', () => {
     assert.doesNotMatch(phoneBlock, /notifySalonAdmin\(\s*ctx,\s*`🔔 Новая запись!/);
     assert.match(phoneBlock, /from\("appointments"\)/);
     assert.match(phoneBlock, /staff_id: staffRow\.id/);
+    assert.match(phoneBlock, /const staffRow = finalState\.staffId/);
+    assert.match(phoneBlock, /if \(!staffRow\) \{\s*[\s\S]*?return STAFF_UNAVAILABLE_MESSAGE;/);
+    assert.doesNotMatch(phoneBlock, /if \(!staffRow\.telegram_chat_id\)/);
   });
 
-  it('loads telegram_chat_id for the assigned staff only', () => {
+  it('resolves assigned master without requiring telegram_chat_id', () => {
     const booking = read('server/src/lib/telegramBooking.ts');
-    assert.match(booking, /select\('id, name, specialties, telegram_chat_id'\)/);
-    assert.match(booking, /telegram_chat_id: row\.telegram_chat_id \?\? null/);
+    const fnStart = booking.indexOf('export async function getActiveStaffById');
+    assert.ok(fnStart >= 0);
+    const fn = booking.slice(fnStart, booking.indexOf('export function buildStaffSelectionKeyboard'));
+    assert.match(fn, /\.select\('id, name, specialties'\)/);
+    assert.doesNotMatch(fn, /\.select\('id, name, specialties, telegram_chat_id'\)/);
+    assert.match(booking, /async function loadStaffTelegramChatId/);
+    assert.match(booking, /\.select\('telegram_chat_id'\)/);
+    assert.match(fn, /telegram_chat_id: await loadStaffTelegramChatId/);
+    assert.match(booking, /if \(error \|\| !data\) return null;/);
   });
 
   it('does not change WhatsApp commit or Google calendar files', () => {
