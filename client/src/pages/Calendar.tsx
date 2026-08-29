@@ -279,7 +279,7 @@ function DayTimeline({
   const nowVisible = showNow && isNowWithinHours(hourStart, hourEnd, now);
 
   return (
-    <div className="relative min-w-0" style={{ height: totalHeight }}>
+    <div className="relative z-0 min-w-0 overflow-hidden" style={{ height: totalHeight }}>
       {hours.map((hour, index) => (
         <div
           key={hour}
@@ -297,7 +297,7 @@ function DayTimeline({
           width: `calc(${100 / laid.columnCount}% - 2px)`,
         };
         return (
-          <div key={laid.item.id} className="absolute z-10 min-w-0" style={style}>
+          <div key={laid.item.id} className="absolute z-[1] min-w-0" style={style}>
             <CalendarEventCard
               block={laid.item}
               compact={compact || laid.height < 36}
@@ -309,7 +309,7 @@ function DayTimeline({
       })}
       {nowVisible ? (
         <div
-          className="pointer-events-none absolute inset-x-0 z-20 flex items-center"
+          className="pointer-events-none absolute inset-x-0 z-[2] flex items-center"
           style={{ top: nowTop }}
         >
           <span className="h-2 w-2 shrink-0 -translate-x-1 rounded-full bg-red-500" />
@@ -637,10 +637,10 @@ export default function Calendar() {
               ) : (
                 <div className="card overflow-hidden p-0">
                   <div className="flex min-w-0">
-                    <div className="w-12 shrink-0 border-r dark:border-gray-800">
+                    <div className="w-12 shrink-0 overflow-hidden border-r dark:border-gray-800">
                       <TimeGutter hours={todayHours} hourHeight={MOBILE_HOUR_HEIGHT_PX} />
                     </div>
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 overflow-hidden">
                       <DayTimeline
                         hours={todayHours}
                         blocks={todayAppointments}
@@ -700,10 +700,10 @@ export default function Calendar() {
                   ) : (
                     <div className="card overflow-hidden p-0">
                       <div className="flex min-w-0">
-                        <div className="w-12 shrink-0 border-r dark:border-gray-800">
+                        <div className="w-12 shrink-0 overflow-hidden border-r dark:border-gray-800">
                           <TimeGutter hours={dayHours} hourHeight={MOBILE_HOUR_HEIGHT_PX} />
                         </div>
-                        <div className="min-w-0 flex-1">
+                        <div className="min-w-0 flex-1 overflow-hidden">
                           <DayTimeline
                             hours={dayHours}
                             blocks={dayBlocks}
@@ -800,38 +800,37 @@ export default function Calendar() {
       {/* DESKTOP: week grid — lg+ */}
       <div className="hidden lg:block">
         <div className="card overflow-hidden p-0">
-          <div className="max-h-[min(70vh,720px)] overflow-y-auto overflow-x-clip">
-            <div
-              className={`sticky top-0 z-10 border-b bg-white dark:border-gray-700 dark:bg-gray-900 ${WEEK_GRID_CLASS}`}
-            >
-              <div className="border-r p-3 text-xs font-medium text-gray-500 dark:border-gray-700 dark:text-gray-400">
-                {t('calendar.timeColumn')}
-              </div>
-              {weekDays.map((day) => (
-                <div
-                  key={day.toISOString()}
-                  className={`min-w-0 border-r p-3 text-center last:border-r-0 dark:border-gray-700 ${
-                    isToday(day) ? 'bg-brand-50 dark:bg-brand-950/30' : ''
+          <div
+            className={`sticky top-0 z-30 isolate border-b bg-white dark:border-gray-700 dark:bg-gray-900 ${WEEK_GRID_CLASS}`}
+          >
+            <div className="border-r p-3 text-xs font-medium text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              {t('calendar.timeColumn')}
+            </div>
+            {weekDays.map((day) => (
+              <div
+                key={day.toISOString()}
+                className={`min-w-0 border-r p-3 text-center last:border-r-0 dark:border-gray-700 ${
+                  isToday(day) ? 'bg-brand-50 dark:bg-brand-950/30' : ''
+                }`}
+              >
+                <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                  {day.toLocaleDateString(locale, { weekday: 'short' })}
+                </p>
+                <p
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-lg font-bold ${
+                    isToday(day)
+                      ? 'bg-brand-600 text-white'
+                      : 'text-gray-900 dark:text-white'
                   }`}
                 >
-                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                    {day.toLocaleDateString(locale, { weekday: 'short' })}
-                  </p>
-                  <p
-                    className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-lg font-bold ${
-                      isToday(day)
-                        ? 'bg-brand-600 text-white'
-                        : 'text-gray-900 dark:text-white'
-                    }`}
-                  >
-                    {day.getDate()}
-                  </p>
-                </div>
-              ))}
-            </div>
-
+                  {day.getDate()}
+                </p>
+              </div>
+            ))}
+          </div>
+          <div className="relative z-0 max-h-[min(70vh,720px)] overflow-x-clip overflow-y-auto">
             <div className={`${WEEK_GRID_CLASS}`}>
-              <div className="border-r dark:border-gray-700">
+              <div className="overflow-hidden border-r dark:border-gray-700">
                 <TimeGutter hours={weekHours} hourHeight={DESKTOP_HOUR_HEIGHT_PX} />
               </div>
               {weekDays.map((day) => {
@@ -839,7 +838,7 @@ export default function Calendar() {
                 return (
                   <div
                     key={day.toISOString()}
-                    className={`min-w-0 border-r last:border-r-0 dark:border-gray-700 ${
+                    className={`min-w-0 overflow-hidden border-r last:border-r-0 dark:border-gray-700 ${
                       isToday(day) ? 'bg-brand-50/40 dark:bg-brand-950/20' : ''
                     }`}
                   >

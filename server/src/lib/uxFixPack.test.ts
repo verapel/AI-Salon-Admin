@@ -167,6 +167,12 @@ describe('UX fix pack', () => {
     assert.match(page, /navigateWeek/);
     assert.match(page, /kind === 'google_review'/);
     assert.match(page, /getGoogleReviewEvents/);
+    const desktop = page.slice(page.indexOf('DESKTOP: week grid'));
+    assert.match(desktop, /sticky top-0 z-30 isolate/);
+    assert.ok(desktop.indexOf('sticky top-0 z-30') < desktop.indexOf('overflow-y-auto'));
+    assert.doesNotMatch(desktop, /sticky top-0 z-10/);
+    assert.match(page, /appointments\.getAll\(\)/);
+    assert.doesNotMatch(page, /appointments\.(create|update|delete|insert)/);
   });
 
   it('8. mobile search/input does not use sub-16px fonts or unbounded scale', () => {
