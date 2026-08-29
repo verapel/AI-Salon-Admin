@@ -12,8 +12,11 @@ import type { CalendarMatchCatalog } from './calendarEventMatcher.js';
 import {
   GOOGLE_AUTO_IMPORT_SINCE_CONFIG_KEY,
   GOOGLE_AUTO_IMPORT_STAFF_CONFIG_KEY,
+  mergeGooglePreviewEvents,
   pullGoogleCalendarConnection,
+  recentGoogleAutoPullUpdatedMin,
 } from './googleCalendarAutoImport.js';
+import { googleImportedAppointmentNotes } from './googleCalendarImport.js';
 import { importGoogleCalendarLast30Days } from './googleCalendarBackfill.js';
 import { listGoogleReviewCalendarItems } from './googleCalendarReviewOverlay.js';
 import {
@@ -613,6 +616,7 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
       staffId: STAFF,
       clientId: CLIENT,
       status: 'scheduled',
+      notes: null,
     };
     assert.equal(googleImportedOccurrenceUnchanged(previewEvent(), record, 'UTC'), true);
     const overlay: GoogleReviewOverlayRecord = {
@@ -780,6 +784,91 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
     });
     assert.equal(imported.length, 0);
     assert.equal(result.imported, 0);
+  });
+
+  it('FAST-6 updates the same imported appointment after Google time/title edit', async () => {
+    const oldNotes = googleImportedAppointmentNotes('Old title');
+    const db = fix2Db({
+      imported: [
+        {
+          appointment_id: 'appt-1',
+          external_uid: 'evt-ap',
+          recurrence_id: '',
+          external_calendar_id: 'primary',
+          external_etag: 'old',
+        },
+      ],
+      appointments: [
+        {
+          id: 'appt-1',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: CLIENT,
+          date: '2026-08-20',
+          start_time: '10:00',
+          end_time: '12:00',
+          status: 'scheduled',
+          notes: oldNotes,
+        },
+      ],
+    });
+    let importCalls = 0;
+    const result = await pullGoogleCalendarConnection({
+      db,
+      salonId: 'salon-1',
+      connectionId: 'conn-1',
+      matchCatalog: CATALOG,
+      salonTimeZone: 'UTC',
+      eventsOverride: [
+        previewEvent({
+          id: 'evt-ap',
+          summary: 'New title',
+          start: { dateTime: '2026-08-20T12:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+          end: { dateTime: '2026-08-20T14:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+          etag: 'moved',
+          updated: '2026-08-16T19:00:00.000Z',
+        }),
+      ],
+      isStillEnabled: async () => true,
+      executeImport: async () => {
+        importCalls += 1;
+        return {
+          appointmentId: 'dup',
+          clientId: CLIENT,
+          clientCreated: false,
+          alreadyImported: false,
+        };
+      },
+    });
+    assert.equal(importCalls, 0);
+    assert.equal(result.updated, 1);
+    assert.equal(result.imported, 0);
+    assert.equal(db.appointments.length, 1);
+    assert.equal(db.appointments[0].id, 'appt-1');
+    assert.equal(db.appointments[0].start_time, '12:00');
+    assert.equal(db.appointments[0].end_time, '14:00');
+    assert.equal(db.appointments[0].notes, googleImportedAppointmentNotes('New title'));
+  });
+
+  it('recent autosync updatedMin is last_sync overlap, not the enable watermark', () => {
+    const now = new Date('2026-08-16T19:00:00.000Z');
+    const recent = recentGoogleAutoPullUpdatedMin({
+      watermark: SINCE,
+      lastSyncAt: '2026-08-16T18:55:00.000Z',
+      now,
+    });
+    assert.equal(recent, '2026-08-16T18:50:00.000Z');
+    assert.notEqual(recent, SINCE);
+    const merged = mergeGooglePreviewEvents(
+      [previewEvent({ id: 'edited', etag: 'new' })],
+      [previewEvent({ id: 'edited', etag: 'old' }), previewEvent({ id: 'other' })],
+    );
+    assert.equal(merged.length, 2);
+    assert.equal(merged[0]?.etag, 'new');
+    const auto = read('server/src/lib/googleCalendarAutoImport.ts');
+    assert.match(auto, /recentGoogleAutoPullUpdatedMin/);
+    assert.match(auto, /pageToken: null/);
+    assert.match(auto, /mergeGooglePreviewEvents/);
   });
 
   it('FAST-6 refreshes an already represented overlay after Google edit', async () => {

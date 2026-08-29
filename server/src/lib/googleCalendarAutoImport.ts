@@ -226,6 +226,39 @@ export function readAutoImportStaffIdFromConfig(providerConfig: unknown): string
   return typeof id === 'string' && id.trim() ? id.trim() : null;
 }
 
+/** Overlap so a lagged tick still sees Google edits. */
+export const GOOGLE_AUTO_PULL_RECENT_OVERLAP_MS = 300000;
+
+/** Incremental updatedMin for already-imported edits (not the enable watermark). */
+export function recentGoogleAutoPullUpdatedMin(params: {
+  watermark: string;
+  lastSyncAt?: string | null;
+  now: Date;
+}): string {
+  const watermarkMs = Date.parse(params.watermark);
+  const lastMs = params.lastSyncAt ? Date.parse(params.lastSyncAt) : NaN;
+  const floor = Number.isFinite(lastMs)
+    ? lastMs - GOOGLE_AUTO_PULL_RECENT_OVERLAP_MS
+    : params.now.getTime() - GOOGLE_AUTO_PULL_RECENT_OVERLAP_MS;
+  const recentMs = Number.isFinite(watermarkMs) ? Math.max(watermarkMs, floor) : floor;
+  return new Date(recentMs).toISOString();
+}
+
+export function mergeGooglePreviewEvents(
+  recent: GoogleEventPreviewItem[],
+  discovered: GoogleEventPreviewItem[],
+): GoogleEventPreviewItem[] {
+  const seen = new Set<string>();
+  const out: GoogleEventPreviewItem[] = [];
+  for (const ev of [...recent, ...discovered]) {
+    const key = googleEventOccurrenceKeys(ev)[0] || ev.id;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(ev);
+  }
+  return out;
+}
+
 export function readAutoImportSinceFromConfig(providerConfig: unknown): string | null {
   const cfg = readProviderConfig(providerConfig);
   const since = cfg[GOOGLE_AUTO_IMPORT_SINCE_CONFIG_KEY];
@@ -804,7 +837,7 @@ export async function pullGoogleCalendarConnection(params: {
     const { data: conn, error: connErr } = await params.db
       .from('calendar_connections')
       .select(
-        'id, salon_id, credential_ciphertext, credential_iv, credential_auth_tag, status, selected_calendar_id, selected_calendar_name, provider_config, import_enabled',
+        'id, salon_id, credential_ciphertext, credential_iv, credential_auth_tag, status, selected_calendar_id, selected_calendar_name, provider_config, import_enabled, last_sync_at',
       )
       .eq('id', params.connectionId)
       .eq('salon_id', params.salonId)
@@ -944,6 +977,30 @@ export async function pullGoogleCalendarConnection(params: {
         return summary;
       }
 
+      const lastSyncAt =
+        typeof conn.last_sync_at === 'string' && conn.last_sync_at.trim()
+          ? conn.last_sync_at.trim()
+          : null;
+      const recentUpdatedMin = recentGoogleAutoPullUpdatedMin({
+        watermark,
+        lastSyncAt,
+        now: params.now ?? new Date(),
+      });
+      // Catch-up walks use watermark + page token (oldest-updated first).
+      // A mid-walk cursor never includes events edited after that snapshot.
+      // Always also list recent updates with no page token so imported
+      // appointment edits apply on the next tick.
+      const recentListed = await listGoogleCalendarEventsForAutoPull({
+        accessToken,
+        calendarId,
+        calendarName: conn.selected_calendar_name ?? null,
+        updatedMin: recentUpdatedMin,
+        fetchImpl: params.fetchImpl,
+        maxPages: 3,
+        maxKeepEvents: GOOGLE_CALENDAR_PULL_MAX_SCAN_EVENTS,
+        pageToken: null,
+        keepEvent: keepDiscoverable,
+      });
       const listed = await listGoogleCalendarEventsForAutoPull({
         accessToken,
         calendarId,
@@ -955,7 +1012,15 @@ export async function pullGoogleCalendarConnection(params: {
         pageToken: readAutoImportPageTokenFromConfig(conn.provider_config),
         keepEvent: keepDiscoverable,
       });
-      listedEvents = listed.events;
+      listedEvents = mergeGooglePreviewEvents(recentListed.events, listed.events);
+      if (recentListed.events.length > 0) {
+        console.log('[calendar/google-auto] recent Google updates listed', {
+          salonId: params.salonId,
+          connectionId: params.connectionId,
+          updatedMin: recentUpdatedMin,
+          recent: recentListed.events.length,
+        });
+      }
       try {
         await persistAutoImportPageToken({
           db: params.db,

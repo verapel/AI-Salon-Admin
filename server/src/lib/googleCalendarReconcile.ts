@@ -7,6 +7,7 @@ import { syncAppointmentReminder } from './appointmentReminders.js';
 import {
   buildGoogleOccurrenceKey,
   buildGoogleOccurrenceRecurrenceId,
+  googleImportedAppointmentNotes,
   googleOccurrenceLookupKeys,
   googleStoredOccurrenceKeys,
   loadGoogleImportedOccurrenceKeys,
@@ -36,6 +37,7 @@ export type GoogleImportedOccurrenceRecord = {
   staffId: string | null;
   clientId: string | null;
   status: string | null;
+  notes: string | null;
 };
 
 export type GoogleImportedOccurrenceIndex = {
@@ -120,6 +122,7 @@ export function normalizeImportedOccurrenceIndex(
       staffId: typeof appt?.staff_id === 'string' ? appt.staff_id : null,
       clientId: typeof appt?.client_id === 'string' ? appt.client_id : null,
       status: typeof appt?.status === 'string' ? appt.status : null,
+      notes: typeof appt?.notes === 'string' ? appt.notes : null,
     };
     const variants = googleStoredOccurrenceKeys({
       calendarId: cal,
@@ -162,25 +165,20 @@ export function googleImportedOccurrenceUnchanged(
   if (!googleImportedAppointmentIsVisible(record)) return false;
   const times = googleEventCalendarTimes(ev, salonTimeZone);
   if (!times) return false;
-  if (record!.etag && ev.etag && record!.etag === ev.etag) {
-    return (
-      record!.date === times.date &&
-      clock5(record!.startTime) === times.startTime &&
-      clock5(record!.endTime) === times.endTime
-    );
-  }
-  if (record!.lastModified && ev.updated && record!.lastModified === ev.updated) {
-    return (
-      record!.date === times.date &&
-      clock5(record!.startTime) === times.startTime &&
-      clock5(record!.endTime) === times.endTime
-    );
-  }
-  return (
+  const timesSame =
     record!.date === times.date &&
     clock5(record!.startTime) === times.startTime &&
-    clock5(record!.endTime) === times.endTime
-  );
+    clock5(record!.endTime) === times.endTime;
+  const expectedNotes = googleImportedAppointmentNotes(ev.summary);
+  const notesSame =
+    record!.notes == null || record!.notes === expectedNotes;
+  if (record!.etag && ev.etag) {
+    return record!.etag === ev.etag && timesSame && notesSame;
+  }
+  if (record!.lastModified && ev.updated) {
+    return record!.lastModified === ev.updated && timesSame && notesSame;
+  }
+  return timesSame && notesSame;
 }
 
 export function googleOverlayOccurrenceUnchanged(
@@ -283,7 +281,7 @@ export async function loadGoogleImportedOccurrenceIndex(params: {
   if (appointmentIds.length > 0) {
     const loaded = await params.db
       .from('appointments')
-      .select('id, date, start_time, end_time, staff_id, client_id, status')
+      .select('id, date, start_time, end_time, staff_id, client_id, status, notes')
       .eq('salon_id', params.salonId);
     const rows = Array.isArray(loaded?.data) ? loaded.data : [];
     const wanted = new Set(appointmentIds);
@@ -339,13 +337,27 @@ export async function reconcileGoogleSourcedAppointment(params: {
   }
   const times = googleEventCalendarTimes(params.ev, params.salonTimeZone);
   if (!times) return { kind: 'missing' };
-  if (
-    params.record.date === times.date &&
-    clock5(params.record.startTime) === times.startTime &&
-    clock5(params.record.endTime) === times.endTime
-  ) {
+  const notes = googleImportedAppointmentNotes(params.ev.summary);
+  const timesChanged =
+    params.record.date !== times.date ||
+    clock5(params.record.startTime) !== times.startTime ||
+    clock5(params.record.endTime) !== times.endTime;
+  const notesChanged = params.record.notes !== notes;
+  if (!timesChanged) {
+    if (!notesChanged) {
+      await touchImportedLink(params);
+      return { kind: 'unchanged' };
+    }
+    const nowIso = new Date().toISOString();
+    const { error } = await params.db
+      .from('appointments')
+      .update({ notes, updated_at: nowIso })
+      .eq('id', params.record.appointmentId)
+      .eq('salon_id', params.salonId);
+    if (error) return { kind: 'missing' };
+    params.record.notes = notes;
     await touchImportedLink(params);
-    return { kind: 'unchanged' };
+    return { kind: 'updated' };
   }
 
   const staffId = params.record.staffId || params.staffId;
@@ -382,6 +394,7 @@ export async function reconcileGoogleSourcedAppointment(params: {
       date: times.date,
       start_time: times.startTime,
       end_time: times.endTime,
+      notes,
       updated_at: nowIso,
     })
     .eq('id', params.record.appointmentId)
@@ -391,6 +404,7 @@ export async function reconcileGoogleSourcedAppointment(params: {
   params.record.date = times.date;
   params.record.startTime = times.startTime;
   params.record.endTime = times.endTime;
+  params.record.notes = notes;
   await touchImportedLink(params);
 
   const syncReminder = params.syncReminder ?? syncAppointmentReminder;

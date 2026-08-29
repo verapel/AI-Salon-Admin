@@ -377,6 +377,7 @@ describe('GOOGLE-CAL-SYNC-FIX-3 zero-loss', () => {
         staffId: STAFF,
         clientId: CLIENT,
         status: 'scheduled',
+        notes: null,
       }),
       false,
     );
@@ -393,6 +394,7 @@ describe('GOOGLE-CAL-SYNC-FIX-3 zero-loss', () => {
           staffId: STAFF,
           clientId: CLIENT,
           status: 'scheduled',
+          notes: null,
         },
         'Europe/Moscow',
       ),

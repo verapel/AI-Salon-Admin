@@ -60,6 +60,11 @@ export type GoogleEventImportProposal = {
 
 export const GOOGLE_IMPORT_RPC = 'commit_google_calendar_manual_import' as const;
 
+/** Stored on imported appointments so later autosync can refresh the same row. */
+export function googleImportedAppointmentNotes(summary: string | null | undefined): string {
+  return `Google Calendar import\n${summary || ''}`.slice(0, 2000);
+}
+
 export type GoogleImportErrorCode =
   | 'google_not_connected'
   | 'google_calendar_not_selected'
@@ -637,7 +642,7 @@ export async function executeManualGoogleCalendarImport(params: {
     }
   }
 
-  const notes = `Google Calendar import\n${mapped.summary || ''}`.slice(0, 2000);
+  const notes = googleImportedAppointmentNotes(mapped.summary);
 
   const { data: rpcData, error: rpcError } = await params.db.rpc(GOOGLE_IMPORT_RPC, {
     p_salon_id: salonId,
