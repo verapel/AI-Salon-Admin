@@ -86,6 +86,55 @@ export function resolveParserTimezone(raw: string | null | undefined): string {
   return CALENDAR_PARSER_FALLBACK_TIMEZONE;
 }
 
+/**
+ * Display timezone for a Google timed event.
+ * Prefer the event's own IANA zone (what Google Calendar shows), then salon.
+ */
+export function resolveGoogleEventDisplayTimezone(
+  eventTimeZone: string | null | undefined,
+  salonTimeZone: string | null | undefined,
+): string {
+  const eventTz = typeof eventTimeZone === 'string' ? eventTimeZone.trim() : '';
+  if (eventTz && eventTz !== 'UTC' && isValidIanaTimeZone(eventTz)) return eventTz;
+  return resolveParserTimezone(salonTimeZone);
+}
+
+/**
+ * Wall clock already encoded in an RFC3339 dateTime with a numeric offset
+ * (not Z). Used only when the event has no IANA timeZone, so we do not
+ * re-project that offset through a different salon zone.
+ */
+export function wallClockFromOffsetDateTime(
+  iso: string | null | undefined,
+): { date: string; time: string } | null {
+  const raw = typeof iso === 'string' ? iso.trim() : '';
+  if (!raw) return null;
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?([+-]\d{2}:?\d{2})$/.exec(
+    raw,
+  );
+  if (!m) return null;
+  return { date: m[1], time: `${m[2]}:${m[3]}` };
+}
+
+/**
+ * Convert a Google dateTime instant to the local clock Google Calendar shows.
+ * Event IANA zone wins; else numeric-offset wall clock; else salon zone.
+ */
+export function localClockForExternalInstant(
+  dateTime: string,
+  eventTimeZone: string | null | undefined,
+  salonTimeZone: string | null | undefined,
+): { date: string; time: string } | null {
+  const eventTz = typeof eventTimeZone === 'string' ? eventTimeZone.trim() : '';
+  // UTC on the event is the instant's zone, not the salon/calendar display zone.
+  if (eventTz && eventTz !== 'UTC' && isValidIanaTimeZone(eventTz)) {
+    return instantToSalonLocal(dateTime, eventTz);
+  }
+  const fromOffset = wallClockFromOffsetDateTime(dateTime);
+  if (fromOffset) return fromOffset;
+  return instantToSalonLocal(dateTime, resolveParserTimezone(salonTimeZone));
+}
+
 export function collapseWhitespace(text: string): string {
   return text.replace(/\s+/gu, ' ').trim();
 }
@@ -569,7 +618,11 @@ function parseTimes(
     };
   }
 
-  const startLocal = instantToSalonLocal(start.dateTime, salonTimeZone);
+  const startLocal = localClockForExternalInstant(
+    start.dateTime,
+    start.timeZone || end.timeZone,
+    salonTimeZone,
+  );
   if (!startLocal) {
     reasons.push('invalid_start_datetime');
     return {
@@ -589,7 +642,11 @@ function parseTimes(
   if (!end.dateTime) {
     reasons.push('missing_end_datetime');
   } else {
-    const endLocal = instantToSalonLocal(end.dateTime, salonTimeZone);
+    const endLocal = localClockForExternalInstant(
+      end.dateTime,
+      end.timeZone || start.timeZone,
+      salonTimeZone,
+    );
     if (!endLocal) {
       reasons.push('invalid_end_datetime');
     } else {

@@ -58,6 +58,8 @@ import {
   googleImportedOccurrenceUnchanged,
   googleOverlayOccurrenceUnchanged,
   loadGoogleImportedOccurrenceIndex,
+  persistCanonicalGoogleBusyAppointment,
+  pickCanonicalGoogleBusyServiceId,
   reconcileGoogleReviewOverlay,
   reconcileGoogleSourcedAppointment,
   type GoogleImportedOccurrenceIndex,
@@ -428,10 +430,42 @@ async function persistEligibleOverlay(params: {
   salonTimeZone: string;
   matching?: Parameters<typeof persistGoogleReviewOrResolve>[0]['matching'];
   importedKeys: Set<string>;
+  importedIndex: GoogleImportedOccurrenceIndex;
+  catalog: CalendarMatchCatalog;
+  selectedCalendarId?: string | null;
   clientId?: string | null;
   reviewIndex: GoogleReviewCoverageIndex;
   existing: boolean;
 }): Promise<GoogleSyncTerminal> {
+  const serviceId = pickCanonicalGoogleBusyServiceId(params.matching, params.catalog.services);
+  if (params.clientId && serviceId && isGoogleEventEligibleForSalonCalendarDisplay(params.ev)) {
+    const persisted = await persistCanonicalGoogleBusyAppointment({
+      db: params.db,
+      salonId: params.salonId,
+      calendarConnectionId: params.calendarConnectionId,
+      ev: params.ev,
+      staffId: params.staffId,
+      staffName: params.staffName,
+      salonTimeZone: params.salonTimeZone,
+      clientId: params.clientId,
+      serviceId,
+      importedIndex: params.importedIndex,
+      selectedCalendarId: params.selectedCalendarId,
+      matching: params.matching,
+    });
+    if (persisted.appointmentId && persisted.kind !== 'conflict' && persisted.kind !== 'missing') {
+      await resolveGoogleCalendarReviewIssue({
+        db: params.db,
+        salonId: params.salonId,
+        calendarConnectionId: params.calendarConnectionId,
+        ev: params.ev,
+        appointmentId: persisted.appointmentId,
+      });
+      if (persisted.kind === 'created') return 'newAppointment';
+      if (persisted.kind === 'updated') return 'updatedAppointment';
+      return 'unchangedAppointment';
+    }
+  }
   const persistKind = await persistGoogleReviewOrResolve({
     db: params.db,
     salonId: params.salonId,
@@ -728,6 +762,9 @@ export async function importGoogleCalendarLast30Days(params: {
               salonTimeZone,
               matching,
               importedKeys,
+              importedIndex,
+              catalog,
+              selectedCalendarId: ev.calendarId,
               clientId: coverageClientId,
               reviewIndex,
               existing: overlayVisible,
@@ -739,31 +776,49 @@ export async function importGoogleCalendarLast30Days(params: {
           }
         }
 
-        if (overlayVisible && googleOverlayOccurrenceUnchanged(ev, overlayRecord, salonTimeZone)) {
+        if (overlayVisible && !importedVisible) {
           const remembered = findRememberedCoverageClientId(ev, reviewIndex.clientByKey);
           if (remembered) summary.clientsReused += 1;
-          finish('unchangedReviewOverlay');
-          continue;
-        }
-
-        if (overlayRecord) {
-          const remembered = findRememberedCoverageClientId(ev, reviewIndex.clientByKey);
-          if (remembered) summary.clientsReused += 1;
-          const overlayOut = await reconcileGoogleReviewOverlay({
+          const coverageClientId =
+            remembered ||
+            (await ensureCoverageClient({
+              db: params.db,
+              salonId,
+              calendarConnectionId: conn.id,
+              ev,
+              parsedClientName: parsed.clientNameCandidate,
+              phoneDigits: parsed.phone.normalized || '',
+              session: clientSession,
+              catalog,
+              summary,
+              rememberedClientId: remembered,
+            }));
+          const terminal = await persistEligibleOverlay({
             db: params.db,
             salonId,
             calendarConnectionId: conn.id,
             ev,
-            overlays: reviewIndex,
+            reasonCode: overlayRecord?.reasonCode || 'service_not_matched',
             staffId: staff.id,
             staffName: staff.name,
             salonTimeZone,
             matching,
-            reasonCode: overlayRecord.reasonCode,
+            importedKeys,
+            importedIndex,
+            catalog,
+            selectedCalendarId: ev.calendarId,
+            clientId: coverageClientId,
+            reviewIndex,
+            existing: true,
           });
-          if (overlayOut === 'updated') finish('updatedReviewOverlay');
-          else if (overlayOut === 'failed') finish('failed');
-          else finish('unchangedReviewOverlay');
+          if (
+            (terminal === 'updatedReviewOverlay' || terminal === 'newReviewOverlay') &&
+            googleOverlayOccurrenceUnchanged(ev, overlayRecord, salonTimeZone)
+          ) {
+            finish('unchangedReviewOverlay');
+          } else {
+            finish(terminal);
+          }
           continue;
         }
 
@@ -812,6 +867,9 @@ export async function importGoogleCalendarLast30Days(params: {
               salonTimeZone,
               matching,
               importedKeys,
+              importedIndex,
+              catalog,
+              selectedCalendarId: ev.calendarId,
               clientId: coverageClientId,
               reviewIndex,
               existing: false,
@@ -858,6 +916,9 @@ export async function importGoogleCalendarLast30Days(params: {
                 salonTimeZone,
                 matching,
                 importedKeys,
+                importedIndex,
+                catalog,
+                selectedCalendarId: ev.calendarId,
                 clientId: coverageClientId,
                 reviewIndex,
                 existing: overlayVisible,
@@ -890,6 +951,9 @@ export async function importGoogleCalendarLast30Days(params: {
           staffName: staff.name,
           salonTimeZone,
           importedKeys,
+          importedIndex,
+          catalog,
+          selectedCalendarId: ev.calendarId,
           clientId: null,
           reviewIndex,
           existing: Boolean(findOverlayRecord(ev, reviewIndex)),

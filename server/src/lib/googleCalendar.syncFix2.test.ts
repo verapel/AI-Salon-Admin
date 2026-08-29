@@ -224,6 +224,22 @@ function fix2Db(opts: {
             };
             return chain;
           },
+          insert(row: any) {
+            const created = {
+              id: row.id || `appt-${appointments.length + 1}`,
+              salon_id: row.salon_id,
+              status: row.status || 'scheduled',
+              reminder_sent: row.reminder_sent ?? false,
+              ...row,
+            };
+            appointments.push(created);
+            return {
+              select() {
+                return { single: async () => ({ data: created, error: null }) };
+              },
+              then: async (resolve: any) => resolve({ data: created, error: null }),
+            };
+          },
           update(payload: any) {
             const allowed = new Set([
               'date',
@@ -515,11 +531,10 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
       },
     });
     assert.equal(importCalls, 0);
-    assert.equal(first.result.updatedEvents, 1);
-    assert.equal(first.result.reviewEventsUpdated, 1);
-    assert.equal(db.issues.length, 1);
-    assert.equal(db.issues[0].parsed_event.title, 'Anna haircut');
-    assert.equal(db.issues[0].parsed_event.startTime, '12:00');
+    const googleAppt = db.appointments.find((row) => row.source === 'google');
+    assert.ok(googleAppt);
+    assert.equal(String(googleAppt.start_time).slice(0, 5), '12:00');
+    assert.equal(String(googleAppt.notes || '').includes('Anna haircut'), true);
     assert.equal(db.clients.length, 1);
 
     const second = await runManual({
@@ -544,7 +559,7 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
       },
     });
     assert.equal(second.result.unchangedEvents, 1);
-    assert.equal(db.issues.length, 1);
+    assert.equal(db.appointments.filter((row) => row.source === 'google').length, 1);
     assert.equal(db.clients.length, 1);
   });
 
@@ -764,8 +779,10 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
       db,
       events: [previewEvent({ id: 'evt-many', summary: 'Three' })],
     });
-    assert.equal(db.issues.filter((r: { status: string }) => r.status === 'open').length, 1);
-    assert.equal(db.issues[0].external_uid, 'evt-many');
+    const googleRows = db.appointments.filter((row) => row.source === 'google');
+    assert.equal(googleRows.length, 1);
+    assert.equal(String(googleRows[0]?.notes || '').includes('Three'), true);
+    assert.equal(db.issues.filter((r: { status: string }) => r.status === 'open').length, 0);
   });
 
   it('14. manual sync still now−30d → all future', () => {
@@ -2154,9 +2171,10 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
         throw new Error('must not create');
       },
     });
-    assert.equal(result.updated, 1);
-    assert.equal(db.issues.length, 1);
-    assert.equal(db.issues[0].parsed_event.title, 'New title');
+    const googleAppt = db.appointments.find((row) => row.source === 'google');
+    assert.ok(googleAppt);
+    assert.equal(String(googleAppt.notes || '').includes('New title'), true);
+    assert.equal(result.imported + result.updated, 1);
   });
 
   it('cancelled overlay is dismissed, appointment/client are not deleted', async () => {

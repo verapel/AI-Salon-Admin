@@ -11,7 +11,9 @@ import { dirname, join } from 'node:path';
 import {
   instantToSalonLocal,
   isValidStandaloneClockToken,
+  localClockForExternalInstant,
   parseExternalCalendarEvent,
+  wallClockFromOffsetDateTime,
   type ExternalCalendarEventInput,
 } from './calendarEventParser.js';
 
@@ -441,6 +443,46 @@ describe('GOOGLE-CAL-FAST-3B-FIX-3 clock not a service signal (executed)', () =>
     assert.equal(isValidStandaloneClockToken('1:2'), false);
     assert.equal(isValidStandaloneClockToken('15:00'), true);
     assert.equal(isValidStandaloneClockToken('9:30'), true);
+  });
+
+  it('Yerevan 15:00+04 with salon Europe/Moscow stays 15:00 (no Moscow reproject)', () => {
+    const parsed = parseExternalCalendarEvent(
+      {
+        summary: 'Sep1',
+        description: null,
+        status: 'confirmed',
+        start: {
+          dateTime: '2026-09-01T15:00:00+04:00',
+          date: null,
+          timeZone: 'Asia/Yerevan',
+          allDay: false,
+        },
+        end: {
+          dateTime: '2026-09-01T17:00:00+04:00',
+          date: null,
+          timeZone: 'Asia/Yerevan',
+          allDay: false,
+        },
+      },
+      'Europe/Moscow',
+    );
+    assert.equal(parsed.localDate, '2026-09-01');
+    assert.equal(parsed.localStartTime, '15:00');
+    assert.equal(parsed.localEndTime, '17:00');
+    assert.notEqual(parsed.localStartTime, '14:00');
+  });
+
+  it('offset wall clock is used when Google omits IANA zone', () => {
+    assert.deepEqual(wallClockFromOffsetDateTime('2026-09-02T13:00:00+04:00'), {
+      date: '2026-09-02',
+      time: '13:00',
+    });
+    const clock = localClockForExternalInstant(
+      '2026-09-02T13:00:00+04:00',
+      null,
+      'Europe/Moscow',
+    );
+    assert.deepEqual(clock, { date: '2026-09-02', time: '13:00' });
   });
 });
 

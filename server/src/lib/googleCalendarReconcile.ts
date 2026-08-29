@@ -3,10 +3,12 @@
  * and update the SAME overlay/appointment. No Google writes. No migration.
  */
 
+import { randomUUID } from 'node:crypto';
 import { syncAppointmentReminder } from './appointmentReminders.js';
 import {
   buildGoogleOccurrenceKey,
   buildGoogleOccurrenceRecurrenceId,
+  buildGoogleSourceExternalEventId,
   googleImportedAppointmentNotes,
   classifyGoogleStoredIdentifierType,
   googleCalendarIdsEquivalent,
@@ -310,6 +312,146 @@ export function googleOccurrenceNeedsAutoReconcile(params: {
     findOverlayRecord(ev, params.overlays),
     params.salonTimeZone,
   );
+}
+
+export function rememberImportedOccurrence(
+  index: GoogleImportedOccurrenceIndex,
+  record: GoogleImportedOccurrenceRecord,
+  ev: Pick<
+    GoogleEventPreviewItem,
+    'id' | 'calendarId' | 'iCalUID' | 'recurringEventId' | 'originalStartTime'
+  >,
+): void {
+  for (const key of googleOccurrenceReconcileLookupKeys(ev)) {
+    index.keys.add(key);
+    index.byKey.set(key, record);
+  }
+}
+
+export function pickCanonicalGoogleBusyServiceId(
+  matching: CalendarEventMatchingPreview | undefined,
+  catalogServices: Array<{ id?: string | null }>,
+): string | null {
+  const matched =
+    matching?.service?.status === 'matched' && typeof matching.service.serviceId === 'string'
+      ? matching.service.serviceId.trim()
+      : '';
+  if (matched) return matched;
+  for (const row of catalogServices) {
+    const id = typeof row?.id === 'string' ? row.id.trim() : '';
+    if (id) return id;
+  }
+  return null;
+}
+
+export async function persistCanonicalGoogleBusyAppointment(params: {
+  db: any;
+  salonId: string;
+  calendarConnectionId: string;
+  ev: GoogleEventPreviewItem;
+  staffId: string;
+  staffName?: string;
+  salonTimeZone: string;
+  clientId: string;
+  serviceId: string;
+  importedIndex: GoogleImportedOccurrenceIndex;
+  selectedCalendarId?: string | null;
+  matching?: CalendarEventMatchingPreview;
+}): Promise<{
+  kind: 'created' | 'updated' | 'unchanged' | 'cancelled' | 'conflict' | 'missing';
+  appointmentId: string | null;
+}> {
+  const existing = findImportedOccurrenceRecord(params.ev, params.importedIndex);
+  if (existing?.appointmentId) {
+    const moved = await reconcileGoogleSourcedAppointment({
+      db: params.db,
+      salonId: params.salonId,
+      calendarConnectionId: params.calendarConnectionId,
+      ev: params.ev,
+      record: existing,
+      salonTimeZone: params.salonTimeZone,
+      staffId: params.staffId,
+      staffName: params.staffName || 'Tatev',
+      matching: params.matching,
+    });
+    return { kind: moved.kind, appointmentId: existing.appointmentId };
+  }
+
+  if (isGoogleEventCancelledOrDeleted(params.ev)) {
+    return { kind: 'cancelled', appointmentId: null };
+  }
+
+  const times = googleEventCalendarTimes(params.ev, params.salonTimeZone);
+  if (!times) return { kind: 'missing', appointmentId: null };
+
+  const appointmentId = randomUUID();
+  const recurrenceId = buildGoogleOccurrenceRecurrenceId(params.ev);
+  const calendarId =
+    googleCanonicalLinkCalendarId(params.ev.calendarId, params.selectedCalendarId) ||
+    (params.ev.calendarId || '').trim() ||
+    'primary';
+  const sourceExternalEventId = buildGoogleSourceExternalEventId({
+    calendarId,
+    eventId: params.ev.id,
+    recurrenceId,
+  });
+  const notes = googleImportedAppointmentNotes(params.ev.summary);
+
+  try {
+    const inserted = params.db.from('appointments').insert({
+      id: appointmentId,
+      salon_id: params.salonId,
+      client_id: params.clientId,
+      staff_id: params.staffId,
+      service_id: params.serviceId,
+      date: times.date,
+      start_time: times.startTime,
+      end_time: times.endTime,
+      status: 'scheduled',
+      notes,
+      reminder_sent: false,
+      source: 'google',
+      source_external_event_id: sourceExternalEventId,
+    });
+    const insertResult = typeof inserted?.then === 'function' ? await inserted : inserted;
+    if (insertResult?.error) return { kind: 'missing', appointmentId: null };
+  } catch {
+    return { kind: 'missing', appointmentId: null };
+  }
+
+  try {
+    await params.db.from('appointment_external_links').insert({
+      salon_id: params.salonId,
+      appointment_id: appointmentId,
+      calendar_connection_id: params.calendarConnectionId,
+      provider: 'google',
+      external_calendar_id: calendarId,
+      external_uid: params.ev.id,
+      recurrence_id: recurrenceId,
+      external_etag: params.ev.etag || null,
+      external_last_modified: params.ev.updated || null,
+    });
+  } catch {
+    return { kind: 'missing', appointmentId: null };
+  }
+
+  const record: GoogleImportedOccurrenceRecord = {
+    appointmentId,
+    eventId: params.ev.id,
+    calendarId,
+    etag: params.ev.etag || null,
+    lastModified: params.ev.updated || null,
+    date: times.date,
+    startTime: times.startTime,
+    endTime: times.endTime,
+    staffId: params.staffId,
+    clientId: params.clientId,
+    status: 'scheduled',
+    notes,
+    source: 'google',
+  };
+  rememberImportedOccurrence(params.importedIndex, record, params.ev);
+  return { kind: 'created', appointmentId };
 }
 
 export function findOverlayRecord(

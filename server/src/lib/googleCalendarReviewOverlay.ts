@@ -4,7 +4,11 @@
  * clients/services or weaken appointment constraints. No Google writes.
  */
 
-import { parseExternalCalendarEvent, resolveParserTimezone } from './calendarEventParser.js';
+import {
+  parseExternalCalendarEvent,
+  resolveGoogleEventDisplayTimezone,
+  resolveParserTimezone,
+} from './calendarEventParser.js';
 import type { CalendarEventMatchingPreview } from './calendarEventMatcher.js';
 import {
   buildGoogleOccurrenceRecurrenceId,
@@ -380,7 +384,10 @@ export function googleEventCalendarTimes(
   salonTimeZone: string,
 ): { date: string; startTime: string; endTime: string; durationMinutes: number } | null {
   if (!isGoogleEventEligibleForSalonCalendarDisplay(ev)) return null;
-  const tz = resolveParserTimezone(salonTimeZone);
+  const displayTz = resolveGoogleEventDisplayTimezone(
+    ev.start?.timeZone || ev.end?.timeZone,
+    salonTimeZone,
+  );
   const parsed = parseExternalCalendarEvent(
     {
       summary: ev.summary ?? null,
@@ -389,7 +396,7 @@ export function googleEventCalendarTimes(
       start: ev.start,
       end: ev.end,
     },
-    tz,
+    displayTz,
   );
   if (parsed.localDate && parsed.localStartTime && parsed.localEndTime) {
     const duration =
@@ -403,8 +410,8 @@ export function googleEventCalendarTimes(
       durationMinutes: duration,
     };
   }
-  const start = formatClockInTimeZone(ev.start.dateTime || '', tz);
-  const end = formatClockInTimeZone(ev.end.dateTime || '', tz);
+  const start = formatClockInTimeZone(ev.start.dateTime || '', displayTz);
+  const end = formatClockInTimeZone(ev.end.dateTime || '', displayTz);
   if (!start || !end) return null;
   const startMs = Date.parse(ev.start.dateTime || '');
   const endMs = Date.parse(ev.end.dateTime || '');

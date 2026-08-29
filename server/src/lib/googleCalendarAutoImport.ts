@@ -67,6 +67,8 @@ import {
   googleImportedAppointmentIsVisible,
   googleOccurrenceNeedsAutoReconcile,
   loadGoogleImportedOccurrenceIndex,
+  persistCanonicalGoogleBusyAppointment,
+  pickCanonicalGoogleBusyServiceId,
   reconcileGoogleReviewOverlay,
   reconcileGoogleSourcedAppointment,
   type GoogleImportedOccurrenceIndex,
@@ -1620,6 +1622,65 @@ export async function pullGoogleCalendarConnection(params: {
     });
     let attemptedImports = 0;
 
+    const persistCanonicalBusy = async (
+      ev: GoogleEventPreviewItem,
+      parsed: CalendarEventParsedPreview | undefined,
+      matching: ReturnType<typeof matchParsedCalendarEvent> | undefined,
+    ): Promise<'created' | 'updated' | 'unchanged' | 'cancelled' | 'conflict' | 'missing' | 'overlay' | 'excluded' | 'failed' | 'resolved'> => {
+      if (!isGoogleEventEligibleForSalonCalendarDisplay(ev)) {
+        return 'excluded';
+      }
+      const coverageClientId = parsed
+        ? await ensureAutoCoverageClient(
+            ev,
+            parsed.clientNameCandidate,
+            parsed.phone.normalized || '',
+          )
+        : null;
+      const serviceId = pickCanonicalGoogleBusyServiceId(matching, catalog.services);
+      if (coverageClientId && serviceId) {
+        const persisted = await persistCanonicalGoogleBusyAppointment({
+          db: params.db,
+          salonId: params.salonId,
+          calendarConnectionId: params.connectionId,
+          ev,
+          staffId,
+          staffName,
+          salonTimeZone,
+          clientId: coverageClientId,
+          serviceId,
+          importedIndex,
+          selectedCalendarId: calendarId,
+          matching,
+        });
+        if (persisted.appointmentId) {
+          await resolveGoogleCalendarReviewIssue({
+            db: params.db,
+            salonId: params.salonId,
+            calendarConnectionId: params.connectionId,
+            ev,
+            appointmentId: persisted.appointmentId,
+          });
+          return persisted.kind;
+        }
+      }
+      const persistKind = await persistGoogleReviewOrResolve({
+        db: params.db,
+        salonId: params.salonId,
+        calendarConnectionId: params.connectionId,
+        ev,
+        reasonCode: matching?.service.status === 'matched' ? 'other' : 'service_not_matched',
+        staffId,
+        staffName,
+        salonTimeZone,
+        matching,
+        importedKeys,
+        clientId: coverageClientId,
+        ignoreImportedLink: true,
+      });
+      return persistKind;
+    };
+
     const ensureAutoCoverageClient = async (
       ev: GoogleEventPreviewItem,
       parsedClientName: string | null,
@@ -1801,19 +1862,11 @@ export async function pullGoogleCalendarConnection(params: {
         }
 
         if (isGoogleReviewOverlayRepresented(ev, reviewIndex.overlayKeys)) {
-          const overlayOut = await reconcileGoogleReviewOverlay({
-            db: params.db,
-            salonId: params.salonId,
-            calendarConnectionId: params.connectionId,
-            ev,
-            overlays: reviewIndex,
-            staffId,
-            staffName,
-            salonTimeZone,
-            matching,
-          });
-          if (overlayOut === 'updated' || overlayOut === 'hidden') summary.updated += 1;
-          else bumpSkip('already_imported');
+          const busyKind = await persistCanonicalBusy(ev, parsed, matching);
+          if (busyKind === 'created') summary.imported += 1;
+          else if (busyKind === 'updated' || busyKind === 'cancelled') summary.updated += 1;
+          else if (busyKind === 'failed') summary.errors += 1;
+          else if (busyKind === 'unchanged' || busyKind === 'overlay') bumpSkip('already_imported');
           continue;
         }
 
@@ -1830,65 +1883,30 @@ export async function pullGoogleCalendarConnection(params: {
         });
 
         if (decision.action === 'skip') {
-          bumpSkip(decision.reason);
-          const coverageClientId = isGoogleEventEligibleForSalonCalendarDisplay(ev)
-            ? await ensureAutoCoverageClient(
-                ev,
-                parsed.clientNameCandidate,
-                parsed.phone.normalized || '',
-              )
-            : null;
-          const persistKind = await persistGoogleReviewOrResolve({
-            db: params.db,
-            salonId: params.salonId,
-            calendarConnectionId: params.connectionId,
-            ev,
-            reasonCode: decision.reason,
-            staffId,
-            staffName,
-            salonTimeZone,
-            matching,
-            importedKeys,
-            clientId: coverageClientId,
-          });
-          if (persistKind === 'failed') {
+          const busyKind = await persistCanonicalBusy(ev, parsed, matching);
+          if (busyKind === 'created') {
+            summary.imported += 1;
+          } else if (busyKind === 'updated' || busyKind === 'cancelled') {
+            summary.updated += 1;
+            bumpSkip(decision.reason);
+          } else if (busyKind === 'failed') {
             summary.errors += 1;
-            console.error('[calendar/google-auto] overlay persist failed', {
-              salonId: params.salonId,
-              eventId: ev.id,
-              reason: decision.reason,
-            });
+            bumpSkip(decision.reason);
+          } else {
+            bumpSkip(decision.reason);
           }
           continue;
         }
 
         if (attemptedImports >= GOOGLE_CALENDAR_PULL_MAX_IMPORTS) {
-          bumpSkip('import_bound');
-          const coverageClientId = await ensureAutoCoverageClient(
-            ev,
-            parsed.clientNameCandidate,
-            parsed.phone.normalized || '',
-          );
-          const persistKind = await persistGoogleReviewOrResolve({
-            db: params.db,
-            salonId: params.salonId,
-            calendarConnectionId: params.connectionId,
-            ev,
-            reasonCode: 'import_bound',
-            staffId,
-            staffName,
-            salonTimeZone,
-            matching,
-            importedKeys,
-            clientId: coverageClientId,
-          });
-          if (persistKind === 'failed') {
+          const busyKind = await persistCanonicalBusy(ev, parsed, matching);
+          if (busyKind === 'created') summary.imported += 1;
+          else if (busyKind === 'updated' || busyKind === 'cancelled') summary.updated += 1;
+          else if (busyKind === 'failed') {
             summary.errors += 1;
-            console.error('[calendar/google-auto] overlay persist failed', {
-              salonId: params.salonId,
-              eventId: ev.id,
-              reason: 'import_bound',
-            });
+            bumpSkip('import_bound');
+          } else {
+            bumpSkip('import_bound');
           }
           continue;
         }
@@ -1999,28 +2017,10 @@ export async function pullGoogleCalendarConnection(params: {
           });
         }
         if (code !== 'google_event_already_imported') {
-          const needsCoverage = googleSkipReasonNeedsCalendarOverlay(code);
-          const coverageClientId =
-            needsCoverage && parsed
-              ? await ensureAutoCoverageClient(
-                  ev,
-                  parsed.clientNameCandidate,
-                  parsed.phone.normalized || '',
-                )
-              : null;
-          await persistGoogleReviewOrResolve({
-            db: params.db,
-            salonId: params.salonId,
-            calendarConnectionId: params.connectionId,
-            ev,
-            reasonCode: code,
-            staffId,
-            staffName,
-            salonTimeZone,
-            matching,
-            importedKeys,
-            clientId: coverageClientId,
-          });
+          const busyKind = await persistCanonicalBusy(ev, parsed, matching);
+          if (busyKind === 'created') summary.imported += 1;
+          else if (busyKind === 'updated' || busyKind === 'cancelled') summary.updated += 1;
+          else if (busyKind === 'failed') summary.errors += 1;
         }
       }
     }
