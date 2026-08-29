@@ -207,12 +207,41 @@ function fix2Db(opts: {
             return chain;
           },
           update(payload: any) {
+            const allowed = new Set([
+              'date',
+              'start_time',
+              'end_time',
+              'notes',
+              'status',
+              'staff_id',
+              'client_id',
+              'service_id',
+              'reminder_sent',
+            ]);
+            const filters: Record<string, string> = {};
             const chain: any = {
-              eq() {
+              eq(col: string, val: string) {
+                filters[col] = val;
                 return chain;
               },
               then: async (resolve: any) => {
-                for (const row of appointments) Object.assign(row, payload);
+                const unknown = Object.keys(payload || {}).filter((key) => !allowed.has(key));
+                if (unknown.length) {
+                  return resolve({
+                    error: {
+                      message: `Could not find the '${unknown[0]}' column of 'appointments' in the schema cache`,
+                    },
+                  });
+                }
+                for (const row of appointments) {
+                  if (
+                    Object.entries(filters).every(
+                      ([k, v]) => String((row as Record<string, unknown>)[k] ?? '') === String(v),
+                    )
+                  ) {
+                    Object.assign(row, payload);
+                  }
+                }
                 return resolve({ error: null });
               },
             };
@@ -791,7 +820,7 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
     const db = fix2Db({
       imported: [
         {
-          appointment_id: 'appt-1',
+          appointment_id: 'appt-google',
           external_uid: 'evt-ap',
           recurrence_id: '',
           external_calendar_id: 'primary',
@@ -800,15 +829,28 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
       ],
       appointments: [
         {
-          id: 'appt-1',
+          id: 'appt-google',
           salon_id: 'salon-1',
           staff_id: STAFF,
           client_id: CLIENT,
           date: '2026-08-20',
-          start_time: '10:00',
-          end_time: '12:00',
+          start_time: '11:00',
+          end_time: '13:00',
           status: 'scheduled',
           notes: oldNotes,
+          source: 'google',
+        },
+        {
+          id: 'appt-owner',
+          salon_id: 'salon-1',
+          staff_id: STAFF,
+          client_id: 'other',
+          date: '2026-08-20',
+          start_time: '09:00',
+          end_time: '10:00',
+          status: 'scheduled',
+          notes: 'manual',
+          source: 'owner',
         },
       ],
     });
@@ -824,7 +866,7 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
           id: 'evt-ap',
           summary: 'New title',
           start: { dateTime: '2026-08-20T12:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
-          end: { dateTime: '2026-08-20T14:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
+          end: { dateTime: '2026-08-20T13:00:00.000Z', date: null, timeZone: 'UTC', allDay: false },
           etag: 'moved',
           updated: '2026-08-16T19:00:00.000Z',
         }),
@@ -843,11 +885,25 @@ describe('GOOGLE-CAL-SYNC-FIX-2 new + update', () => {
     assert.equal(importCalls, 0);
     assert.equal(result.updated, 1);
     assert.equal(result.imported, 0);
-    assert.equal(db.appointments.length, 1);
-    assert.equal(db.appointments[0].id, 'appt-1');
-    assert.equal(db.appointments[0].start_time, '12:00');
-    assert.equal(db.appointments[0].end_time, '14:00');
-    assert.equal(db.appointments[0].notes, googleImportedAppointmentNotes('New title'));
+    assert.equal(db.appointments.length, 2);
+    const google = db.appointments.find((row) => row.id === 'appt-google');
+    const owner = db.appointments.find((row) => row.id === 'appt-owner');
+    assert.ok(google);
+    assert.equal(google.start_time, '12:00');
+    assert.equal(google.end_time, '13:00');
+    assert.notEqual(google.start_time, '11:00');
+    assert.equal(google.notes, googleImportedAppointmentNotes('New title'));
+    assert.equal(owner?.start_time, '09:00');
+    assert.equal(owner?.end_time, '10:00');
+    assert.equal(owner?.notes, 'manual');
+    const reconcile = read('server/src/lib/googleCalendarReconcile.ts');
+    const updateFn = reconcile.slice(
+      reconcile.indexOf('export async function reconcileGoogleSourcedAppointment'),
+      reconcile.indexOf('async function touchImportedLink'),
+    );
+    assert.match(updateFn, /start_time: times.startTime/);
+    assert.match(updateFn, /end_time: times.endTime/);
+    assert.doesNotMatch(updateFn, /updated_at/);
   });
 
   it('recent autosync updatedMin is last_sync overlap, not the enable watermark', () => {

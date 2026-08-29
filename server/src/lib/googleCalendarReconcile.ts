@@ -348,10 +348,9 @@ export async function reconcileGoogleSourcedAppointment(params: {
       await touchImportedLink(params);
       return { kind: 'unchanged' };
     }
-    const nowIso = new Date().toISOString();
     const { error } = await params.db
       .from('appointments')
-      .update({ notes, updated_at: nowIso })
+      .update({ notes })
       .eq('id', params.record.appointmentId)
       .eq('salon_id', params.salonId);
     if (error) return { kind: 'missing' };
@@ -387,7 +386,6 @@ export async function reconcileGoogleSourcedAppointment(params: {
     return { kind: 'conflict' };
   }
 
-  const nowIso = new Date().toISOString();
   const { error } = await params.db
     .from('appointments')
     .update({
@@ -395,7 +393,6 @@ export async function reconcileGoogleSourcedAppointment(params: {
       start_time: times.startTime,
       end_time: times.endTime,
       notes,
-      updated_at: nowIso,
     })
     .eq('id', params.record.appointmentId)
     .eq('salon_id', params.salonId);
