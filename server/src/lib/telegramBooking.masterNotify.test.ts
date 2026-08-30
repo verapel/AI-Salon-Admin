@@ -102,21 +102,21 @@ describe('staff telegram_chat_id schema + staff UI', () => {
     assert.doesNotMatch(mig, /555000555|111000111|TELEGRAM_CHAT_ID/);
   });
 
-  it('exposes Telegram chat ID on staff create/edit form and API', () => {
+  it('staff card CRUD does not depend on telegram_chat_id', () => {
     const staffPage = read('client/src/pages/Staff.tsx');
-    assert.match(staffPage, /telegramChatId/);
-    assert.match(staffPage, /staff\.fieldTelegramChatId/);
-
-    const en = read('client/src/i18n/translations.ts');
-    assert.match(en, /'staff\.fieldTelegramChatId': 'Telegram chat ID'/);
+    assert.doesNotMatch(staffPage, /telegramChatId|fieldTelegramChatId/);
+    assert.match(staffPage, /\.\.\.form/);
+    assert.match(staffPage, /api\.staff\.update\(editing\.id, data\)/);
+    assert.match(staffPage, /api\.staff\.updateServices\(staffId, selectedServiceIds\)/);
+    assert.match(staffPage, /specialties: member\.specialties\.join\(', '\)/);
+    assert.match(staffPage, /setSelectedServiceIds\(member\.serviceIds \?\? \[\]\)/);
 
     const routes = read('server/src/routes/staff.ts');
-    assert.match(routes, /telegram_chat_id/);
-    assert.match(routes, /telegramChatId/);
-    assert.match(routes, /parseStaffTelegramChatIdBody/);
-
-    const mapper = read('server/src/lib/mappers.ts');
-    assert.match(mapper, /telegramChatId: row\.telegram_chat_id \?\? null/);
+    assert.doesNotMatch(routes, /parseStaffTelegramChatIdBody/);
+    assert.doesNotMatch(routes, /updates\.telegram_chat_id/);
+    assert.doesNotMatch(routes, /telegram_chat_id: telegramChatId/);
+    assert.match(routes, /router\.put\('\/:id\/services'/);
+    assert.match(routes, /if \(specialties !== undefined\) updates\.specialties = specialties/);
   });
 });
 

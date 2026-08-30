@@ -357,44 +357,10 @@ router.get('/:id', async (req, res) => {
   res.json(mapStaff(data, serviceIdsByStaff.get(data.id) ?? []));
 });
 
-function parseStaffTelegramChatIdBody(body: {
-  telegramChatId?: unknown;
-  telegram_chat_id?: unknown;
-}):
-  | { provided: false }
-  | { provided: true; ok: true; value: number | null }
-  | { provided: true; ok: false } {
-  const hasCamel = Object.prototype.hasOwnProperty.call(body, 'telegramChatId');
-  const hasSnake = Object.prototype.hasOwnProperty.call(body, 'telegram_chat_id');
-  if (!hasCamel && !hasSnake) return { provided: false };
-
-  const raw = hasCamel ? body.telegramChatId : body.telegram_chat_id;
-  if (raw === undefined || raw === null || raw === '') {
-    return { provided: true, ok: true, value: null };
-  }
-  if (typeof raw === 'number' && Number.isInteger(raw)) {
-    return { provided: true, ok: true, value: raw };
-  }
-  if (typeof raw === 'string') {
-    const trimmed = raw.trim();
-    if (!trimmed) return { provided: true, ok: true, value: null };
-    if (!/^-?\d+$/.test(trimmed)) return { provided: true, ok: false };
-    const n = Number(trimmed);
-    if (!Number.isSafeInteger(n)) return { provided: true, ok: false };
-    return { provided: true, ok: true, value: n };
-  }
-  return { provided: true, ok: false };
-}
-
 router.post('/', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
   const { name, email, phone, role, specialties } = req.body;
   if (!name || !email) return res.status(400).json({ error: 'Name and email are required' });
-
-  const telegramChatId = parseStaffTelegramChatIdBody(req.body);
-  if (telegramChatId.provided && !telegramChatId.ok) {
-    return res.status(400).json({ error: 'telegramChatId must be an integer or empty' });
-  }
 
   const { data, error } = await supabase
     .from('staff')
@@ -407,7 +373,6 @@ router.post('/', requireSalonWriteAccess, async (req, res) => {
       avatar: initialsAvatar(name),
       active: true,
       salon_id: salonId,
-      telegram_chat_id: telegramChatId.provided ? telegramChatId.value : null,
     })
     .select('*')
     .single();
@@ -505,11 +470,6 @@ router.put('/:id', requireSalonWriteAccess, async (req, res) => {
   if (role !== undefined) updates.role = role;
   if (specialties !== undefined) updates.specialties = specialties;
   if (active !== undefined) updates.active = active;
-  const telegramChatId = parseStaffTelegramChatIdBody(req.body);
-  if (telegramChatId.provided && !telegramChatId.ok) {
-    return res.status(400).json({ error: 'telegramChatId must be an integer or empty' });
-  }
-  if (telegramChatId.provided) updates.telegram_chat_id = telegramChatId.value;
 
   const { data, error } = await supabase
     .from('staff')

@@ -14,7 +14,6 @@ const emptyForm = () => ({
   name: '',
   email: '',
   phone: '',
-  telegramChatId: '',
   role: 'Stylist',
   specialties: '',
 });
@@ -86,10 +85,6 @@ export default function Staff() {
       name: member.name,
       email: member.email,
       phone: member.phone,
-      telegramChatId:
-        member.telegramChatId != null && member.telegramChatId !== undefined
-          ? String(member.telegramChatId)
-          : '',
       role: member.role,
       specialties: member.specialties.join(', '),
     });
@@ -109,14 +104,8 @@ export default function Staff() {
     if (submitting) return;
     setSubmitting(true);
     setFormError('');
-    const telegramRaw = form.telegramChatId.trim();
-    const telegramChatId = telegramRaw === '' ? null : Number(telegramRaw);
     const data = {
-      name: form.name,
-      email: form.email,
-      phone: form.phone,
-      role: form.role,
-      telegramChatId,
+      ...form,
       specialties: form.specialties
         .split(',')
         .map((s) => s.trim())
@@ -385,15 +374,6 @@ export default function Staff() {
               className="input-field"
               value={form.phone}
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium">{t('staff.fieldTelegramChatId')}</label>
-            <input
-              className="input-field"
-              value={form.telegramChatId}
-              onChange={(e) => setForm({ ...form, telegramChatId: e.target.value })}
-              inputMode="numeric"
             />
           </div>
           <div>
