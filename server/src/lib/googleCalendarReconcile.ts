@@ -17,6 +17,7 @@ import {
   googleOccurrenceReconcileLookupKeys,
   googleStoredOccurrenceKeys,
   googleStoredUidMatchesEvent,
+  legacyStoredGoogleIdentityMatchesEvent,
   loadGoogleImportedOccurrenceKeys,
 } from './googleCalendarImport.js';
 import type { GoogleEventPreviewItem } from './googleCalendarOAuth.js';
@@ -502,6 +503,34 @@ export async function ensureUnresolvedGoogleBusyServiceId(params: {
   }
 }
 
+/** User-cancelled source=google row for this live event. Sync must not insert a twin. */
+export async function findUserCancelledGoogleAppointmentForEvent(params: {
+  db: any;
+  salonId: string;
+  ev: Pick<
+    GoogleEventPreviewItem,
+    'id' | 'calendarId' | 'iCalUID' | 'recurringEventId' | 'originalStartTime'
+  >;
+}): Promise<string | null> {
+  const loaded = await params.db
+    .from('appointments')
+    .select('id, source, status, source_external_event_id')
+    .eq('salon_id', params.salonId)
+    .eq('source', 'google')
+    .eq('status', 'cancelled');
+  const rows = Array.isArray(loaded?.data) ? loaded.data : [];
+  for (const row of rows) {
+    const id = typeof row?.id === 'string' ? row.id : '';
+    if (!id) continue;
+    if (String(row?.source || '').trim().toLowerCase() !== 'google') continue;
+    if (String(row?.status || '').toLowerCase() !== 'cancelled') continue;
+    if (legacyStoredGoogleIdentityMatchesEvent(row?.source_external_event_id, params.ev)) {
+      return id;
+    }
+  }
+  return null;
+}
+
 export async function persistCanonicalGoogleBusyAppointment(params: {
   db: any;
   salonId: string;
@@ -521,6 +550,10 @@ export async function persistCanonicalGoogleBusyAppointment(params: {
 }> {
   const existing = findImportedOccurrenceRecord(params.ev, params.importedIndex);
   if (existing?.appointmentId) {
+    if (!googleImportedAppointmentIsVisible(existing)) {
+      // User removed this card in /bookings. Do not revive or insert a twin.
+      return { kind: 'unchanged', appointmentId: existing.appointmentId };
+    }
     const moved = await reconcileGoogleSourcedAppointment({
       db: params.db,
       salonId: params.salonId,
@@ -539,6 +572,15 @@ export async function persistCanonicalGoogleBusyAppointment(params: {
 
   if (isGoogleEventCancelledOrDeleted(params.ev)) {
     return { kind: 'cancelled', appointmentId: null };
+  }
+
+  const userCancelledId = await findUserCancelledGoogleAppointmentForEvent({
+    db: params.db,
+    salonId: params.salonId,
+    ev: params.ev,
+  });
+  if (userCancelledId) {
+    return { kind: 'unchanged', appointmentId: userCancelledId };
   }
 
   const times = googleEventCalendarTimes(params.ev, params.salonTimeZone);

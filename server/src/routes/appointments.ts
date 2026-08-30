@@ -7,6 +7,7 @@ import {
   skipPendingRemindersForAppointment,
   syncAppointmentReminder,
 } from '../lib/appointmentReminders.js';
+import { cancelSelectedAppointments, normalizeAppointmentIds } from '../lib/appointmentBulkDelete.js';
 import type { Appointment } from '../types.js';
 import type { Database } from '../types/database.js';
 
@@ -68,33 +69,26 @@ router.get('/:id', async (req, res) => {
 /** Cancel only the IDs the user selected. Never expands to other rows or sources. */
 router.post('/bulk-delete', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
-  const rawIds: unknown[] = Array.isArray(req.body?.ids) ? req.body.ids : [];
-  const ids: string[] = [
-    ...new Set(
-      rawIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
-    ),
-  ];
+  const ids = normalizeAppointmentIds(req.body?.ids);
   if (ids.length === 0) {
     return res.status(400).json({ error: 'ids must be a non-empty array' });
   }
 
-  const { data, error } = await supabase
-    .from('appointments')
-    .update({ status: 'cancelled' })
-    .eq('salon_id', salonId)
-    .in('id', ids)
-    .select('id');
-
-  if (error) return res.status(500).json({ error: error.message });
-
-  const cancelledIds = (data ?? []).map((row) => row.id);
-  await Promise.all(
-    cancelledIds.map((appointmentId) =>
-      skipPendingRemindersForAppointment({ salonId, appointmentId })
-    )
-  );
-
-  res.json({ cancelledIds });
+  try {
+    const { cancelledIds } = await cancelSelectedAppointments({
+      db: supabase,
+      salonId,
+      ids,
+      skipReminders: skipPendingRemindersForAppointment,
+    });
+    if (cancelledIds.length === 0) {
+      return res.status(409).json({ error: 'No appointments cancelled', cancelledIds });
+    }
+    res.json({ cancelledIds });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Bulk delete failed';
+    return res.status(500).json({ error: message });
+  }
 });
 
 router.post('/', requireSalonWriteAccess, async (req, res) => {

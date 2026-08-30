@@ -218,7 +218,11 @@ export default function Bookings() {
     }
     setActionBusy('bulk');
     try {
-      await api.appointments.bulkDelete(ids);
+      const result = await api.appointments.bulkDelete(ids);
+      const gone = new Set(
+        result?.cancelledIds?.length ? result.cancelledIds : ids,
+      );
+      setAppointments((prev) => prev.filter((a) => !gone.has(a.id)));
       setSelectedIds(new Set());
       loadData();
     } catch (err) {
