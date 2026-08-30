@@ -270,6 +270,9 @@ const en = {
   'staff.fieldName': 'Name',
   'staff.fieldEmail': 'Email',
   'staff.fieldPhone': 'Phone',
+  'staff.fieldTelegramChatId': 'Master Telegram ID for notifications',
+  'staff.fieldTelegramChatIdHelp':
+    'Personal Telegram chat ID where the bot sends new-booking notifications.',
   'staff.fieldRole': 'Role',
   'staff.fieldSpecialties': 'Specialties (comma-separated)',
   'staff.specialtiesPlaceholder': 'Hair, Color, Nails',
@@ -1499,6 +1502,9 @@ const ru: Record<TranslationKey, string> = {
   'staff.fieldName': 'Имя',
   'staff.fieldEmail': 'Email',
   'staff.fieldPhone': 'Телефон',
+  'staff.fieldTelegramChatId': 'Telegram ID мастера для уведомлений',
+  'staff.fieldTelegramChatIdHelp':
+    'Личный Telegram chat ID, куда бот отправляет уведомления о новых записях.',
   'staff.fieldRole': 'Должность',
   'staff.fieldSpecialties': 'Специализации (через запятую)',
   'staff.specialtiesPlaceholder': 'Стрижка, Окрашивание, Маникюр',
@@ -2723,6 +2729,9 @@ const hy: Record<TranslationKey, string> = {
   'staff.fieldName': 'Անուն',
   'staff.fieldEmail': 'Email',
   'staff.fieldPhone': 'Հեռախոս',
+  'staff.fieldTelegramChatId': 'Մասնագետի Telegram ID ծանուցումների համար',
+  'staff.fieldTelegramChatIdHelp':
+    'Անձնական Telegram chat ID, որտեղ բոտը ուղարկում է նոր գրանցումների ծանուցումները։',
   'staff.fieldRole': 'Պաշտոն',
   'staff.fieldSpecialties': 'Մասնագիտություններ (ստորակետով)',
   'staff.specialtiesPlaceholder': 'Սանրել, Գույն, Nail',

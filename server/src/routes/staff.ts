@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import { supabase } from '../lib/supabase.js';
 import { mapStaff, initialsAvatar } from '../lib/mappers.js';
+import {
+  parseStaffTelegramChatIdBody,
+  persistStaffTelegramChatIdIfSupported,
+} from '../lib/staffTelegramChatId.js';
 import { getSalonId } from '../lib/salonContext.js';
 import { requireSalonWriteAccess } from '../middleware/auth.js';
 import type { Database } from '../types/database.js';
@@ -362,6 +366,11 @@ router.post('/', requireSalonWriteAccess, async (req, res) => {
   const { name, email, phone, role, specialties } = req.body;
   if (!name || !email) return res.status(400).json({ error: 'Name and email are required' });
 
+  const telegramChatId = parseStaffTelegramChatIdBody(req.body);
+  if (telegramChatId.provided && !telegramChatId.ok) {
+    return res.status(400).json({ error: 'telegramChatId must be an integer or empty' });
+  }
+
   const { data, error } = await supabase
     .from('staff')
     .insert({
@@ -378,7 +387,22 @@ router.post('/', requireSalonWriteAccess, async (req, res) => {
     .single();
 
   if (error) return res.status(500).json({ error: error.message });
-  res.status(201).json(mapStaff(data, []));
+
+  if (telegramChatId.provided) {
+    await persistStaffTelegramChatIdIfSupported({
+      salonId,
+      staffId: data.id,
+      value: telegramChatId.value,
+    });
+  }
+
+  const reloaded = await supabase
+    .from('staff')
+    .select('*')
+    .eq('id', data.id)
+    .eq('salon_id', salonId)
+    .maybeSingle();
+  res.status(201).json(mapStaff(reloaded.data ?? data, []));
 });
 
 router.put('/:id/services', requireSalonWriteAccess, async (req, res) => {
@@ -471,6 +495,11 @@ router.put('/:id', requireSalonWriteAccess, async (req, res) => {
   if (specialties !== undefined) updates.specialties = specialties;
   if (active !== undefined) updates.active = active;
 
+  const telegramChatId = parseStaffTelegramChatIdBody(req.body);
+  if (telegramChatId.provided && !telegramChatId.ok) {
+    return res.status(400).json({ error: 'telegramChatId must be an integer or empty' });
+  }
+
   const { data, error } = await supabase
     .from('staff')
     .update(updates)
@@ -481,8 +510,23 @@ router.put('/:id', requireSalonWriteAccess, async (req, res) => {
 
   if (error || !data) return res.status(404).json({ error: 'Staff member not found' });
 
-  const serviceIdsByStaff = await loadServiceIdsByStaff(salonId, [data.id]);
-  res.json(mapStaff(data, serviceIdsByStaff.get(data.id) ?? []));
+  if (telegramChatId.provided) {
+    await persistStaffTelegramChatIdIfSupported({
+      salonId,
+      staffId: data.id,
+      value: telegramChatId.value,
+    });
+  }
+
+  const reloaded = await supabase
+    .from('staff')
+    .select('*')
+    .eq('id', data.id)
+    .eq('salon_id', salonId)
+    .maybeSingle();
+  const row = reloaded.data ?? data;
+  const serviceIdsByStaff = await loadServiceIdsByStaff(salonId, [row.id]);
+  res.json(mapStaff(row, serviceIdsByStaff.get(row.id) ?? []));
 });
 
 router.delete('/:id', requireSalonWriteAccess, async (req, res) => {

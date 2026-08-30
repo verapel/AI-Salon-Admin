@@ -15,6 +15,10 @@ import {
   parseStaffTelegramChatId,
   resolveAssignedMasterNotifyChatId,
 } from './telegramBooking.ts';
+import {
+  isMissingStaffTelegramChatIdColumn,
+  parseStaffTelegramChatIdBody,
+} from './staffTelegramChatId.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '../../..');
@@ -102,21 +106,50 @@ describe('staff telegram_chat_id schema + staff UI', () => {
     assert.doesNotMatch(mig, /555000555|111000111|TELEGRAM_CHAT_ID/);
   });
 
-  it('staff card CRUD does not depend on telegram_chat_id', () => {
+  it('staff card CRUD saves core fields even if telegram_chat_id is unsupported', () => {
     const staffPage = read('client/src/pages/Staff.tsx');
-    assert.doesNotMatch(staffPage, /telegramChatId|fieldTelegramChatId/);
-    assert.match(staffPage, /\.\.\.form/);
+    assert.match(staffPage, /telegramChatId/);
+    assert.match(staffPage, /staff\.fieldTelegramChatId/);
+    assert.match(staffPage, /staff\.fieldTelegramChatIdHelp/);
     assert.match(staffPage, /api\.staff\.update\(editing\.id, data\)/);
     assert.match(staffPage, /api\.staff\.updateServices\(staffId, selectedServiceIds\)/);
     assert.match(staffPage, /specialties: member\.specialties\.join\(', '\)/);
     assert.match(staffPage, /setSelectedServiceIds\(member\.serviceIds \?\? \[\]\)/);
 
+    const ru = read('client/src/i18n/translations.ts');
+    assert.match(ru, /Telegram ID мастера для уведомлений/);
+    assert.match(ru, /Личный Telegram chat ID, куда бот отправляет уведомления о новых записях\./);
+
     const routes = read('server/src/routes/staff.ts');
-    assert.doesNotMatch(routes, /parseStaffTelegramChatIdBody/);
-    assert.doesNotMatch(routes, /updates\.telegram_chat_id/);
+    assert.match(routes, /persistStaffTelegramChatIdIfSupported/);
     assert.doesNotMatch(routes, /telegram_chat_id: telegramChatId/);
-    assert.match(routes, /router\.put\('\/:id\/services'/);
+    assert.doesNotMatch(routes, /updates\.telegram_chat_id/);
     assert.match(routes, /if \(specialties !== undefined\) updates\.specialties = specialties/);
+    assert.match(routes, /router\.put\('\/:id\/services'/);
+
+    const persist = read('server/src/lib/staffTelegramChatId.ts');
+    assert.match(persist, /telegram_chat_id persist skipped/);
+    assert.doesNotMatch(persist, /Staff member not found/);
+
+    assert.equal(parseStaffTelegramChatIdBody({}).provided, false);
+    assert.deepEqual(parseStaffTelegramChatIdBody({ telegramChatId: '' }), {
+      provided: true,
+      ok: true,
+      value: null,
+    });
+    assert.deepEqual(parseStaffTelegramChatIdBody({ telegramChatId: '555000555' }), {
+      provided: true,
+      ok: true,
+      value: 555000555,
+    });
+    assert.equal(parseStaffTelegramChatIdBody({ telegramChatId: 'abc' }).ok, false);
+    assert.equal(
+      isMissingStaffTelegramChatIdColumn({
+        message: "Could not find the 'telegram_chat_id' column of 'staff' in the schema cache",
+      }),
+      true
+    );
+    assert.equal(isMissingStaffTelegramChatIdColumn({ message: 'Staff member not found' }), false);
   });
 });
 
