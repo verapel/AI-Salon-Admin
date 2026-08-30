@@ -65,6 +65,38 @@ router.get('/:id', async (req, res) => {
   res.json(mapEnrichedAppointment(data));
 });
 
+/** Cancel only the IDs the user selected. Never expands to other rows or sources. */
+router.post('/bulk-delete', requireSalonWriteAccess, async (req, res) => {
+  const salonId = getSalonId(req);
+  const rawIds: unknown[] = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  const ids: string[] = [
+    ...new Set(
+      rawIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+    ),
+  ];
+  if (ids.length === 0) {
+    return res.status(400).json({ error: 'ids must be a non-empty array' });
+  }
+
+  const { data, error } = await supabase
+    .from('appointments')
+    .update({ status: 'cancelled' })
+    .eq('salon_id', salonId)
+    .in('id', ids)
+    .select('id');
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  const cancelledIds = (data ?? []).map((row) => row.id);
+  await Promise.all(
+    cancelledIds.map((appointmentId) =>
+      skipPendingRemindersForAppointment({ salonId, appointmentId })
+    )
+  );
+
+  res.json({ cancelledIds });
+});
+
 router.post('/', requireSalonWriteAccess, async (req, res) => {
   const salonId = getSalonId(req);
   const { clientId, staffId, serviceId, date, startTime, notes } = req.body;

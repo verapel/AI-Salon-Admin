@@ -179,6 +179,11 @@ export const api = {
       request<import('@/types').Appointment>(`/appointments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<import('@/types').Appointment>(`/appointments/${id}`, { method: 'DELETE' }),
+    bulkDelete: (ids: string[]) =>
+      request<{ cancelledIds: string[] }>('/appointments/bulk-delete', {
+        method: 'POST',
+        body: JSON.stringify({ ids }),
+      }),
   },
   stats: {
     getDashboard: () => request<import('@/types').DashboardStats>('/stats/dashboard'),

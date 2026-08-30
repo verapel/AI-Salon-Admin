@@ -8,6 +8,7 @@ import QuickBookingModal from '@/components/bookings/QuickBookingModal';
 import { useLanguage, type LangCode, type TranslationKey } from '@/context/LanguageContext';
 import { useCurrency } from '@/context/CurrencyContext';
 import { api } from '@/lib/api';
+import { isVisibleOnBookingsAll } from '@/lib/bookingsVisibility';
 import { getStatusColor } from '@/lib/utils';
 import type { Appointment, Client, Service, Staff as StaffType } from '@/types';
 
@@ -63,6 +64,7 @@ export default function Bookings() {
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [form, setForm] = useState(emptyEditForm);
 
   const formatDateLocalized = (dateStr: string) =>
@@ -98,7 +100,7 @@ export default function Bookings() {
   const query = search.trim().toLowerCase();
   const statusFiltered =
     statusFilter === 'all'
-      ? appointments
+      ? appointments.filter(isVisibleOnBookingsAll)
       : appointments.filter((a) => a.status === statusFilter);
 
   const filtered = query
@@ -111,6 +113,32 @@ export default function Bookings() {
           formatTime24(a.startTime).includes(query)
       )
     : statusFiltered;
+
+  const visibleIds = filtered.map((a) => a.id);
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const someVisibleSelected = visibleIds.some((id) => selectedIds.has(id));
+
+  const toggleRowSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const id of visibleIds) next.delete(id);
+      } else {
+        for (const id of visibleIds) next.add(id);
+      }
+      return next;
+    });
+  };
 
   const canModify = (apt: Appointment) =>
     apt.status === 'scheduled' || apt.status === 'confirmed';
@@ -169,6 +197,29 @@ export default function Bookings() {
     setActionBusy(id);
     try {
       await api.appointments.delete(id);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      loadData();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  const deleteSelected = async () => {
+    const ids = visibleIds.filter((id) => selectedIds.has(id));
+    if (ids.length === 0 || actionBusy) return;
+    if (!confirm(t('bookings.deleteSelectedConfirm').replace('{count}', String(ids.length)))) {
+      return;
+    }
+    setActionBusy('bulk');
+    try {
+      await api.appointments.bulkDelete(ids);
+      setSelectedIds(new Set());
       loadData();
     } catch (err) {
       console.error(err);
@@ -220,6 +271,35 @@ export default function Bookings() {
             </button>
           ))}
         </div>
+
+        {filtered.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                checked={allVisibleSelected}
+                ref={(el) => {
+                  if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected;
+                }}
+                onChange={toggleSelectAllVisible}
+                aria-label={t('bookings.selectAll')}
+              />
+              <span>{t('bookings.selectAll')}</span>
+            </label>
+            <button
+              type="button"
+              onClick={deleteSelected}
+              disabled={
+                visibleIds.filter((id) => selectedIds.has(id)).length === 0 ||
+                actionBusy === 'bulk'
+              }
+              className="btn-secondary text-red-600 disabled:opacity-50 dark:text-red-400"
+            >
+              {t('bookings.deleteSelected')}
+            </button>
+          </div>
+        )}
       </div>
 
       {filtered.length === 0 ? (
@@ -243,6 +323,13 @@ export default function Bookings() {
               <div key={apt.id} className="card w-full min-w-0 max-w-full space-y-3 p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 shrink-0 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                      checked={selectedIds.has(apt.id)}
+                      onChange={() => toggleRowSelected(apt.id)}
+                      aria-label={t('bookings.selectRow')}
+                    />
                     <User className="h-4 w-4 shrink-0 text-gray-400" />
                     <p className="truncate text-base font-semibold text-gray-900 dark:text-white">
                       {apt.clientName}
@@ -322,6 +409,18 @@ export default function Bookings() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50">
+                      <th className="w-10 px-3 py-3">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                          checked={allVisibleSelected}
+                          ref={(el) => {
+                            if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected;
+                          }}
+                          onChange={toggleSelectAllVisible}
+                          aria-label={t('bookings.selectAll')}
+                        />
+                      </th>
                       <th className="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">
                         {t('bookings.columnClient')}
                       </th>
@@ -348,6 +447,15 @@ export default function Bookings() {
                   <tbody className="divide-y dark:divide-gray-700">
                     {filtered.map((apt) => (
                       <tr key={apt.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                        <td className="px-3 py-3">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                            checked={selectedIds.has(apt.id)}
+                            onChange={() => toggleRowSelected(apt.id)}
+                            aria-label={t('bookings.selectRow')}
+                          />
+                        </td>
                         <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
                           {apt.clientName}
                         </td>
