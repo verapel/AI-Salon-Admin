@@ -121,14 +121,15 @@ describe('staff telegram_chat_id schema + staff UI', () => {
     assert.match(ru, /Личный Telegram chat ID, куда бот отправляет уведомления о новых записях\./);
 
     const routes = read('server/src/routes/staff.ts');
-    assert.match(routes, /persistStaffTelegramChatIdIfSupported/);
-    assert.doesNotMatch(routes, /telegram_chat_id: telegramChatId/);
-    assert.doesNotMatch(routes, /updates\.telegram_chat_id/);
+    assert.match(routes, /updates\.telegram_chat_id = telegramChatId\.value/);
+    assert.match(routes, /insertRow\.telegram_chat_id = telegramChatId\.value/);
+    assert.match(routes, /STAFF_TELEGRAM_CHAT_ID_UNAVAILABLE/);
+    assert.doesNotMatch(routes, /persist skipped/);
     assert.match(routes, /if \(specialties !== undefined\) updates\.specialties = specialties/);
     assert.match(routes, /router\.put\('\/:id\/services'/);
 
     const persist = read('server/src/lib/staffTelegramChatId.ts');
-    assert.match(persist, /telegram_chat_id persist skipped/);
+    assert.doesNotMatch(persist, /persist skipped/);
     assert.doesNotMatch(persist, /Staff member not found/);
 
     assert.equal(parseStaffTelegramChatIdBody({}).provided, false);
@@ -140,7 +141,7 @@ describe('staff telegram_chat_id schema + staff UI', () => {
     assert.deepEqual(parseStaffTelegramChatIdBody({ telegramChatId: '555000555' }), {
       provided: true,
       ok: true,
-      value: 555000555,
+      value: '555000555',
     });
     assert.equal(parseStaffTelegramChatIdBody({ telegramChatId: 'abc' }).ok, false);
     assert.equal(

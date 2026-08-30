@@ -123,12 +123,15 @@ export default function Staff() {
     };
     try {
       let staffId: string;
+      let telegramChatIdSaveError: string | undefined;
       if (editing) {
-        await api.staff.update(editing.id, data);
+        const updated = await api.staff.update(editing.id, data);
         staffId = editing.id;
+        telegramChatIdSaveError = updated.telegramChatIdSaveError;
       } else {
         const created = await api.staff.create(data);
         staffId = created.id;
+        telegramChatIdSaveError = created.telegramChatIdSaveError;
       }
 
       try {
@@ -136,6 +139,12 @@ export default function Staff() {
       } catch (assignErr) {
         console.error(assignErr);
         setFormError(t('staff.servicesSaveError'));
+        loadStaff();
+        return;
+      }
+
+      if (telegramChatIdSaveError) {
+        setFormError(telegramChatIdSaveError);
         loadStaff();
         return;
       }

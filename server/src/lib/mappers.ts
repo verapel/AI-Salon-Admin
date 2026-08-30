@@ -125,10 +125,14 @@ export function mapStaff(
     avatar: string;
     active: boolean;
     is_primary?: boolean | null;
-    telegram_chat_id?: number | null;
+    telegram_chat_id?: number | string | null;
   },
   serviceIds: string[] = []
 ): Staff {
+  const telegramChatId =
+    row.telegram_chat_id == null || row.telegram_chat_id === ''
+      ? null
+      : String(row.telegram_chat_id);
   return {
     id: row.id,
     name: row.name,
@@ -140,7 +144,7 @@ export function mapStaff(
     active: row.active,
     isPrimary: Boolean(row.is_primary),
     serviceIds,
-    telegramChatId: row.telegram_chat_id ?? null,
+    telegramChatId,
   };
 }
 
