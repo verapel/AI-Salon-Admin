@@ -1504,6 +1504,15 @@ registerTelegramPollingRestarter(restartTelegramPolling);
 async function processTelegramUpdate(update: any, ctx: TelegramSalonContext): Promise<void> {
         const botToken = resolveTelegramBotToken(ctx);
 
+        const incomingMessage = update.message;
+        if (incomingMessage?.chat?.id != null) {
+          const username =
+            typeof incomingMessage.from?.username === 'string' ? incomingMessage.from.username : '';
+          console.log(
+            `[telegram/chat] salonId=${ctx.salonId} chat_id=${incomingMessage.chat.id} username=${username}`
+          );
+        }
+
         // SUB-1D1: salon-scoped AI automation gate (after ctx.salonId known).
         // Blocks callbacks + booking FSM + OpenRouter + appointment mutations.
         // Does NOT clear bookingState / manageState / birthdayState.
