@@ -621,6 +621,7 @@ describe('SUB-1D1 Telegram entitlement gate (runtime)', () => {
 describe('SUB-1D1 Telegram entitlement (static source contracts)', () => {
   const index = read('server/src/index.ts');
   const gate = read('server/src/lib/telegramSubscriptionGate.ts');
+  const sharedGate = read('server/src/lib/messengerAiAutomationGate.ts');
   const entitlement = read('server/src/lib/salonEntitlement.ts');
   const telegramBooking = read('server/src/lib/telegramBooking.ts');
   const telegramBotManager = read('server/src/lib/telegramBotManager.ts');
@@ -650,21 +651,24 @@ describe('SUB-1D1 Telegram entitlement (static source contracts)', () => {
   });
 
   it('central entitlement only; no direct subscription field inspection in Telegram gate UX path', () => {
-    assert.match(gate, /getSalonEntitlements/);
-    assert.match(gate, /aiAutomationAllowed/);
-    assert.match(gate, /denyReason/);
+    assert.match(gate, /enforceMessengerAiAutomationGate/);
+    assert.match(sharedGate, /getSalonEntitlements/);
+    assert.match(sharedGate, /aiAutomationAllowed/);
+    assert.match(sharedGate, /denyReason/);
     // Gate must not re-implement status / developer_suspended checks.
     assert.doesNotMatch(gate, /subscriptionStatus\s*===/);
     assert.doesNotMatch(gate, /developerSuspended\s*===/);
     assert.doesNotMatch(gate, /current_period_end|currentPeriodEnd/);
+    assert.doesNotMatch(sharedGate, /subscriptionStatus\s*===/);
+    assert.doesNotMatch(sharedGate, /developerSuspended\s*===/);
     assert.match(entitlement, /export async function getSalonEntitlements/);
   });
 
-  it('denied UX: neutral copy RU/EN/HY; no billing leak; throttle in-memory', () => {
-    assert.match(gate, /Онлайн-запись сейчас временно недоступна/);
-    assert.match(gate, /Online booking is temporarily unavailable/);
-    assert.match(gate, /Առցանց գրանցումն/);
+  it('denied UX: neutral copy; no billing leak; throttle in-memory', () => {
+    assert.match(sharedGate, /Сервис временно недоступен\. Пожалуйста, свяжитесь с салоном напрямую\./);
+    assert.match(gate, /MESSENGER_AI_UNAVAILABLE_MESSAGE/);
     assert.doesNotMatch(gate, /unpaid|stripe|подписк|оплат/i);
+    assert.doesNotMatch(sharedGate, /unpaid|stripe|подписк|оплат/i);
     assert.doesNotMatch(
       TELEGRAM_AI_UNAVAILABLE_MESSAGES.ru +
         TELEGRAM_AI_UNAVAILABLE_MESSAGES.en +
@@ -686,19 +690,19 @@ describe('SUB-1D1 Telegram entitlement (static source contracts)', () => {
     assert.match(denyBlock, /sendTelegramMessage/);
   });
 
-  it('22/23/24. WhatsApp / Instagram / Apple / reminders still have no entitlement enforcement', () => {
+  it('22/23/24. WhatsApp / Instagram inbound use shared gate; poller / Apple / reminders stay ungated', () => {
     const patterns = /getSalonEntitlements|evaluateSalonEntitlement|salonEntitlement|telegramSubscriptionGate|aiAutomationAllowed/;
     assert.doesNotMatch(telegramBooking, patterns);
     assert.doesNotMatch(telegramBotManager, patterns);
     assert.doesNotMatch(telegramPolling, patterns);
-    assert.doesNotMatch(waWebhook, patterns);
     assert.doesNotMatch(waFlow, patterns);
     assert.doesNotMatch(waOutbound, patterns);
-    assert.doesNotMatch(igProcess, patterns);
     assert.doesNotMatch(igRoutes, patterns);
     assert.doesNotMatch(calendar, patterns);
     assert.doesNotMatch(reminders, patterns);
     assert.doesNotMatch(appointmentReminders, patterns);
+    assert.match(waWebhook, /enforceMessengerAiAutomationGate|messengerAiAutomationGate/);
+    assert.match(igProcess, /enforceMessengerAiAutomationGate|messengerAiAutomationGate/);
   });
 
   it('package registers SUB-1D1 suite once', () => {

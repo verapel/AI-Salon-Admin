@@ -40,9 +40,31 @@ import {
   renderWhatsAppCommitOutbound,
   renderWhatsAppFsmOutbound,
 } from '../lib/whatsappOutboundRenderer.js';
+import {
+  MESSENGER_AI_UNAVAILABLE_MESSAGE_KEY,
+  enforceMessengerAiAutomationGate,
+  type GetSalonEntitlementsFn,
+  type MessengerUnavailableThrottleLike,
+} from '../lib/messengerAiAutomationGate.js';
 
 const router = Router();
 const WHATSAPP_PROVIDER = 'whatsapp' as const;
+
+export type WhatsAppWebhookAiGuardDeps = {
+  getEntitlements?: GetSalonEntitlementsFn;
+  throttle?: MessengerUnavailableThrottleLike;
+  processBookingFsm?: typeof processWhatsAppBookingFsm;
+};
+
+let whatsappWebhookAiGuardDeps: WhatsAppWebhookAiGuardDeps = {};
+
+/** Test-only: inject entitlement / FSM spies. Production keeps defaults. */
+export function setWhatsAppWebhookAiGuardDepsForTests(
+  deps: WhatsAppWebhookAiGuardDeps | null,
+): void {
+  whatsappWebhookAiGuardDeps = deps ?? {};
+}
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -278,9 +300,33 @@ async function claimAndFinalizeReceipt(params: {
     messageKey: string;
     text: string;
   } | null = null;
+  let skipAiAutomation = false;
+
+  const inboundPeerId = params.event.inboundSender?.externalUserId?.trim() ?? '';
+  if (params.event.isInboundMessage && inboundPeerId) {
+    const aiGate = await enforceMessengerAiAutomationGate({
+      salonId: params.salonId,
+      conversationKey: inboundPeerId,
+      getEntitlements: whatsappWebhookAiGuardDeps.getEntitlements,
+      throttle: whatsappWebhookAiGuardDeps.throttle,
+    });
+    if (!aiGate.proceed) {
+      skipAiAutomation = true;
+      if (aiGate.sendCustomerMessage) {
+        pendingOutbound = {
+          conversationId: null,
+          recipientExternalUserId: inboundPeerId,
+          messageKey: MESSENGER_AI_UNAVAILABLE_MESSAGE_KEY,
+          text: aiGate.customerMessage,
+        };
+      }
+      finalizeStatus = 'processed';
+    }
+  }
 
   // WA-4B: inbound message identity + durable conversation (no replies/FSM/appointments).
   if (params.event.isInboundMessage) {
+    if (!skipAiAutomation) {
     const foundation = await processWhatsAppInboundIdentityFoundation({
       db: supabase as any,
       salonId: params.salonId,
@@ -370,7 +416,9 @@ async function claimAndFinalizeReceipt(params: {
       // WA-4C: durable booking FSM (internal reply only — no Meta send / no appointments).
       const textBody = extractWhatsAppInboundTextBody(params.event);
       if (textBody) {
-        const fsm = await processWhatsAppBookingFsm({
+        const fsm = await (
+          whatsappWebhookAiGuardDeps.processBookingFsm ?? processWhatsAppBookingFsm
+        )({
           db: supabase as any,
           salonId: params.salonId,
           externalUserId: foundation.externalUserId,
@@ -571,6 +619,7 @@ async function claimAndFinalizeReceipt(params: {
       }
 
       finalizeStatus = finalizeStatus === 'ignored' ? 'ignored' : 'processed';
+    }
     }
   }
 

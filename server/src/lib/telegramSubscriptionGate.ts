@@ -1,27 +1,31 @@
 /**
  * SUB-1D1: Telegram inbound AI-automation entitlement gate.
  *
- * Decision uses central getSalonEntitlements only (aiAutomationAllowed / denyReason).
+ * Decision uses the shared messenger helper (getSalonEntitlements only).
  * Does not clear FSM maps. Throttles customer unavailable UX in-memory.
- * WhatsApp / Instagram / Apple / reminders are out of scope.
+ * Does not stop polling or disconnect the bot.
  */
 
 import {
-  getSalonEntitlements,
-  isSalonEntitlementNotFoundError,
-} from './salonEntitlement.js';
+  MESSENGER_AI_UNAVAILABLE_MESSAGE,
+  MESSENGER_AI_UNAVAILABLE_THROTTLE_MS,
+  MessengerUnavailableThrottle,
+  enforceMessengerAiAutomationGate,
+  type EnforceMessengerAiAutomationGateResult,
+  type GetSalonEntitlementsFn,
+} from './messengerAiAutomationGate.js';
 import type { SalonEntitlementDenyReason, SalonEntitlements } from '../types.js';
 
 export const TELEGRAM_AI_UNAVAILABLE_MESSAGES = {
-  ru: 'Онлайн-запись сейчас временно недоступна. Пожалуйста, свяжитесь с салоном напрямую.',
-  en: 'Online booking is temporarily unavailable. Please contact the salon directly.',
-  hy: 'Առցանց գրանցումն այս պահին ժամանակավորապես հասանելի չէ։ Խնդրում ենք կապ հաստատել սրահի հետ անմիջապես։',
+  ru: MESSENGER_AI_UNAVAILABLE_MESSAGE,
+  en: MESSENGER_AI_UNAVAILABLE_MESSAGE,
+  hy: MESSENGER_AI_UNAVAILABLE_MESSAGE,
 } as const;
 
 export type TelegramCustomerLang = keyof typeof TELEGRAM_AI_UNAVAILABLE_MESSAGES;
 
 /** Default: one unavailable customer message per salon+chat every 5 minutes. */
-export const TELEGRAM_UNAVAILABLE_THROTTLE_MS = 5 * 60 * 1000;
+export const TELEGRAM_UNAVAILABLE_THROTTLE_MS = MESSENGER_AI_UNAVAILABLE_THROTTLE_MS;
 
 export function normalizeTelegramCustomerLang(
   raw: string | null | undefined,
@@ -32,37 +36,40 @@ export function normalizeTelegramCustomerLang(
   return 'ru';
 }
 
-export function telegramAiUnavailableMessage(lang?: string | null): string {
-  return TELEGRAM_AI_UNAVAILABLE_MESSAGES[normalizeTelegramCustomerLang(lang)];
+export function telegramAiUnavailableMessage(_lang?: string | null): string {
+  return MESSENGER_AI_UNAVAILABLE_MESSAGE;
 }
 
 export function telegramUnavailableThrottleKey(salonId: string, chatId: number): string {
   return `${salonId}:${chatId}`;
 }
 
-/** Minimal in-memory throttle; no DB. Injectable for tests. */
+/** Telegram-shaped throttle adapter over the shared in-memory helper. */
 export class TelegramUnavailableThrottle {
-  private readonly lastSentAt = new Map<string, number>();
+  private readonly inner: MessengerUnavailableThrottle;
 
-  constructor(private readonly intervalMs: number = TELEGRAM_UNAVAILABLE_THROTTLE_MS) {}
+  constructor(intervalMs: number = TELEGRAM_UNAVAILABLE_THROTTLE_MS) {
+    this.inner = new MessengerUnavailableThrottle(intervalMs);
+  }
 
   shouldSend(salonId: string, chatId: number, nowMs: number = Date.now()): boolean {
-    const key = telegramUnavailableThrottleKey(salonId, chatId);
-    const last = this.lastSentAt.get(key);
-    if (last == null) return true;
-    return nowMs - last >= this.intervalMs;
+    return this.inner.shouldSend(salonId, String(chatId), nowMs);
   }
 
   markSent(salonId: string, chatId: number, nowMs: number = Date.now()): void {
-    this.lastSentAt.set(telegramUnavailableThrottleKey(salonId, chatId), nowMs);
+    this.inner.markSent(salonId, String(chatId), nowMs);
   }
 
   clear(salonId: string, chatId: number): void {
-    this.lastSentAt.delete(telegramUnavailableThrottleKey(salonId, chatId));
+    this.inner.clear(salonId, String(chatId));
   }
 
   clearAll(): void {
-    this.lastSentAt.clear();
+    this.inner.clearAll();
+  }
+
+  asMessengerThrottle(): MessengerUnavailableThrottle {
+    return this.inner;
   }
 }
 
@@ -87,7 +94,18 @@ export type EnforceTelegramAiAutomationGateResult =
       customerFacingBilling: false;
     };
 
-export type GetSalonEntitlementsFn = (salonId: string) => Promise<SalonEntitlements>;
+export type { GetSalonEntitlementsFn };
+
+function withTelegramCallback(
+  result: EnforceMessengerAiAutomationGateResult,
+  hasCallbackQuery: boolean,
+): EnforceTelegramAiAutomationGateResult {
+  if (result.proceed) return result;
+  return {
+    ...result,
+    answerCallbackQuery: hasCallbackQuery,
+  };
+}
 
 /**
  * Top-level Telegram inbound gate (after salonId known).
@@ -104,60 +122,14 @@ export async function enforceTelegramAiAutomationGate(params: {
   getEntitlements?: GetSalonEntitlementsFn;
   throttle?: TelegramUnavailableThrottle;
 }): Promise<EnforceTelegramAiAutomationGateResult> {
-  const salonId = String(params.salonId ?? '').trim();
-  const chatId = params.chatId;
   const hasCallbackQuery = params.hasCallbackQuery === true;
   const throttle = params.throttle ?? defaultTelegramUnavailableThrottle;
-  const nowMs = (params.now ?? new Date()).getTime();
-  const customerMessage = telegramAiUnavailableMessage(params.languageCode);
-  const load = params.getEntitlements ?? ((id: string) => getSalonEntitlements(id));
-
-  let entitlements: SalonEntitlements;
-  try {
-    entitlements = await load(salonId);
-  } catch (err) {
-    if (isSalonEntitlementNotFoundError(err)) {
-      const sendCustomerMessage = throttle.shouldSend(salonId, chatId, nowMs);
-      if (sendCustomerMessage) {
-        throttle.markSent(salonId, chatId, nowMs);
-      }
-      return {
-        proceed: false,
-        blockKind: 'salon_not_found',
-        denyReason: null,
-        answerCallbackQuery: hasCallbackQuery,
-        sendCustomerMessage,
-        customerMessage,
-        customerFacingBilling: false,
-      };
-    }
-    // Unexpected loader throw: preserve fail-open posture for Telegram inbound.
-    console.error('[telegram/entitlement] unexpected entitlement load failure; fail-open', {
-      salonId,
-      operation: 'enforce_telegram_ai_automation_gate',
-    });
-    throttle.clear(salonId, chatId);
-    return { proceed: true, entitlements: null };
-  }
-
-  if (entitlements.aiAutomationAllowed) {
-    // Allowed again → drop throttle so a later deny can notify once more.
-    throttle.clear(salonId, chatId);
-    return { proceed: true, entitlements };
-  }
-
-  const sendCustomerMessage = throttle.shouldSend(salonId, chatId, nowMs);
-  if (sendCustomerMessage) {
-    throttle.markSent(salonId, chatId, nowMs);
-  }
-
-  return {
-    proceed: false,
-    blockKind: 'denied',
-    denyReason: entitlements.denyReason,
-    answerCallbackQuery: hasCallbackQuery,
-    sendCustomerMessage,
-    customerMessage,
-    customerFacingBilling: false,
-  };
+  const result = await enforceMessengerAiAutomationGate({
+    salonId: params.salonId,
+    conversationKey: String(params.chatId),
+    now: params.now,
+    getEntitlements: params.getEntitlements,
+    throttle: throttle.asMessengerThrottle(),
+  });
+  return withTelegramCallback(result, hasCallbackQuery);
 }

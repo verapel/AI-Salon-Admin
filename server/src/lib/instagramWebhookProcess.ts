@@ -47,6 +47,12 @@ import {
   type InstagramOutboundIntent,
 } from './instagramOutboundIntent.js';
 import { supabase } from './supabase.js';
+import { getSalonEntitlements } from './salonEntitlement.js';
+import {
+  enforceMessengerAiAutomationGate,
+  type GetSalonEntitlementsFn,
+  type MessengerUnavailableThrottleLike,
+} from './messengerAiAutomationGate.js';
 
 export type InstagramEventProcessResult =
   | {
@@ -120,6 +126,9 @@ export type InstagramProcessDeps = {
   }) => Promise<EnqueueInstagramOutboundResult>;
   bookingFsmDeps?: InstagramBookingFsmDeps;
   db?: SupabaseClient | any;
+  /** Injectable entitlement loader (tests). Production uses getSalonEntitlements. */
+  getEntitlements?: GetSalonEntitlementsFn;
+  throttle?: MessengerUnavailableThrottleLike;
 };
 
 export function createDefaultInstagramProcessDeps(
@@ -158,6 +167,7 @@ export function createDefaultInstagramProcessDeps(
         intent: params.intent,
       }),
     db: supabase as any,
+    getEntitlements: (salonId) => getSalonEntitlements(salonId),
   };
 }
 
@@ -254,8 +264,38 @@ export async function processInstagramWebhookEvent(
   let inboundAdvanced = true;
   let bookingIntent: InstagramBookingIntent | undefined;
   let bookingCommit: InstagramBookingCommitResult | undefined;
+  let skipAiAutomation = false;
+  let entitlementOutbound: InstagramOutboundIntent | null = null;
 
-  if (shouldTouchIdentityConversation(event, route.kind)) {
+  if (
+    deps.getEntitlements &&
+    route.kind === 'connected' &&
+    professionalAccountId &&
+    !event.isEcho &&
+    (event.kind === 'message' || event.kind === 'postback') &&
+    event.externalUserId?.trim()
+  ) {
+    const gate = await enforceMessengerAiAutomationGate({
+      salonId,
+      conversationKey: event.externalUserId.trim(),
+      getEntitlements: deps.getEntitlements,
+      throttle: deps.throttle,
+    });
+    if (!gate.proceed) {
+      skipAiAutomation = true;
+      if (gate.sendCustomerMessage) {
+        entitlementOutbound = {
+          kind: 'invalid_input',
+          text: gate.customerMessage,
+          sourceEventId: event.externalEventId,
+          recipientExternalUserId: event.externalUserId.trim(),
+          professionalAccountId,
+        };
+      }
+    }
+  }
+
+  if (!skipAiAutomation && shouldTouchIdentityConversation(event, route.kind)) {
     const touched = await deps.applyIdentityConversation({
       salonId,
       receiptId: claim.receiptId,
@@ -356,7 +396,9 @@ export async function processInstagramWebhookEvent(
   // override, but omission falls back to enqueueInstagramOutboundOwned
   // (never silently finalize without attempting durable enqueue).
   let outboundIntent: InstagramOutboundIntent | null = null;
-  if (
+  if (entitlementOutbound) {
+    outboundIntent = entitlementOutbound;
+  } else if (
     finalStatus === 'processed' &&
     route.kind === 'connected' &&
     professionalAccountId &&

@@ -119,17 +119,17 @@ describe('SUB-1C2 developer subscriptions page (static source contracts)', () =>
     assert.doesNotMatch(appointments, /\/subscription/);
   });
 
-  it('18/19/20. no messenger enforcement; no payment provider; messengers untouched by page', () => {
+  it('18/19/20. developer subscriptions page does not own messenger runtime; no payment provider', () => {
     const patterns =
-      /getSalonEntitlements|evaluateSalonEntitlement|listDeveloperSalonSubscriptions|aiAutomationAllowed/;
+      /getSalonEntitlements|evaluateSalonEntitlement|listDeveloperSalonSubscriptions/;
     assert.doesNotMatch(telegramBooking, patterns);
-    assert.doesNotMatch(waWebhook, patterns);
     assert.doesNotMatch(waFlow, patterns);
-    assert.doesNotMatch(igProcess, patterns);
     assert.doesNotMatch(calendar, patterns);
     assert.doesNotMatch(reminders, patterns);
     assert.doesNotMatch(page, /stripe|paddle|paypal/i);
     assert.doesNotMatch(helper, /stripe|paddle|paypal/i);
+    assert.match(waWebhook, /enforceMessengerAiAutomationGate|messengerAiAutomationGate/);
+    assert.match(igProcess, /enforceMessengerAiAutomationGate|messengerAiAutomationGate/);
   });
 
   it('stale unmount protection on list load', () => {
