@@ -4,6 +4,7 @@ import DeveloperLayout from '@/layouts/DeveloperLayout';
 import ProtectedSalonRoute from '@/components/auth/ProtectedSalonRoute';
 import ProtectedDeveloperRoute from '@/components/auth/ProtectedDeveloperRoute';
 import StaffSectionGate from '@/components/auth/StaffSectionGate';
+import SalonAppAccessGate from '@/components/auth/SalonAppAccessGate';
 import Dashboard from '@/pages/Dashboard';
 import Calendar from '@/pages/Calendar';
 import Clients from '@/pages/Clients';
@@ -15,6 +16,8 @@ import Statistics from '@/pages/Statistics';
 import Reminders from '@/pages/Reminders';
 import StaffAccess from '@/pages/StaffAccess';
 import SalonIntegrations from '@/pages/SalonIntegrations';
+import Subscription from '@/pages/Subscription';
+import TestPayment from '@/pages/TestPayment';
 import SetPassword from '@/pages/SetPassword';
 import Login from '@/pages/Login';
 import DeveloperHome from '@/pages/developer/DeveloperHome';
@@ -35,17 +38,21 @@ export default function App() {
       {/* Salon cabinet — owner/admin only */}
       <Route element={<ProtectedSalonRoute />}>
         <Route element={<Layout />}>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/calendar" element={<Calendar />} />
-          <Route path="/clients" element={<Clients />} />
-          <Route path="/services" element={<Services />} />
-          <Route path="/products" element={<Products />} />
-          <Route path="/schedule" element={<Schedule />} />
-          <Route path="/bookings" element={<Bookings />} />
-          <Route path="/statistics" element={<Statistics />} />
-          <Route path="/reminders" element={<Reminders />} />
-          <Route path="/staff-access" element={<StaffAccess />} />
-          <Route path="/integrations" element={<SalonIntegrations />} />
+          <Route path="/subscription" element={<Subscription />} />
+          <Route path="/subscription/checkout/:checkoutId" element={<TestPayment />} />
+          <Route element={<SalonAppAccessGate />}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/calendar" element={<Calendar />} />
+            <Route path="/clients" element={<Clients />} />
+            <Route path="/services" element={<Services />} />
+            <Route path="/products" element={<Products />} />
+            <Route path="/schedule" element={<Schedule />} />
+            <Route path="/bookings" element={<Bookings />} />
+            <Route path="/statistics" element={<Statistics />} />
+            <Route path="/reminders" element={<Reminders />} />
+            <Route path="/staff-access" element={<StaffAccess />} />
+            <Route path="/integrations" element={<SalonIntegrations />} />
+          </Route>
         </Route>
       </Route>
 

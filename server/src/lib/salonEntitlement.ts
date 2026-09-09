@@ -200,6 +200,9 @@ export function evaluateSalonEntitlement(
   }
 
   // E–G. Terminal / blocked statuses
+  if (status === 'unpaid') {
+    return deny(input, 'subscription_unpaid', extras);
+  }
   if (status === 'past_due') {
     return deny(input, 'subscription_past_due', extras);
   }

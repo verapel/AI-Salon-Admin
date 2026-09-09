@@ -367,7 +367,8 @@ export type SalonSubscriptionStatus =
   | 'active'
   | 'past_due'
   | 'expired'
-  | 'cancelled';
+  | 'cancelled'
+  | 'unpaid';
 
 export const SALON_SUBSCRIPTION_STATUSES: readonly SalonSubscriptionStatus[] = [
   'trial',
@@ -375,6 +376,7 @@ export const SALON_SUBSCRIPTION_STATUSES: readonly SalonSubscriptionStatus[] = [
   'past_due',
   'expired',
   'cancelled',
+  'unpaid',
 ] as const;
 
 /** Internal DB row shape for salon_subscriptions (server-only). */
@@ -394,6 +396,7 @@ export interface SalonSubscriptionRecord {
   /** Server-only linkage; never send to owner/staff clients. */
   providerSubscriptionId: string | null;
   lastPaymentStatus: string | null;
+  canceledAt: string | null;
   createdAt: string;
   updatedAt: string;
   /**
@@ -428,7 +431,8 @@ export type SalonEntitlementDenyReason =
   | 'trial_expired'
   | 'subscription_past_due'
   | 'subscription_expired'
-  | 'subscription_cancelled';
+  | 'subscription_cancelled'
+  | 'subscription_unpaid';
 
 export const SALON_ENTITLEMENT_DENY_REASONS: readonly SalonEntitlementDenyReason[] = [
   'salon_inactive',
@@ -437,6 +441,7 @@ export const SALON_ENTITLEMENT_DENY_REASONS: readonly SalonEntitlementDenyReason
   'subscription_past_due',
   'subscription_expired',
   'subscription_cancelled',
+  'subscription_unpaid',
 ] as const;
 
 /**

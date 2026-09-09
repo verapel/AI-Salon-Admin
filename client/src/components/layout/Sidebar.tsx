@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
+  CreditCard,
   Calendar,
   Users,
   Scissors,
@@ -26,6 +27,7 @@ type NavItem = {
 
 const desktopNavItems: NavItem[] = [
   { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
+  { to: '/subscription', icon: CreditCard, labelKey: 'nav.subscription' },
   { to: '/calendar', icon: Calendar, labelKey: 'nav.calendar' },
   { to: '/clients', icon: Users, labelKey: 'nav.clients' },
   { to: '/services', icon: Scissors, labelKey: 'nav.services' },
@@ -47,6 +49,7 @@ const mobileNavItems: NavItem[] = [
   { to: '/products', icon: Package, labelKey: 'nav.products' },
   { to: '/staff', icon: UserCog, labelKey: 'nav.staff' },
   { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
+  { to: '/subscription', icon: CreditCard, labelKey: 'nav.subscription' },
   { to: '/staff-access', icon: KeyRound, labelKey: 'nav.staffAccess' },
   { to: '/schedule', icon: Clock, labelKey: 'nav.schedule' },
   { to: '/bookings', icon: CalendarPlus, labelKey: 'nav.bookings' },

@@ -52,6 +52,7 @@ function subStatusClass(status: SalonSubscriptionStatus): string {
       return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300';
     case 'expired':
     case 'cancelled':
+    case 'unpaid':
       return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300';
     default:
       return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
@@ -207,7 +208,7 @@ export default function DeveloperSubscriptions() {
         >
           <option value="all">{t('developer.subscriptions.filterStatusAll')}</option>
           {(
-            ['trial', 'active', 'past_due', 'expired', 'cancelled'] as SalonSubscriptionStatus[]
+            ['trial', 'active', 'past_due', 'expired', 'cancelled', 'unpaid'] as SalonSubscriptionStatus[]
           ).map((s) => (
             <option key={s} value={s}>
               {t(statusLabelKey(s))}

@@ -30,6 +30,7 @@ const STATUS_OPTIONS: SalonSubscriptionStatus[] = [
   'past_due',
   'expired',
   'cancelled',
+  'unpaid',
 ];
 
 function pad2(n: number): string {
