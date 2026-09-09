@@ -2,8 +2,9 @@
  * SUB-1B: Central salon subscription / AI entitlement helper.
  *
  * Pure evaluator + DB loader.
- * SUB-1D1: Telegram inbound uses getSalonEntitlements via telegramSubscriptionGate.
- * Still NOT wired into WhatsApp / Instagram / Apple / reminders / appointment routes.
+ * Messenger inbound AI uses getSalonEntitlements via messengerAiAutomationGate
+ * (Telegram / WhatsApp / Instagram). Still NOT wired into Apple / reminders /
+ * appointment routes.
  */
 
 import { supabase } from './supabase.js';
@@ -314,7 +315,7 @@ const defaultStore: SalonEntitlementStore = {
  * Load salon + subscription and evaluate entitlements.
  * Salon-not-found → throws SalonEntitlementNotFoundError.
  * Read failures → fail-safe (do not silently deny production salons).
- * Never mutates DB. Not used by messenger runtimes in SUB-1B.
+ * Never mutates DB. Messenger inbound AI uses this via messengerAiAutomationGate.
  */
 export async function getSalonEntitlements(
   salonId: string,

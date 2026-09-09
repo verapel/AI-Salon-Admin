@@ -369,17 +369,16 @@ describe('SUB-1B safe DTO + static non-enforcement contracts', () => {
     );
   });
 
-  it('runtime non-enforcement: WhatsApp / Instagram / Apple / reminders do not import entitlement helper (Telegram gated in SUB-1D1)', () => {
+  it('runtime: messengers use shared AI gate; Apple / reminders / poller stay ungated', () => {
     const patterns = /getSalonEntitlements|evaluateSalonEntitlement|salonEntitlement/;
-    // Telegram top-level inbound is intentionally gated via telegramSubscriptionGate.
     assert.match(index, /enforceTelegramAiAutomationGate|telegramSubscriptionGate/);
+    assert.match(waWebhook, /enforceMessengerAiAutomationGate|messengerAiAutomationGate/);
+    assert.match(igProcess, /enforceMessengerAiAutomationGate|messengerAiAutomationGate/);
     assert.doesNotMatch(telegramBooking, patterns);
     assert.doesNotMatch(telegramBotManager, patterns);
     assert.doesNotMatch(telegramPolling, patterns);
-    assert.doesNotMatch(waWebhook, patterns);
     assert.doesNotMatch(waFlow, patterns);
     assert.doesNotMatch(waOutbound, patterns);
-    assert.doesNotMatch(igProcess, patterns);
     assert.doesNotMatch(igRoutes, patterns);
     assert.doesNotMatch(calendar, patterns);
     assert.doesNotMatch(reminders, patterns);

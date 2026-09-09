@@ -210,20 +210,19 @@ describe('SUB-1C developer subscription (static source contracts)', () => {
     assert.doesNotMatch(section, /stripe|paddle|paypal/i);
   });
 
-  it('14. static: no WhatsApp / Instagram / Apple / reminder / appointment enforcement (Telegram gated in SUB-1D1)', () => {
+  it('14. static: developer helper does not own messenger runtime; inbound uses shared AI gate', () => {
     const patterns = /getSalonEntitlements|evaluateSalonEntitlement|developerSalonSubscription|aiAutomationAllowed|developer_suspended/;
     assert.doesNotMatch(telegramBooking, patterns);
     assert.doesNotMatch(telegramBotManager, patterns);
-    assert.doesNotMatch(waWebhook, patterns);
     assert.doesNotMatch(waFlow, patterns);
     assert.doesNotMatch(waOutbound, patterns);
-    assert.doesNotMatch(igProcess, patterns);
     assert.doesNotMatch(calendar, patterns);
     assert.doesNotMatch(reminders, patterns);
     assert.doesNotMatch(appointmentReminders, patterns);
     assert.doesNotMatch(appointments, /getSalonEntitlements|developerSalonSubscription/);
-    // Telegram inbound may call central entitlement via telegramSubscriptionGate only.
     assert.match(index, /enforceTelegramAiAutomationGate|telegramSubscriptionGate/);
+    assert.match(waWebhook, /enforceMessengerAiAutomationGate|messengerAiAutomationGate/);
+    assert.match(igProcess, /enforceMessengerAiAutomationGate|messengerAiAutomationGate/);
     assert.doesNotMatch(index, /evaluateSalonEntitlement/);
   });
 
