@@ -13,7 +13,7 @@ export interface CreateProviderCheckoutInput {
 export interface ProviderCheckout {
   provider: PaymentProviderId;
   displayName: string;
-  /** False for the current test provider — UI must not claim automatic charges. */
+  /** False until a provider is verified to perform automatic recurring charges. */
   supportsAutomaticRecurring: boolean;
   providerSessionId: string;
   /** In-app path for hosted payment. Never a secret. */

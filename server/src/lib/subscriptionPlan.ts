@@ -4,7 +4,10 @@ import { DEFAULT_SALON_CURRENCY, parseSalonCurrency } from './salonCurrency.js';
 /** Single paid monthly plan. Price is centralized here (and env), never scattered. */
 export const PAID_PLAN_ID = DEVELOPER_SALON_SUBSCRIPTION_PLANS[0];
 
-/** Temporary configurable price — no product catalog price exists in the repo. */
+/**
+ * TEMPORARY configurable default amount. Not a permanent business price.
+ * Override with SUBSCRIPTION_PLAN_AMOUNT. UI must read the amount from the API.
+ */
 export const DEFAULT_SUBSCRIPTION_PLAN_AMOUNT = 15000;
 export const DEFAULT_SUBSCRIPTION_PLAN_CURRENCY = DEFAULT_SALON_CURRENCY;
 

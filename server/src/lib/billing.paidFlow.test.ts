@@ -115,6 +115,7 @@ describe('plan + provider boundary', () => {
     assert.equal(plan.currency, 'AMD');
     assert.equal(plan.interval, 'month');
     assert.equal(testPaymentProvider.supportsAutomaticRecurring, false);
+    assert.equal(paynetPaymentProvider.supportsAutomaticRecurring, false);
     await assert.rejects(
       paynetPaymentProvider.createCheckout({
         salonId: SALON_A,
@@ -432,6 +433,7 @@ describe('paid flow source contracts', () => {
   it('wires owner Subscription page and does not activate via query params', () => {
     assert.match(app, /path="\/subscription"/);
     assert.match(app, /path="\/subscription\/checkout\/:checkoutId"/);
+    assert.match(app, /SalonAppAccessGate/);
     assert.match(sidebar, /nav\.subscription/);
     assert.match(sidebar, /['"]\/subscription['"]/);
     assert.match(translations, /'nav\.subscription': 'Подписка'/);
@@ -439,6 +441,14 @@ describe('paid flow source contracts', () => {
     assert.match(translations, /Отменить подписку/);
     assert.doesNotMatch(billingRoutes, /req\.query\.(paid|status|success)/);
     assert.doesNotMatch(billingRoutes, /router\.get\('\/checkout\/:id\/complete'/);
+    const subscriptionPage = read('client/src/pages/Subscription.tsx');
+    assert.match(subscriptionPage, /data\.plan\.amount/);
+    assert.doesNotMatch(subscriptionPage, /15000/);
+    const migration = read('supabase/migrations/20260909000001_subscription_payments_billing.sql');
+    assert.doesNotMatch(migration, /15000/);
+    const envExample = read('server/.env.example');
+    assert.match(envExample, /TEMPORARY configurable default/);
+    assert.match(envExample, /SUBSCRIPTION_PLAN_AMOUNT=15000/);
   });
 
   it('keeps billing reachable and gates only application APIs', () => {
@@ -454,6 +464,8 @@ describe('paid flow source contracts', () => {
 
   it('does not invent Paynet APIs and leaves messengers/calendars untouched', () => {
     assert.match(paynet, /Paynet sandbox is not implemented/);
+    assert.match(paynet, /supportsAutomaticRecurring:\s*false/);
+    assert.doesNotMatch(paynet, /supportsAutomaticRecurring:\s*true/);
     assert.doesNotMatch(paynet, /https?:\/\/api\.paynet/i);
     assert.doesNotMatch(telegramBooking, /createBillingService|billing_checkout_sessions/);
     assert.doesNotMatch(waWebhook, /createBillingService|billing_checkout_sessions/);

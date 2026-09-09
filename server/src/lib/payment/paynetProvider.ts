@@ -18,7 +18,8 @@ export const PAYNET_PAYMENT_PROVIDER_ID = 'paynet' as const;
 export const paynetPaymentProvider: PaymentProvider = {
   id: PAYNET_PAYMENT_PROVIDER_ID,
   displayName: 'Paynet',
-  supportsAutomaticRecurring: true,
+  // Stay false until verified Paynet documentation confirms automatic recurring charges.
+  supportsAutomaticRecurring: false,
   async createCheckout(_input: CreateProviderCheckoutInput): Promise<ProviderCheckout> {
     throw new PaymentProviderNotReadyError(
       'Paynet sandbox is not implemented: verified API credentials and documentation are not in this repository.',
