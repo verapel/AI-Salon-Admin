@@ -73,6 +73,26 @@ export const api = {
         body: JSON.stringify(data),
       }),
   },
+  billing: {
+    getSubscription: () => request<import('@/types').OwnerSubscription>('/billing/subscription'),
+    createCheckout: (planId?: string) =>
+      request<import('@/types').BillingCheckout>('/billing/checkout', {
+        method: 'POST',
+        body: JSON.stringify(planId ? { planId } : {}),
+      }),
+    getCheckout: (id: string) =>
+      request<import('@/types').BillingCheckoutView>(`/billing/checkout/${id}`),
+    completeTestCheckout: (id: string, result: 'success' | 'failure') =>
+      request<import('@/types').OwnerSubscription>(`/billing/checkout/${id}/complete`, {
+        method: 'POST',
+        body: JSON.stringify({ result }),
+      }),
+    cancelSubscription: () =>
+      request<import('@/types').OwnerSubscription>('/billing/subscription/cancel', {
+        method: 'POST',
+        body: JSON.stringify({ confirm: true }),
+      }),
+  },
   clients: {
     getAll: () => request<import('@/types').Client[]>('/clients'),
     get: (id: string) => request<import('@/types').Client>(`/clients/${id}`),

@@ -24,6 +24,7 @@ import internalRouter from './routes/internal.js';
 import staffPortalRouter from './routes/staffPortal.js';
 import calendarConnectionsRouter from './routes/calendarConnections.js';
 import salonSettingsRouter from './routes/salonSettings.js';
+import billingRouter from './routes/billing.js';
 import googleCalendarOAuthCallbackRouter from './routes/googleCalendarOAuthCallback.js';
 import whatsappWebhookRouter from './routes/whatsappWebhook.js';
 import instagramWebhookRouter from './routes/instagramWebhook.js';
@@ -34,6 +35,7 @@ import {
   requireSalonCabinetAccess,
   requireStaffPortalAccess,
 } from './middleware/auth.js';
+import { requireSalonAppAccess } from './middleware/requireSalonAppAccess.js';
 import { supabase, checkSupabaseConnection } from './lib/supabase.js';
 import { startWhatsAppOutboundWorker } from './lib/whatsappOutboundWorker.js';
 import { startGoogleCalendarPullWorker } from './lib/googleCalendarPullWorker.js';
@@ -1202,18 +1204,20 @@ const API_AUTH_REQUIRED = process.env.API_AUTH_REQUIRED === 'true';
 const noopAuth: RequestHandler = (_req, _res, next) => next();
 const salonAuth = API_AUTH_REQUIRED ? requireSalonAuth : noopAuth;
 const developerAuth = API_AUTH_REQUIRED ? requireDeveloperAuth : noopAuth;
+const salonAppAccess = API_AUTH_REQUIRED ? requireSalonAppAccess : noopAuth;
 
-app.use('/api/salon', salonAuth, salonSettingsRouter);
-app.use('/api/clients', salonAuth, requireSalonCabinetAccess, clientsRouter);
-app.use('/api/services', salonAuth, requireSalonCabinetAccess, servicesRouter);
-app.use('/api/products', salonAuth, requireSalonCabinetAccess, productsRouter);
-app.use('/api/staff', salonAuth, requireSalonCabinetAccess, staffRouter);
-app.use('/api/appointments', salonAuth, requireSalonCabinetAccess, appointmentsRouter);
-app.use('/api/stats', salonAuth, requireSalonCabinetAccess, statsRouter);
-app.use('/api/notifications', salonAuth, requireSalonCabinetAccess, notificationsRouter);
-app.use('/api/schedule', salonAuth, requireSalonCabinetAccess, scheduleRouter);
-app.use('/api/calendar', salonAuth, requireSalonCabinetAccess, calendarConnectionsRouter);
-app.use('/api/staff-portal', salonAuth, requireStaffPortalAccess, staffPortalRouter);
+app.use('/api/billing', salonAuth, billingRouter);
+app.use('/api/salon', salonAuth, salonAppAccess, salonSettingsRouter);
+app.use('/api/clients', salonAuth, requireSalonCabinetAccess, salonAppAccess, clientsRouter);
+app.use('/api/services', salonAuth, requireSalonCabinetAccess, salonAppAccess, servicesRouter);
+app.use('/api/products', salonAuth, requireSalonCabinetAccess, salonAppAccess, productsRouter);
+app.use('/api/staff', salonAuth, requireSalonCabinetAccess, salonAppAccess, staffRouter);
+app.use('/api/appointments', salonAuth, requireSalonCabinetAccess, salonAppAccess, appointmentsRouter);
+app.use('/api/stats', salonAuth, requireSalonCabinetAccess, salonAppAccess, statsRouter);
+app.use('/api/notifications', salonAuth, requireSalonCabinetAccess, salonAppAccess, notificationsRouter);
+app.use('/api/schedule', salonAuth, requireSalonCabinetAccess, salonAppAccess, scheduleRouter);
+app.use('/api/calendar', salonAuth, requireSalonCabinetAccess, salonAppAccess, calendarConnectionsRouter);
+app.use('/api/staff-portal', salonAuth, requireStaffPortalAccess, salonAppAccess, staffPortalRouter);
 app.use('/api/developer', developerAuth, developerRouter);
 
 function resolveClientDist(): string | null {

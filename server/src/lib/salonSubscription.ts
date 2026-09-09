@@ -25,6 +25,7 @@ type SubscriptionDbRow = {
   provider_customer_id: string | null;
   provider_subscription_id: string | null;
   last_payment_status: string | null;
+  canceled_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -58,6 +59,7 @@ export function buildLegacyActiveSubscriptionFallback(
     providerCustomerId: null,
     providerSubscriptionId: null,
     lastPaymentStatus: null,
+    canceledAt: null,
     createdAt: now,
     updatedAt: now,
     usedMissingRowFallback: true,
@@ -79,6 +81,7 @@ function mapSubscriptionRow(row: SubscriptionDbRow): SalonSubscriptionRecord {
     providerCustomerId: row.provider_customer_id,
     providerSubscriptionId: row.provider_subscription_id,
     lastPaymentStatus: row.last_payment_status,
+    canceledAt: row.canceled_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     usedMissingRowFallback: false,
@@ -131,6 +134,7 @@ export async function getSalonSubscription(salonId: string): Promise<SalonSubscr
       provider_customer_id,
       provider_subscription_id,
       last_payment_status,
+      canceled_at,
       created_at,
       updated_at
     `,

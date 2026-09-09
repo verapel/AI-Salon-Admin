@@ -18,6 +18,7 @@ const pageKeys: Record<string, { title: TranslationKey; subtitle: TranslationKey
   '/statistics': { title: 'pages.statistics.title', subtitle: 'pages.statistics.subtitle' },
   '/reminders': { title: 'pages.reminders.title', subtitle: 'pages.reminders.subtitle' },
   '/integrations': { title: 'pages.integrations.title', subtitle: 'pages.integrations.subtitle' },
+  '/subscription': { title: 'pages.subscription.title', subtitle: 'pages.subscription.subtitle' },
 };
 
 export default function Layout() {
@@ -25,10 +26,14 @@ export default function Layout() {
   const location = useLocation();
   const { t } = useLanguage();
 
-  const keys = pageKeys[location.pathname] ?? {
-    title: 'pages.default.title' as TranslationKey,
-    subtitle: 'pages.default.subtitle' as TranslationKey,
-  };
+  const keys = pageKeys[location.pathname] ?? (
+    location.pathname.startsWith('/subscription')
+      ? pageKeys['/subscription']
+      : {
+          title: 'pages.default.title' as TranslationKey,
+          subtitle: 'pages.default.subtitle' as TranslationKey,
+        }
+  );
 
   const title = t(keys.title);
   const subtitle = keys.subtitle ? t(keys.subtitle) : '';

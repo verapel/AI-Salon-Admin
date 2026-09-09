@@ -243,7 +243,8 @@ export type SalonSubscriptionStatus =
   | 'active'
   | 'past_due'
   | 'expired'
-  | 'cancelled';
+  | 'cancelled'
+  | 'unpaid';
 
 export type SalonEntitlementDenyReason =
   | 'salon_inactive'
@@ -251,7 +252,8 @@ export type SalonEntitlementDenyReason =
   | 'trial_expired'
   | 'subscription_past_due'
   | 'subscription_expired'
-  | 'subscription_cancelled';
+  | 'subscription_cancelled'
+  | 'subscription_unpaid';
 
 /** Browser-safe developer subscription + entitlement (no provider linkage ids). */
 export interface DeveloperSalonSubscription {
@@ -295,6 +297,76 @@ export interface DeveloperSalonSubscriptionListItem {
   salonActive: boolean;
   subscription: DeveloperSalonSubscription | null;
   loadError: boolean;
+}
+
+export interface BillingPlan {
+  id: string;
+  amount: number;
+  currency: string;
+  interval: 'month';
+}
+
+export interface BillingProviderInfo {
+  id: string;
+  displayName: string;
+  supportsAutomaticRecurring: boolean;
+}
+
+export interface BillingPayment {
+  id: string;
+  amount: number;
+  currency: string;
+  status: 'pending' | 'succeeded' | 'failed';
+  createdAt: string;
+  paidAt: string | null;
+  provider: string;
+}
+
+export type BillingDisplayStatus =
+  | 'unpaid'
+  | 'active'
+  | 'cancel_at_period_end'
+  | 'expired'
+  | 'past_due'
+  | 'failed';
+
+export interface OwnerSubscription {
+  plan: BillingPlan;
+  provider: BillingProviderInfo;
+  entitled: boolean;
+  denyReason: string | null;
+  hasManagedPaidPeriod: boolean;
+  isComplimentary: boolean;
+  status: SalonSubscriptionStatus;
+  displayStatus: BillingDisplayStatus;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  canceledAt: string | null;
+  payments: BillingPayment[];
+}
+
+export interface BillingCheckout {
+  checkoutId: string;
+  hostedPaymentPath: string;
+  plan: BillingPlan;
+  amount: number;
+  currency: string;
+  provider: BillingProviderInfo;
+  isTest: boolean;
+  expiresAt: string;
+}
+
+export interface BillingCheckoutView {
+  checkoutId: string;
+  salonId: string;
+  status: string;
+  plan: BillingPlan;
+  amount: number;
+  currency: string;
+  provider: BillingProviderInfo;
+  isTest: boolean;
+  expiresAt: string;
 }
 
 export interface SalonDeleteCounts {
